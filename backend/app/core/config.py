@@ -2,6 +2,7 @@
 SDK 数据中台 + 配置管理系统 — 核心配置
 """
 from functools import lru_cache
+from urllib.parse import quote_plus
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -30,7 +31,12 @@ class Settings(BaseSettings):
 
     @property
     def resolved_database_url(self) -> str:
-        return self.DATABASE_URL.replace("${DB_PASSWORD}", self.DB_PASSWORD)
+        encoded_password = quote_plus(self.DB_PASSWORD)
+        if "${DB_PASSWORD}" in self.DATABASE_URL:
+            return self.DATABASE_URL.replace("${DB_PASSWORD}", encoded_password)
+        if "://admin:@" in self.DATABASE_URL and self.DB_PASSWORD:
+            return self.DATABASE_URL.replace("://admin:@", f"://admin:{encoded_password}@")
+        return self.DATABASE_URL
 
 
 @lru_cache()
