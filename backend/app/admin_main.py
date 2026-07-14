@@ -38,7 +38,7 @@ async def etl_refresh_loop() -> None:
                 await session.commit()
             except Exception:
                 await session.rollback()
-                logger.warning("ETL 刷新失败")
+                logger.exception("ETL 刷新失败")
 
 
 @asynccontextmanager
