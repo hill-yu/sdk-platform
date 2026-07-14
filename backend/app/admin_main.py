@@ -27,6 +27,7 @@ async def etl_refresh_loop() -> None:
             logger.info("ETL 初始刷新完成")
         except Exception:
             await session.rollback()
+            logger.exception("ETL 初始刷新失败，大盘数据可能为空")
 
     # 定时循环
     while True:
