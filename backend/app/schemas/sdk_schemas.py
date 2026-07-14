@@ -12,8 +12,8 @@ from pydantic import BaseModel, Field, field_validator
 class ClickEvent(BaseModel):
     """单条点击事件"""
     type: str = "click"
-    page: Optional[str] = None
-    element: Optional[str] = None
+    page: Optional[str] = Field(None, max_length=200)
+    element: Optional[str] = Field(None, max_length=200)
     position: Optional[dict] = None
     timestamp: Optional[int] = None
     extra: Optional[dict] = Field(default_factory=dict)
@@ -21,10 +21,10 @@ class ClickEvent(BaseModel):
 
 class ClickReportRequest(BaseModel):
     """点击上报请求"""
-    app_id: str
-    device_id: str
-    sdk_version: Optional[str] = None
-    session_id: Optional[str] = None
+    app_id: str = Field(..., max_length=32)
+    device_id: str = Field(..., max_length=64)
+    sdk_version: Optional[str] = Field(None, max_length=20)
+    session_id: Optional[str] = Field(None, max_length=64)
     events: list[ClickEvent] = Field(..., min_length=1, max_length=100)
 
 
@@ -44,8 +44,8 @@ VALID_LOG_LEVELS = {"debug", "info", "warn", "error"}
 class LogEntry(BaseModel):
     """单条日志"""
     level: str
-    tag: Optional[str] = None
-    message: str
+    tag: Optional[str] = Field(None, max_length=100)
+    message: str = Field(..., max_length=10000)
     timestamp: Optional[int] = None
     extra: Optional[dict] = Field(default_factory=dict)
 
@@ -60,9 +60,9 @@ class LogEntry(BaseModel):
 
 class LogReportRequest(BaseModel):
     """日志上报请求"""
-    app_id: str
-    device_id: str
-    sdk_version: Optional[str] = None
+    app_id: str = Field(..., max_length=32)
+    device_id: str = Field(..., max_length=64)
+    sdk_version: Optional[str] = Field(None, max_length=20)
     logs: list[LogEntry] = Field(..., min_length=1, max_length=100)
 
 
