@@ -32,6 +32,13 @@ async def report_log(
 
     values = []
     for log_entry in body.logs:
+        client_ts = None
+        if log_entry.timestamp is not None and log_entry.timestamp > 0:
+            try:
+                client_ts = datetime.fromtimestamp(log_entry.timestamp / 1000, tz=timezone.utc)
+            except (OSError, ValueError, OverflowError):
+                client_ts = None  # 非法时间戳 → 跳过，不用该字段
+
         values.append({
             "event_type": "log",
             "app_id": body.app_id,
@@ -44,7 +51,7 @@ async def report_log(
                 "message": log_entry.message,
                 "extra": log_entry.extra or {},
             },
-            "client_ts": datetime.fromtimestamp(log_entry.timestamp / 1000, tz=timezone.utc) if log_entry.timestamp else None,
+            "client_ts": client_ts,
             "server_ts": datetime.now(timezone.utc),
             "ip": client_ip,
             "user_agent": user_agent,

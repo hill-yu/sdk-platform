@@ -36,6 +36,13 @@ async def report_click(
             rejected += 1
             continue
 
+        client_ts = None
+        if event.timestamp is not None and event.timestamp > 0:
+            try:
+                client_ts = datetime.fromtimestamp(event.timestamp / 1000, tz=timezone.utc)
+            except (OSError, ValueError, OverflowError):
+                client_ts = None  # 非法时间戳 → 跳过，不用该字段
+
         values.append({
             "event_type": "click",
             "app_id": body.app_id,
@@ -49,7 +56,7 @@ async def report_click(
                 "position": event.position,
                 "extra": event.extra or {},
             },
-            "client_ts": datetime.fromtimestamp(event.timestamp / 1000, tz=timezone.utc) if event.timestamp else None,
+            "client_ts": client_ts,
             "server_ts": datetime.now(timezone.utc),
             "ip": client_ip,
             "user_agent": user_agent,
