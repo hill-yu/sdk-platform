@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -10,19 +11,33 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.api.admin import config_mgr, dashboard, version_mgr
-from app.core.database import engine
+from app.core.config import get_settings
+from app.core.database import async_session_factory
 
 logger = logging.getLogger(__name__)
 
 
 async def etl_refresh_loop() -> None:
+    """ETL 定时刷新物化视图。启动时立即刷新一次，之后每5分钟刷新。"""
+    # 启动时立即刷新
+    async with async_session_factory() as session:
+        try:
+            await session.execute(text("SELECT refresh_materialized_views()"))
+            await session.commit()
+            logger.info("ETL 初始刷新完成")
+        except Exception:
+            await session.rollback()
+
+    # 定时循环
     while True:
         await asyncio.sleep(300)
-        try:
-            async with engine.begin() as conn:
-                await conn.execute(text("SELECT refresh_materialized_views()"))
-        except Exception as exc:
-            logger.warning("Materialized view refresh failed: %s", exc)
+        async with async_session_factory() as session:
+            try:
+                await session.execute(text("SELECT refresh_materialized_views()"))
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                logger.warning("ETL 刷新失败")
 
 
 @asynccontextmanager
@@ -34,11 +49,22 @@ async def lifespan(_app: FastAPI):
         task.cancel()
 
 
-app = FastAPI(title="Admin API", version="1.0.0", lifespan=lifespan)
+cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
+
+app = FastAPI(title="Admin API", version="1.0.0", lifespan=lifespan, request_max_size=5_000_000)  # 5MB
+
+
+@app.on_event("startup")
+async def startup_admin():
+    settings = get_settings()
+    if not settings.ADMIN_TOKEN or settings.ADMIN_TOKEN == "admin-secret-token-change-me":
+        raise RuntimeError(
+            "ADMIN_TOKEN 未设置或使用弱默认值！请在 .env 中设置: ADMIN_TOKEN=<随机字符串>"
+        )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -15,10 +15,10 @@ class Settings(BaseSettings):
     APP_NAME: str = "SDK Platform"
     DEBUG: bool = False
     DB_PASSWORD: str = Field(default="your_password_here", repr=False)
-    DATABASE_URL: str = "postgresql+asyncpg://admin:your_password_here@localhost:5432/sdk_platform"
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/sdk_platform"
     SDK_API_PORT: int = 8100
     ADMIN_API_PORT: int = 8101
-    ADMIN_TOKEN: str = Field(default="admin-secret-token-change-me", repr=False)
+    ADMIN_TOKEN: str = Field(default="", repr=False)
 
     # 腾讯云 COS
     COS_SECRET_ID: str = ""
