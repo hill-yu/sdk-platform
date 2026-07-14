@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class ConfigUpsertRequest(BaseModel):
-    config_data: dict[str, Any]
+    config_data: dict[str, Any] = Field(..., max_length=500000)  # 500KB 上限
     change_log: str = ""
 
 
