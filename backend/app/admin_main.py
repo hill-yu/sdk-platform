@@ -42,26 +42,30 @@ async def etl_refresh_loop() -> None:
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
-    task = asyncio.create_task(etl_refresh_loop())
+async def lifespan(app: FastAPI):
+    # 启动：校验 ADMIN_TOKEN
+    settings = get_settings()
+    if not settings.ADMIN_TOKEN or "change-me" in settings.ADMIN_TOKEN:
+        raise RuntimeError("ADMIN_TOKEN 未设置或使用弱默认值！请在 .env 中设置强随机 ADMIN_TOKEN")
+    logger.info("ADMIN_TOKEN 校验通过")
+
+    # 启动 ETL 定时刷新
+    etl_task = asyncio.create_task(etl_refresh_loop())
+    logger.info("ETL 定时刷新已启动")
+
+    yield  # 应用运行中
+
+    # 关闭：取消 ETL 任务
+    etl_task.cancel()
     try:
-        yield
-    finally:
-        task.cancel()
+        await etl_task
+    except asyncio.CancelledError:
+        pass
 
 
 cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
 
 app = FastAPI(title="Admin API", version="1.0.0", lifespan=lifespan, request_max_size=5_000_000)  # 5MB
-
-
-@app.on_event("startup")
-async def startup_admin():
-    settings = get_settings()
-    if not settings.ADMIN_TOKEN or settings.ADMIN_TOKEN == "admin-secret-token-change-me":
-        raise RuntimeError(
-            "ADMIN_TOKEN 未设置或使用弱默认值！请在 .env 中设置: ADMIN_TOKEN=<随机字符串>"
-        )
 
 app.add_middleware(
     CORSMiddleware,
