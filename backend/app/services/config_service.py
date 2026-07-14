@@ -139,14 +139,13 @@ async def rollback_config(db: AsyncSession, config_id: int, published_by: str) -
 
 
 async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by: str) -> dict[str, Any]:
+    """从已有记录发布（用于回滚和首次发布），DB先 + COS后 + 失败回滚"""
     is_rollback = config.status == "archived"
     publish_at = datetime.now(timezone.utc)
-    version = config.version if is_rollback else publish_at.strftime("%Y%m%d_v%H%M%S")
+    version = publish_at.strftime("%Y%m%d_v%H%M%S")
     cos_key = f"config/v{version}.json"
-    publish_data = {"version": version, "updated_at": publish_at.isoformat(), "config": config.config_data}
 
-    await _upload_config_payload(cos_key, publish_data)
-
+    # ① 先更新 DB
     await db.execute(
         update(SdkConfig).where(SdkConfig.status == "published").values(status="archived", updated_at=publish_at)
     )
@@ -158,6 +157,16 @@ async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by
     config.cdn_url = _cdn_url(cos_key)
     config.updated_at = publish_at
     await db.flush()
+
+    # ② 再上传 COS
+    publish_data = {"version": version, "updated_at": publish_at.isoformat(), "config": config.config_data}
+
+    try:
+        _upload_config_payload(cos_key, publish_data)
+    except Exception:
+        await db.rollback()
+        raise RuntimeError(f"COS 上传失败，配置回滚/发布已撤销: {version}")
+
     return {
         "version": version,
         "publish_at": publish_at.isoformat(),
