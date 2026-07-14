@@ -20,9 +20,9 @@ except Exception:  # pragma: no cover - import depends on optional runtime deps
     CosS3Client = None
 
 
-def _cdn_url() -> str:
+def _cdn_url(cos_key: str) -> str:
     settings = get_settings()
-    return f"{settings.CDN_BASE_URL.rstrip('/')}/config/latest.json"
+    return f"{settings.CDN_BASE_URL.rstrip('/')}/{cos_key}"
 
 
 async def list_configs(db: AsyncSession) -> dict[str, Any]:
@@ -50,7 +50,7 @@ async def create_config(db: AsyncSession, config_data: dict[str, Any], change_lo
         config_data=config_data,
         status="draft",
         change_log=change_log,
-        cdn_url=_cdn_url(),
+        cdn_url=_cdn_url("config/latest.json"),
     )
     db.add(config)
     await db.flush()
@@ -73,8 +73,62 @@ async def update_config(db: AsyncSession, config_id: int, config_data: dict[str,
 async def publish_config(db: AsyncSession, config_id: int, published_by: str) -> dict[str, Any]:
     config = await db.get(SdkConfig, config_id)
     if config is None or config.status != "draft":
-        raise ValueError("只能发布 draft 状态的配置")
-    return await _publish_from_record(db, config, published_by)
+        raise ValueError("只能发布草稿状态的配置")
+
+    publish_at = datetime.now(timezone.utc)
+    version = publish_at.strftime("%Y%m%d_v%H%M%S")
+    cos_key = f"config/v{version}.json"
+
+    # ① 先更新数据库状态
+    await db.execute(
+        update(SdkConfig).where(SdkConfig.status == "published").values(status="archived")
+    )
+    config.status = "published"
+    config.version = version
+    config.publish_at = publish_at
+    config.published_by = published_by
+    config.cos_key = cos_key
+    config.updated_at = publish_at
+    await db.flush()
+
+    # ② 再上传 COS
+    settings = get_settings()
+    publish_data = {
+        "version": version,
+        "updated_at": publish_at.isoformat(),
+        "config": config.config_data,
+    }
+    json_bytes = json.dumps(publish_data, ensure_ascii=False).encode()
+
+    try:
+        client = CosS3Client(
+            CosConfig(
+                Region=settings.COS_REGION,
+                SecretId=settings.COS_SECRET_ID,
+                SecretKey=settings.COS_SECRET_KEY,
+            )
+        )
+        client.put_object(Bucket=settings.COS_BUCKET, Key=cos_key, Body=json_bytes)
+        client.put_object(
+            Bucket=settings.COS_BUCKET,
+            Key="config/latest.json",
+            Body=json_bytes,
+            CacheControl="max-age=300",
+        )
+    except Exception:
+        # COS 上传失败 → 回滚 DB 状态
+        await db.rollback()
+        raise RuntimeError("COS 上传失败，配置发布已回滚")
+
+    cdn_url = _cdn_url(cos_key)
+    config.cdn_url = cdn_url
+
+    return {
+        "version": version,
+        "publish_at": publish_at.isoformat(),
+        "cdn_url": cdn_url,
+        "cos_key": cos_key,
+    }
 
 
 async def rollback_config(db: AsyncSession, config_id: int, published_by: str) -> dict[str, Any]:
@@ -101,7 +155,7 @@ async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by
     config.publish_at = publish_at
     config.published_by = published_by
     config.cos_key = cos_key
-    config.cdn_url = _cdn_url()
+    config.cdn_url = _cdn_url(cos_key)
     config.updated_at = publish_at
     await db.flush()
     return {
@@ -118,11 +172,11 @@ async def _upload_config_payload(cos_key: str, payload: dict[str, Any]) -> None:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
     if not settings.COS_SECRET_ID or not settings.COS_SECRET_KEY or not settings.COS_BUCKET:
-        logger.warning("COS credentials are not configured, skip upload for %s", cos_key)
-        return
+        raise RuntimeError(
+            "COS 凭证未配置，无法上传配置。请在 .env 中设置 COS_SECRET_ID / COS_SECRET_KEY / COS_BUCKET"
+        )
     if CosConfig is None or CosS3Client is None:
-        logger.warning("COS SDK is unavailable, skip upload for %s", cos_key)
-        return
+        raise RuntimeError("COS SDK 不可用，无法上传配置")
 
     client = CosS3Client(
         CosConfig(
