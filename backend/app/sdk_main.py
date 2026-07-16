@@ -45,19 +45,24 @@ class RequestSizeLimitMiddleware:
         more_body = True
         while more_body:
             message = await receive()
-            if message.get("type") != "http.request":
-                chunks.append(message)
-                continue
+            msg_type = message.get("type", "")
+
+            # 客户端断连 → 立即退出，不调用 app
+            if msg_type == "http.disconnect":
+                return
+
+            if msg_type != "http.request":
+                continue  # 非请求消息跳过
+
             body = message.get("body", b"")
             total += len(body)
             more_body = message.get("more_body", False)
-            # 超限：读完剩余后直接发 413（不调用 app）
+
+            # 超限 → 立即返回 413，不等待剩余 body
             if total > self.max_bytes:
-                while more_body:
-                    msg = await receive()
-                    more_body = msg.get("more_body", False)
                 await self._send_error(send, 413, "Request body too large")
                 return
+
             chunks.append(message)
 
         # ② 未超限：重放 body 给 app
