@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin.deps import require_admin_token
+from app.core.config import get_settings
 from app.core.database import get_db, get_db_no_commit
 from app.models.config import SdkConfig
 from app.schemas.admin_schemas import ConfigUpsertRequest
@@ -36,27 +38,40 @@ async def reconcile_configs(db: AsyncSession = Depends(get_db_no_commit)):
     )
     published = result.scalar_one_or_none()
     if not published:
-        return {"code": 0, "data": {"consistent": None, "message": "无已发布配置"}}
+        return {"code": 0, "data": {"consistent": None, "message": "无有效已发布配置"}}
 
-    cdn_url = published.cdn_url
-    if not cdn_url:
-        return {"code": 0, "data": {"consistent": False, "message": "CDN地址缺失"}}
+    settings = get_settings()
+    # 对账读取 latest.json（非版本化对象），加缓存穿透
+    latest_url = f"{settings.CDN_BASE_URL.rstrip('/')}/config/latest.json"
+    cache_bust = f"?_t={int(datetime.now().timestamp())}"
+
+    db_version = published.version
+    cdn_version = None
 
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.get(cdn_url)
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                f"{latest_url}{cache_bust}",
+                headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+            )
             r.raise_for_status()
             cdn_data = r.json()
             cdn_version = cdn_data.get("version")
-            consistent = (cdn_version == published.version)
-            return {"code": 0, "data": {
-                "db_version": published.version,
-                "cdn_version": cdn_version,
-                "consistent": consistent,
-            }}
     except Exception as e:
         logger.warning("对账CDN请求失败: %s", e)
-        return {"code": 0, "data": {"consistent": None, "message": f"CDN不可达: {str(e)}"}}
+        return {"code": 0, "data": {
+            "consistent": None,
+            "db_version": db_version,
+            "cdn_version": None,
+            "message": "CDN不可达",
+        }}
+
+    consistent = (cdn_version == db_version)
+    return {"code": 0, "data": {
+        "consistent": consistent,
+        "db_version": db_version,
+        "cdn_version": cdn_version,
+    }}
 
 
 @router.get("/configs/{config_id}")
