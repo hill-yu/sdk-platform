@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from typing import Any
 import logging
 
-from sqlalchemy import desc, select, update
+from fastapi import HTTPException
+from sqlalchemy import desc, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -76,13 +77,18 @@ async def publish_config(db: AsyncSession, config_id: int, published_by: str) ->
     if config is None or config.status != "draft":
         raise ValueError("只能发布草稿状态的配置")
 
+    # 获取发布排他锁
+    result = await db.execute(text("SELECT pg_try_advisory_xact_lock(9999)"))
+    if not result.scalar():
+        raise HTTPException(status_code=409, detail="另一发布操作正在进行，请稍后重试")
+
     version = datetime.now().strftime("%Y%m%d_v%H%M%S_%f")
     publish_data = {"version": version, "updated_at": datetime.now().isoformat(), "config": config.config_data}
     json_bytes = json.dumps(publish_data, ensure_ascii=False).encode()
 
-    # ① 先上传 COS（版本文件 + latest.json）
-    await asyncio.to_thread(_upload_config_payload, f"config/v{version}.json", json_bytes)
-    await asyncio.to_thread(_upload_config_payload, "config/latest.json", json_bytes)
+    # ① 先上传 COS（版本文件 + latest.json），带重试
+    await _upload_with_retry(f"config/v{version}.json", json_bytes)
+    await _upload_with_retry("config/latest.json", json_bytes)
 
     # ② COS 成功 → 归档旧 + 当前变 published
     await db.execute(
@@ -95,6 +101,8 @@ async def publish_config(db: AsyncSession, config_id: int, published_by: str) ->
     config.cos_key = f"config/v{version}.json"
     config.cos_upload_status = "success"
     config.cdn_url = _cdn_url(config.cos_key)
+
+    logger.info("配置发布完成: version=%s, cdn_url=%s", version, config.cdn_url)
 
     return {
         "version": version,
@@ -117,11 +125,11 @@ async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by
     version = datetime.now().strftime("%Y%m%d_v%H%M%S_%f")
     cos_key = f"config/v{version}.json"
 
-    # ① 先上传 COS
+    # ① 先上传 COS，带重试
     publish_data = {"version": version, "updated_at": datetime.now().isoformat(), "config": config.config_data}
     json_bytes = json.dumps(publish_data, ensure_ascii=False).encode()
-    await asyncio.to_thread(_upload_config_payload, cos_key, json_bytes)
-    await asyncio.to_thread(_upload_config_payload, "config/latest.json", json_bytes)
+    await _upload_with_retry(cos_key, json_bytes)
+    await _upload_with_retry("config/latest.json", json_bytes)
 
     # ② COS 成功 → 归档旧 + 当前变 published
     await db.execute(
@@ -142,6 +150,18 @@ async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by
         "cos_key": cos_key,
         "message": f"已回滚到版本 {version}" if is_rollback else f"已发布版本 {version}",
     }
+
+
+async def _upload_with_retry(cos_key: str, json_bytes: bytes, max_retries: int = 2):
+    """上传配置到 COS，失败自动重试"""
+    for attempt in range(max_retries + 1):
+        try:
+            await asyncio.to_thread(_upload_config_payload, cos_key, json_bytes)
+            return
+        except Exception:
+            if attempt == max_retries:
+                raise
+            await asyncio.sleep(1)
 
 
 def _upload_config_payload(cos_key: str, json_bytes: bytes) -> str:
