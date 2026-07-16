@@ -76,8 +76,8 @@ class StubWriteSession:
                         raise RuntimeError("simulated write failure")
                     if isinstance(value_dict, dict):
                         self.records.append(value_dict)
-            except Exception:
-                pass
+            except (AttributeError, KeyError, TypeError):
+                pass  # 参数提取相关异常才忽略
         self.executed.append(stmt)
         return StubScalarResult(None)
 
