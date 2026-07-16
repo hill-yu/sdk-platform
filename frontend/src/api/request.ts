@@ -5,8 +5,21 @@ const request = axios.create({
   timeout: 10000,
 });
 
+const getToken = (): string => {
+  // 优先从 sessionStorage 读取
+  const stored = sessionStorage.getItem("admin_token");
+  if (stored) return stored;
+  // 弹出输入框
+  const input = prompt("请输入 Admin Token:");
+  if (input) {
+    sessionStorage.setItem("admin_token", input);
+    return input;
+  }
+  return "";
+};
+
 request.interceptors.request.use((config) => {
-  const token = window.localStorage.getItem("admin_token") || import.meta.env.VITE_ADMIN_TOKEN || "";
+  const token = getToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   } else if (config.headers.Authorization) {
