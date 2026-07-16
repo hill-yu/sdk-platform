@@ -107,9 +107,19 @@ async def publish_config(db: AsyncSession, config_id: int, published_by: str) ->
         await db.commit()
         logger.info("配置发布完成: version=%s", version)
     except Exception:
-        logger.exception("数据库提交失败，COS已更新但DB状态不一致: version=%s", version)
-        config.cos_upload_status = "failed"
-        raise HTTPException(status_code=500, detail="配置发布部分完成，请联系管理员检查CDN与数据库一致性")
+        logger.exception("数据库提交失败，COS已更新: version=%s", version)
+        # 原事务已污染，用独立 session 持久化失败状态
+        from app.core.database import async_session_factory
+        async with async_session_factory() as recovery_session:
+            async with recovery_session.begin():
+                cfg = await recovery_session.get(SdkConfig, config.id)
+                if cfg:
+                    cfg.cos_upload_status = "failed"
+                    cfg.change_log = (cfg.change_log or "") + f"\n[COS_UPLOADED_DB_FAILED] version={version}"
+        raise HTTPException(
+            status_code=500,
+            detail="配置已上传CDN但数据库状态更新失败，系统已记录，请联系管理员检查"
+        )
 
     return {
         "version": version,
@@ -132,11 +142,10 @@ async def rollback_config(db: AsyncSession, config_id: int, published_by: str) -
 
 
 async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by: str) -> dict[str, Any]:
-    """从已有记录发布（用于回滚和首次发布），先COS后DB"""
-    result = await db.execute(text("SELECT pg_try_advisory_xact_lock(9999)"))
-    if not result.scalar():
-        raise HTTPException(status_code=409, detail="另一配置操作正在进行，请稍后重试")
+    """从已有记录发布（用于回滚和首次发布），先COS后DB
 
+    调用方已持 advisory lock (9999)，此处不重复获取。
+    """
     is_rollback = config.status == "archived"
     version = datetime.now().strftime("%Y%m%d_v%H%M%S_%f")
     cos_key = f"config/v{version}.json"
@@ -164,9 +173,19 @@ async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by
         await db.commit()
         logger.info("配置发布完成: version=%s", version)
     except Exception:
-        logger.exception("数据库提交失败，COS已更新但DB状态不一致: version=%s", version)
-        config.cos_upload_status = "failed"
-        raise HTTPException(status_code=500, detail="配置发布部分完成，请联系管理员检查CDN与数据库一致性")
+        logger.exception("数据库提交失败，COS已更新: version=%s", version)
+        # 原事务已污染，用独立 session 持久化失败状态
+        from app.core.database import async_session_factory
+        async with async_session_factory() as recovery_session:
+            async with recovery_session.begin():
+                cfg = await recovery_session.get(SdkConfig, config.id)
+                if cfg:
+                    cfg.cos_upload_status = "failed"
+                    cfg.change_log = (cfg.change_log or "") + f"\n[COS_UPLOADED_DB_FAILED] version={version}"
+        raise HTTPException(
+            status_code=500,
+            detail="配置已上传CDN但数据库状态更新失败，系统已记录，请联系管理员检查"
+        )
 
     return {
         "version": version,
