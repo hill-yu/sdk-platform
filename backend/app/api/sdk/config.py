@@ -51,7 +51,11 @@ async def get_config_meta(
         headers = {"ETag": etag_value, "Cache-Control": "max-age=300"}
         return Response(status_code=304, headers=headers)
 
-    cdn_url = published.cdn_url or "https://cdn.example.com/config/latest.json"
+    if not published.cdn_url:
+        return JSONResponse(status_code=500, content={
+            "code": 2, "message": "配置已发布但 CDN 地址缺失，请联系管理员", "data": None
+        })
+    cdn_url = published.cdn_url
 
     return JSONResponse(
         status_code=200,

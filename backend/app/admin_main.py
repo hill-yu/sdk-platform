@@ -72,6 +72,11 @@ async def lifespan(app: FastAPI):
         )
     logger.info("ADMIN_TOKEN 校验通过")
 
+    if "example.com" in settings.CDN_BASE_URL or "example.com" in settings.COS_BUCKET:
+        raise RuntimeError(
+            "CDN/COS 配置为占位符！请在 .env 中设置真实的 CDN_BASE_URL 和 COS_BUCKET"
+        )
+
     # 启动 ETL 定时刷新
     etl_task = asyncio.create_task(etl_refresh_loop())
     logger.info("ETL 定时刷新已启动")
