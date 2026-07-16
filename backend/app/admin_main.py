@@ -6,58 +6,71 @@ import os
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.api.admin import config_mgr, dashboard, version_mgr
 from app.core.config import get_settings
 from app.core.database import async_session_factory
-from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
+class _RequestSizeExceeded(Exception):
+    pass
 
 
-class RequestSizeExceeded(Exception):
-    def __init__(self, max_bytes: int):
-        self.max_bytes = max_bytes
-
-
-class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
+class RequestSizeLimitMiddleware:
+    """纯 ASGI 中间件：限制请求体大小，超限返回413"""
     def __init__(self, app, max_bytes: int):
-        super().__init__(app)
+        self.app = app
         self.max_bytes = max_bytes
 
-    async def dispatch(self, request: Request, call_next):
-        # 1. 检查 Content-Length（快速拦截）
-        content_length = request.headers.get("content-length")
-        if content_length is not None:
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Content-Length 快速拦截
+        headers = dict(scope.get("headers", []))
+        cl = headers.get(b"content-length")
+        if cl is not None:
             try:
-                if int(content_length) > self.max_bytes:
-                    return JSONResponse(status_code=413, content={"detail": f"Request body too large"})
-                if int(content_length) < 0:
-                    return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
-            except ValueError:
-                return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length header"})
+                cl_int = int(cl.decode())
+                if cl_int > self.max_bytes:
+                    await self._send_error(send, 413, "Request body too large")
+                    return
+                if cl_int < 0:
+                    await self._send_error(send, 400, "Invalid Content-Length")
+                    return
+            except (ValueError, UnicodeDecodeError):
+                await self._send_error(send, 400, "Invalid Content-Length header")
+                return
 
-        # 2. 包装 receive 累计实际字节数
+        # 包装 receive 累计实际字节数
         total = 0
-        original_receive = request.receive
-
         async def limited_receive():
             nonlocal total
-            message = await original_receive()
-            if message.get("type") == "http.request" and message.get("body"):
-                total += len(message["body"])
+            message = await receive()
+            if message.get("type") == "http.request":
+                body = message.get("body", b"")
+                total += len(body)
                 if total > self.max_bytes:
-                    raise RequestSizeExceeded(self.max_bytes)
+                    # 读完剩余body后抛异常（被外层except捕获 → 413）
+                    more = message.get("more_body", False)
+                    while more:
+                        msg = await receive()
+                        more = msg.get("more_body", False)
+                    raise _RequestSizeExceeded()
             return message
 
-        request._receive = limited_receive
-
         try:
-            return await call_next(request)
-        except RequestSizeExceeded:
-            return JSONResponse(status_code=413, content={"detail": f"Request body too large"})
+            await self.app(scope, limited_receive, send)
+        except _RequestSizeExceeded:
+            await self._send_error(send, 413, "Request body too large")
+
+    async def _send_error(self, send, status: int, detail: str):
+        body = f'{{"detail":"{detail}"}}'.encode()
+        await send({"type": "http.response.start", "status": status,
+                     "headers": [(b"content-type", b"application/json")]})
+        await send({"type": "http.response.body", "body": body})
 
 logger = logging.getLogger(__name__)
 
