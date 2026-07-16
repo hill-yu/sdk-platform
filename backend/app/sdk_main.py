@@ -6,12 +6,12 @@ from fastapi import FastAPI
 from app.api.sdk import version, config, click, log
 
 
-class _RequestSizeExceeded(Exception):
-    pass
-
-
 class RequestSizeLimitMiddleware:
-    """纯 ASGI 中间件：限制请求体大小，超限返回413"""
+    """纯 ASGI 中间件：限制请求体大小，超限返回413
+
+    策略：先缓冲全部 body，验证大小后重放给内部 app。
+    Content-Length 合法时走快速路径跳过缓冲。
+    """
     def __init__(self, app, max_bytes: int):
         self.app = app
         self.max_bytes = max_bytes
@@ -21,7 +21,7 @@ class RequestSizeLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Content-Length 快速拦截
+        # ── Content-Length 快速路径 ──
         headers = dict(scope.get("headers", []))
         cl = headers.get(b"content-length")
         if cl is not None:
@@ -36,28 +36,47 @@ class RequestSizeLimitMiddleware:
             except (ValueError, UnicodeDecodeError):
                 await self._send_error(send, 400, "Invalid Content-Length header")
                 return
+            # Content-Length 合法且在限制内 → 直接放行
+            await self.app(scope, receive, send)
+            return
 
-        # 包装 receive 累计实际字节数
+        # ── 无 Content-Length（分块传输）→ 缓冲全部 body ──
+        body_chunks: list[dict] = []
         total = 0
-        async def limited_receive():
-            nonlocal total
-            message = await receive()
-            if message.get("type") == "http.request":
-                body = message.get("body", b"")
-                total += len(body)
-                if total > self.max_bytes:
-                    # 读完剩余body后抛异常（被外层except捕获 → 413）
-                    more = message.get("more_body", False)
-                    while more:
-                        msg = await receive()
-                        more = msg.get("more_body", False)
-                    raise _RequestSizeExceeded()
-            return message
 
-        try:
-            await self.app(scope, limited_receive, send)
-        except _RequestSizeExceeded:
-            await self._send_error(send, 413, "Request body too large")
+        while True:
+            message = await receive()
+            if message.get("type") == "http.disconnect":
+                return
+            if message.get("type") != "http.request":
+                body_chunks.append(message)
+                continue
+
+            body = message.get("body", b"")
+            total += len(body)
+            if total > self.max_bytes:
+                # 读完剩余 body 后返回 413
+                more = message.get("more_body", False)
+                while more:
+                    msg = await receive()
+                    more = msg.get("more_body", False)
+                await self._send_error(send, 413, "Request body too large")
+                return
+
+            body_chunks.append(message)
+            if not message.get("more_body", False):
+                break
+
+        # 重放缓冲的 body 给内部 app
+        _iter = iter(body_chunks)
+
+        async def replayed_receive():
+            try:
+                return next(_iter)
+            except StopIteration:
+                return {"type": "http.request", "body": b"", "more_body": False}
+
+        await self.app(scope, replayed_receive, send)
 
     async def _send_error(self, send, status: int, detail: str):
         body = f'{{"detail":"{detail}"}}'.encode()
