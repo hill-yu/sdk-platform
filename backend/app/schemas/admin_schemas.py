@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ConfigUpsertRequest(BaseModel):
-    config_data: dict[str, Any] = Field(..., max_length=500000)  # 500KB 上限
+    config_data: dict[str, Any]
     change_log: str = ""
+
+    @field_validator("config_data")
+    @classmethod
+    def validate_size(cls, v: dict) -> dict:
+        json_bytes = json.dumps(v, ensure_ascii=False).encode("utf-8")
+        if len(json_bytes) > 500_000:
+            raise ValueError(f"config_data JSON 大小超过 500KB 限制（当前 {len(json_bytes)} 字节）")
+        return v
 
 
 class VersionCreateRequest(BaseModel):
