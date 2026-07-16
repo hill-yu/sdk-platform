@@ -78,7 +78,8 @@ CREATE TABLE IF NOT EXISTS sdk_configs (
     updated_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
 
     CONSTRAINT uq_configs_version UNIQUE (version),
-    CONSTRAINT chk_configs_status CHECK (status IN ('draft', 'published', 'archived'))
+    CONSTRAINT chk_configs_status CHECK (status IN ('draft', 'published', 'archived')),
+    CONSTRAINT chk_configs_cos_upload_status CHECK (cos_upload_status IN ('pending', 'success', 'failed'))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_configs_one_published ON sdk_configs (status) WHERE status = 'published';
