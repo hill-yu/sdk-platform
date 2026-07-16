@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     # 腾讯云 COS
     COS_SECRET_ID: str = ""
-    COS_SECRET_KEY: str = ""
+    COS_SECRET_KEY: str = Field(default="", repr=False)
     COS_REGION: str = "ap-guangzhou"
     COS_BUCKET: str = "sdk-config-bucket"
     CDN_BASE_URL: str = "https://cdn.example.com"
