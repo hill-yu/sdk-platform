@@ -47,7 +47,7 @@ async def get_config_detail(db: AsyncSession, config_id: int) -> dict[str, Any] 
 
 async def create_config(db: AsyncSession, config_data: dict[str, Any], change_log: str) -> dict[str, Any]:
     config = SdkConfig(
-        version=f"draft_{datetime.now(timezone.utc):%Y%m%d%H%M%S}",
+        version=f"draft_{datetime.now(timezone.utc):%Y%m%d%H%M%S_%f}",
         config_data=config_data,
         status="draft",
         change_log=change_log,
@@ -77,7 +77,7 @@ async def publish_config(db: AsyncSession, config_id: int, published_by: str) ->
         raise ValueError("只能发布草稿状态的配置")
 
     publish_at = datetime.now(timezone.utc)
-    version = publish_at.strftime("%Y%m%d_v%H%M%S")
+    version = publish_at.strftime("%Y%m%d_v%H%M%S_%f")
     cos_key = f"config/v{version}.json"
 
     # ① 先更新数据库状态
@@ -139,7 +139,7 @@ async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by
     """从已有记录发布（用于回滚和首次发布），DB先 + COS后 + 失败回滚"""
     is_rollback = config.status == "archived"
     publish_at = datetime.now(timezone.utc)
-    version = publish_at.strftime("%Y%m%d_v%H%M%S")
+    version = publish_at.strftime("%Y%m%d_v%H%M%S_%f")
     cos_key = f"config/v{version}.json"
 
     # ① 先更新 DB
