@@ -102,7 +102,14 @@ async def publish_config(db: AsyncSession, config_id: int, published_by: str) ->
     config.cos_upload_status = "success"
     config.cdn_url = _cdn_url(config.cos_key)
 
-    logger.info("配置发布完成: version=%s, cdn_url=%s", version, config.cdn_url)
+    # COS 上传成功后立即 commit
+    try:
+        await db.commit()
+        logger.info("配置发布完成: version=%s", version)
+    except Exception:
+        logger.exception("数据库提交失败，COS已更新但DB状态不一致: version=%s", version)
+        config.cos_upload_status = "failed"
+        raise HTTPException(status_code=500, detail="配置发布部分完成，请联系管理员检查CDN与数据库一致性")
 
     return {
         "version": version,
@@ -116,11 +123,20 @@ async def rollback_config(db: AsyncSession, config_id: int, published_by: str) -
     config = await db.get(SdkConfig, config_id)
     if config is None or config.status != "archived":
         raise ValueError("只能回滚 archived 状态的配置")
+
+    result = await db.execute(text("SELECT pg_try_advisory_xact_lock(9999)"))
+    if not result.scalar():
+        raise HTTPException(status_code=409, detail="另一配置操作正在进行，请稍后重试")
+
     return await _publish_from_record(db, config, published_by)
 
 
 async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by: str) -> dict[str, Any]:
     """从已有记录发布（用于回滚和首次发布），先COS后DB"""
+    result = await db.execute(text("SELECT pg_try_advisory_xact_lock(9999)"))
+    if not result.scalar():
+        raise HTTPException(status_code=409, detail="另一配置操作正在进行，请稍后重试")
+
     is_rollback = config.status == "archived"
     version = datetime.now().strftime("%Y%m%d_v%H%M%S_%f")
     cos_key = f"config/v{version}.json"
@@ -142,6 +158,15 @@ async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by
     config.cos_key = cos_key
     config.cos_upload_status = "success"
     config.cdn_url = _cdn_url(cos_key)
+
+    # COS 上传成功后立即 commit
+    try:
+        await db.commit()
+        logger.info("配置发布完成: version=%s", version)
+    except Exception:
+        logger.exception("数据库提交失败，COS已更新但DB状态不一致: version=%s", version)
+        config.cos_upload_status = "failed"
+        raise HTTPException(status_code=500, detail="配置发布部分完成，请联系管理员检查CDN与数据库一致性")
 
     return {
         "version": version,
