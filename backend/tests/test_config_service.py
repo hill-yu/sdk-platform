@@ -61,5 +61,6 @@ async def test_rollback_keeps_original_version(monkeypatch):
     assert config.version != "20260629_v2"
     # Verify version format: YYYYMMDD_vHHMMSS_ffffff
     assert re.match(r"\d{8}_v\d{6}_\d{6}", result["version"]), f"Unexpected version format: {result['version']}"
-    assert db.flushed is True
-    assert db.committed is True
+    # 3.1 重构后 service 不再自行 flush/commit，事务由外层 get_db 管理
+    assert db.executed  # 至少执行了旧 published 归档的 update
+    assert config.cos_upload_status == "success"
