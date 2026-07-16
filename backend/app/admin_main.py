@@ -13,6 +13,23 @@ from sqlalchemy import text
 from app.api.admin import config_mgr, dashboard, version_mgr
 from app.core.config import get_settings
 from app.core.database import async_session_factory
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+
+
+class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, max_bytes: int):
+        super().__init__(app)
+        self.max_bytes = max_bytes
+
+    async def dispatch(self, request, call_next):
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > self.max_bytes:
+            return JSONResponse(
+                status_code=413,
+                content={"detail": f"Request body too large. Max: {self.max_bytes} bytes"}
+            )
+        return await call_next(request)
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +88,9 @@ async def lifespan(app: FastAPI):
 
 cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
 
-app = FastAPI(title="Admin API", version="1.0.0", lifespan=lifespan, request_max_size=5_000_000)  # 5MB
+app = FastAPI(title="Admin API", version="1.0.0", lifespan=lifespan)
+
+app.add_middleware(RequestSizeLimitMiddleware, max_bytes=5_000_000)
 
 app.add_middleware(
     CORSMiddleware,
