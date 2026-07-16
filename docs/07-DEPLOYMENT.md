@@ -296,15 +296,15 @@ sudo journalctl -u sdk-api -n 50 # 最近 50 行
 
 # 1. 本地打包
 cd D:\code\SDK
-tar -czf backend.tar.gz backend/
+tar -czf sdk-deploy.tar.gz backend/ scripts/
 
 # 2. 上传到服务器
-scp backend.tar.gz user@your-server:/www/wwwroot/sdk-platform/
+scp sdk-deploy.tar.gz user@your-server:/www/wwwroot/sdk-platform/
 
 # 3. 服务器上更新
 ssh user@your-server
 cd /www/wwwroot/sdk-platform
-tar -xzf backend.tar.gz
+tar -xzf sdk-deploy.tar.gz
 cd backend
 source venv/bin/activate
 pip install -r requirements.txt  # 如有新增依赖
