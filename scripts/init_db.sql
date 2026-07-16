@@ -203,7 +203,7 @@ $$ LANGUAGE plpgsql;
 -- ============================================================
 -- 8. 初始数据
 -- ============================================================
-INSERT INTO sdk_configs (version, config_data, status, change_log)
+INSERT INTO sdk_configs (version, config_data, status, change_log, cos_upload_status)
 VALUES (
     '20260630_init',
     '{
@@ -214,8 +214,9 @@ VALUES (
             "cdn_base": "https://cdn.example.com"
         }
     }'::jsonb,
-    'published',
-    '初始配置模板（字段结构由SDK同事后续定义）'
+    'draft',
+    '初始配置模板（部署后请通过管理后台编辑并正式发布）',
+    'pending'
 ) ON CONFLICT (version) DO NOTHING;
 
 -- ============================================================

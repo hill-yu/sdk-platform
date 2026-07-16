@@ -17,7 +17,7 @@
 - [ ] PostgreSQL 已安装并运行（`systemctl status postgresql`）
 - [ ] `sdk_platform` 数据库已创建
 - [ ] `init_db.sql` 已执行（三张表 + 三个分区 + 两个物化视图）
-- [ ] 初始数据已插入（`SELECT * FROM sdk_configs` 有 1 条 published 记录）
+- [ ] 初始数据已插入（`SELECT * FROM sdk_configs` 有 1 条 draft 记录）
 - [ ] 定时备份已配置（`crontab -l | grep pg_dump`）
 
 ## 3. 后端服务
