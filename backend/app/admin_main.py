@@ -15,9 +15,6 @@ from app.core.config import get_settings
 from app.core.database import async_session_factory
 
 
-class _RequestSizeExceeded(Exception):
-    """内部异常：请求体超过限制"""
-    pass
 
 
 class RequestSizeLimitMiddleware:
@@ -53,33 +50,41 @@ class RequestSizeLimitMiddleware:
                 await self._send_error(send, 400, "Invalid Content-Length header")
                 return
 
-        # 所有放行请求都累计实际字节（包括有 CL 的请求）
+        # 所有放行请求都累计实际字节
+        exceeded = False
         total = 0
-        chunks = []
 
         async def limited_receive():
-            nonlocal total
+            nonlocal total, exceeded
+            if exceeded:
+                msg = await receive()
+                while msg.get("more_body", False):
+                    msg = await receive()
+                return {"type": "http.disconnect"}
             message = await receive()
             if message.get("type") == "http.request":
                 body = message.get("body", b"")
                 total += len(body)
-                chunks.append(body)
                 if total > self.max_bytes:
-                    # 读完剩余
+                    exceeded = True
                     more = message.get("more_body", False)
                     while more:
                         msg = await receive()
                         more = msg.get("more_body", False)
-                    raise _RequestSizeExceeded()
-                if not message.get("more_body", False):
-                    # 全部读完，合并 chunks 重放
-                    message["body"] = b"".join(chunks)
+                    return {"type": "http.disconnect"}
             return message
 
-        try:
-            await self.app(scope, limited_receive, send)
-        except _RequestSizeExceeded:
-            await self._send_error(send, 413, "Request body too large")
+        # 包装 send 以拦截 app 响应（超限时替换为 413）
+        async def _wrapped_send(message):
+            nonlocal exceeded
+            if exceeded:
+                if message.get("type") == "http.response.start":
+                    exceeded = False
+                    await self._send_error(send, 413, "Request body too large")
+                return
+            await send(message)
+
+        await self.app(scope, limited_receive, _wrapped_send)
 
     async def _send_error(self, send, status: int, detail: str):
         body = f'{{"detail":"{detail}"}}'.encode()
