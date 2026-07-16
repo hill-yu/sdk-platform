@@ -76,55 +76,31 @@ async def publish_config(db: AsyncSession, config_id: int, published_by: str) ->
     if config is None or config.status != "draft":
         raise ValueError("只能发布草稿状态的配置")
 
-    publish_at = datetime.now(timezone.utc)
-    version = publish_at.strftime("%Y%m%d_v%H%M%S_%f")
-    cos_key = f"config/v{version}.json"
+    version = datetime.now().strftime("%Y%m%d_v%H%M%S_%f")
+    publish_data = {"version": version, "updated_at": datetime.now().isoformat(), "config": config.config_data}
+    json_bytes = json.dumps(publish_data, ensure_ascii=False).encode()
 
-    # ① 先更新数据库状态
+    # ① 先上传 COS（版本文件 + latest.json）
+    await asyncio.to_thread(_upload_config_payload, f"config/v{version}.json", json_bytes)
+    await asyncio.to_thread(_upload_config_payload, "config/latest.json", json_bytes)
+
+    # ② COS 成功 → 归档旧 + 当前变 published
     await db.execute(
         update(SdkConfig).where(SdkConfig.status == "published").values(status="archived")
     )
     config.status = "published"
     config.version = version
-    config.publish_at = publish_at
+    config.publish_at = datetime.now()
     config.published_by = published_by
-    config.cos_key = cos_key
-    config.cos_upload_status = "pending"
-    config.updated_at = publish_at
-    await db.flush()
-
-    # ② 先 commit 确保 DB 落库
-    await db.commit()
-
-    # ③ COS 上传放在 DB 确认后
-    publish_data = {
-        "version": version,
-        "updated_at": publish_at.isoformat(),
-        "config": config.config_data,
-    }
-    json_bytes = json.dumps(publish_data, ensure_ascii=False).encode()
-
-    try:
-        await asyncio.to_thread(_upload_config_payload, cos_key, json_bytes)
-        await asyncio.to_thread(_upload_config_payload, "config/latest.json", json_bytes)
-        config.cos_upload_status = "success"
-        await db.flush()
-    except Exception:
-        # COS 失败时标记状态（DB 已提交，需异步修复）
-        config.cos_upload_status = "failed"
-        await db.flush()
-        await db.commit()
-        logger.exception("COS 上传失败，DB 已提交，需人工修复: version=%s", version)
-        raise RuntimeError(f"COS 上传失败: {version}，配置已入库但 CDN 未更新，请联系管理员")
-
-    cdn_url = _cdn_url(cos_key)
-    config.cdn_url = cdn_url
+    config.cos_key = f"config/v{version}.json"
+    config.cos_upload_status = "success"
+    config.cdn_url = _cdn_url(config.cos_key)
 
     return {
         "version": version,
-        "publish_at": publish_at.isoformat(),
-        "cdn_url": cdn_url,
-        "cos_key": cos_key,
+        "publish_at": config.publish_at.isoformat(),
+        "cdn_url": config.cdn_url,
+        "cos_key": config.cos_key,
     }
 
 
@@ -136,49 +112,32 @@ async def rollback_config(db: AsyncSession, config_id: int, published_by: str) -
 
 
 async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by: str) -> dict[str, Any]:
-    """从已有记录发布（用于回滚和首次发布），DB先 + COS后 + 失败回滚"""
+    """从已有记录发布（用于回滚和首次发布），先COS后DB"""
     is_rollback = config.status == "archived"
-    publish_at = datetime.now(timezone.utc)
-    version = publish_at.strftime("%Y%m%d_v%H%M%S_%f")
+    version = datetime.now().strftime("%Y%m%d_v%H%M%S_%f")
     cos_key = f"config/v{version}.json"
 
-    # ① 先更新 DB
+    # ① 先上传 COS
+    publish_data = {"version": version, "updated_at": datetime.now().isoformat(), "config": config.config_data}
+    json_bytes = json.dumps(publish_data, ensure_ascii=False).encode()
+    await asyncio.to_thread(_upload_config_payload, cos_key, json_bytes)
+    await asyncio.to_thread(_upload_config_payload, "config/latest.json", json_bytes)
+
+    # ② COS 成功 → 归档旧 + 当前变 published
     await db.execute(
-        update(SdkConfig).where(SdkConfig.status == "published").values(status="archived", updated_at=publish_at)
+        update(SdkConfig).where(SdkConfig.status == "published").values(status="archived")
     )
     config.status = "published"
     config.version = version
-    config.publish_at = publish_at
+    config.publish_at = datetime.now()
     config.published_by = published_by
     config.cos_key = cos_key
+    config.cos_upload_status = "success"
     config.cdn_url = _cdn_url(cos_key)
-    config.cos_upload_status = "pending"
-    config.updated_at = publish_at
-    await db.flush()
-
-    # ② 先 commit 确保 DB 落库
-    await db.commit()
-
-    # ③ COS 上传放在 DB 确认后
-    publish_data = {"version": version, "updated_at": publish_at.isoformat(), "config": config.config_data}
-    json_bytes = json.dumps(publish_data, ensure_ascii=False).encode("utf-8")
-
-    try:
-        await asyncio.to_thread(_upload_config_payload, cos_key, json_bytes)
-        await asyncio.to_thread(_upload_config_payload, "config/latest.json", json_bytes)
-        config.cos_upload_status = "success"
-        await db.flush()
-    except Exception:
-        # COS 失败时标记状态（DB 已提交，需异步修复）
-        config.cos_upload_status = "failed"
-        await db.flush()
-        await db.commit()
-        logger.exception("COS 上传失败，DB 已提交，需人工修复: version=%s", version)
-        raise RuntimeError(f"COS 上传失败: {version}，配置已入库但 CDN 未更新，请联系管理员")
 
     return {
         "version": version,
-        "publish_at": publish_at.isoformat(),
+        "publish_at": config.publish_at.isoformat(),
         "cdn_url": config.cdn_url,
         "cos_key": cos_key,
         "message": f"已回滚到版本 {version}" if is_rollback else f"已发布版本 {version}",

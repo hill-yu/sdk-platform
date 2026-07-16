@@ -29,7 +29,10 @@ async def get_config_meta(
     此接口不返回完整 config JSON。
     """
     result = await db.execute(
-        select(SdkConfig).where(SdkConfig.status == "published").limit(1)
+        select(SdkConfig).where(
+            SdkConfig.status == "published",
+            SdkConfig.cos_upload_status == "success"
+        ).limit(1)
     )
     published: SdkConfig | None = result.scalar_one_or_none()
 

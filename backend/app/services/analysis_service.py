@@ -3,11 +3,14 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.event import SdkEvent
 
 
 async def get_summary(db: AsyncSession) -> dict[str, int]:
+    """获取今日/昨日汇总数据（PV/UV/事件数/错误数）"""
     today = date.today()
     yesterday = today - timedelta(days=1)
 
@@ -46,13 +49,14 @@ async def get_summary(db: AsyncSession) -> dict[str, int]:
 
 
 async def get_trend(db: AsyncSession, range_value: str = "24h", event_type: str | None = None) -> dict[str, list[dict[str, Any]]]:
+    """获取趋势数据（24小时/7天/30天）"""
     if range_value == "24h":
         sql = text(
             """
             SELECT hour AS time, event_count AS count, unique_devices AS uv
             FROM mv_hourly_trend
             WHERE hour >= :start_time
-              AND (:event_type IS NULL OR event_type = :event_type)
+              AND (:event_type::varchar IS NULL OR event_type = :event_type::varchar)
             ORDER BY hour ASC
             """
         )
@@ -65,7 +69,7 @@ async def get_trend(db: AsyncSession, range_value: str = "24h", event_type: str 
             SELECT stat_date::text AS time, SUM(event_count) AS count, SUM(unique_devices) AS uv
             FROM mv_daily_event_stats
             WHERE stat_date >= :start_date
-              AND (:event_type IS NULL OR event_type = :event_type)
+              AND (:event_type::varchar IS NULL OR event_type = :event_type::varchar)
             GROUP BY stat_date
             ORDER BY stat_date ASC
             """
@@ -77,26 +81,28 @@ async def get_trend(db: AsyncSession, range_value: str = "24h", event_type: str 
 
 
 async def get_breakdown(db: AsyncSession, target_date: date, dimension: str = "event_type") -> list[dict[str, Any]]:
+    """按维度（event_type/page/element）拆分某日事件分布"""
     if dimension == "page":
-        dimension_expr = "COALESCE(payload->>'page', 'unknown')"
+        name_col = func.coalesce(SdkEvent.payload['page'].astext, 'unknown')
     elif dimension == "element":
-        dimension_expr = "COALESCE(payload->>'element', 'unknown')"
+        name_col = func.coalesce(SdkEvent.payload['element'].astext, 'unknown')
     else:
-        dimension_expr = "event_type"
-
-    sql = text(
-        f"""
-        SELECT {dimension_expr} AS name, COUNT(*) AS count
-        FROM sdk_events
-        WHERE server_ts >= :start_time AND server_ts < :end_time
-        GROUP BY 1
-        ORDER BY count DESC
-        """
-    )
+        name_col = SdkEvent.event_type
 
     start_time = datetime.combine(target_date, datetime.min.time(), tzinfo=timezone.utc)
     end_time = start_time + timedelta(days=1)
-    rows = (await db.execute(sql, {"start_time": start_time, "end_time": end_time})).mappings().all()
+
+    stmt = (
+        select(
+            name_col.label('name'),
+            func.count().label('count')
+        )
+        .where(SdkEvent.server_ts >= start_time, SdkEvent.server_ts < end_time)
+        .group_by(name_col)
+        .order_by(text('count DESC'))
+    )
+
+    rows = (await db.execute(stmt)).mappings().all()
     total = sum(int(row["count"]) for row in rows) or 1
     return [
         {"name": row["name"], "count": int(row["count"]), "percentage": round(int(row["count"]) * 100 / total, 2)}
@@ -115,36 +121,38 @@ async def get_events(
     date_from: date | None,
     date_to: date | None,
 ) -> dict[str, Any]:
-    where_clauses: list[str] = ["1=1"]
-    params: dict[str, Any] = {"limit": page_size, "offset": (page - 1) * page_size}
+    """分页查询原始事件列表，支持多条件筛选"""
+    stmt = select(SdkEvent)
 
     if event_type:
-        where_clauses.append("event_type = :event_type")
-        params["event_type"] = event_type
+        stmt = stmt.where(SdkEvent.event_type == event_type)
     if app_id:
-        where_clauses.append("app_id = :app_id")
-        params["app_id"] = app_id
+        stmt = stmt.where(SdkEvent.app_id == app_id)
     if device_id:
-        where_clauses.append("device_id = :device_id")
-        params["device_id"] = device_id
+        stmt = stmt.where(SdkEvent.device_id == device_id)
     if date_from:
-        params["date_from"] = datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc)
-        where_clauses.append("server_ts >= :date_from")
+        stmt = stmt.where(SdkEvent.server_ts >= datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc))
     if date_to:
-        params["date_to"] = datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
-        where_clauses.append("server_ts < :date_to")
+        stmt = stmt.where(SdkEvent.server_ts < datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc))
 
-    where_sql = " AND ".join(where_clauses)
-    total_sql = text(f"SELECT COUNT(*) AS total FROM sdk_events WHERE {where_sql}")
-    list_sql = text(
-        f"""
-        SELECT id, event_type, app_id, device_id, payload, client_ts, server_ts
-        FROM sdk_events
-        WHERE {where_sql}
-        ORDER BY server_ts DESC
-        LIMIT :limit OFFSET :offset
-        """
-    )
-    total = int((await db.execute(total_sql, params)).scalar_one())
-    items = (await db.execute(list_sql, params)).mappings().all()
-    return {"total": total, "page": page, "page_size": page_size, "items": [dict(row) for row in items]}
+    # Count total
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    total = (await db.execute(count_stmt)).scalar_one()
+
+    # Paginated list
+    list_stmt = stmt.order_by(SdkEvent.server_ts.desc()).limit(page_size).offset((page - 1) * page_size)
+    rows = (await db.execute(list_stmt)).scalars().all()
+
+    items = [
+        {
+            "id": e.id,
+            "event_type": e.event_type,
+            "app_id": e.app_id,
+            "device_id": e.device_id,
+            "payload": e.payload,
+            "client_ts": e.client_ts,
+            "server_ts": e.server_ts,
+        }
+        for e in rows
+    ]
+    return {"total": total, "page": page, "page_size": page_size, "items": items}
