@@ -15,6 +15,14 @@ ALTER TABLE sdk_configs
 ALTER COLUMN cos_upload_status SET DEFAULT 'pending',
 ALTER COLUMN cos_upload_status SET NOT NULL;
 
-ALTER TABLE sdk_configs
-ADD CONSTRAINT chk_configs_cos_upload_status
-CHECK (cos_upload_status IN ('pending', 'success', 'failed'));
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'chk_configs_cos_upload_status'
+    ) THEN
+        ALTER TABLE sdk_configs
+        ADD CONSTRAINT chk_configs_cos_upload_status
+        CHECK (cos_upload_status IN ('pending', 'success', 'failed'));
+    END IF;
+END $$;
