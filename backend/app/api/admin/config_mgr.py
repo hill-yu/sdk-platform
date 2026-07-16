@@ -26,40 +26,37 @@ async def list_configs(db: AsyncSession = Depends(get_db_no_commit)):
 @router.get("/configs/reconcile")
 async def reconcile_configs(db: AsyncSession = Depends(get_db_no_commit)):
     """对账：比较 DB published 版本与 CDN latest.json 版本号"""
-    # 查询 DB 当前 published 配置版本
+    import httpx
+
     result = await db.execute(
-        select(SdkConfig.version).where(SdkConfig.status == "published")
+        select(SdkConfig).where(
+            SdkConfig.status == "published",
+            SdkConfig.cos_upload_status == "success",
+        ).limit(1)
     )
-    db_version = result.scalar_one_or_none() or "(无已发布配置)"
+    published = result.scalar_one_or_none()
+    if not published:
+        return {"code": 0, "data": {"consistent": None, "message": "无已发布配置"}}
 
-    # 尝试从 CDN 拉取 latest.json 获取版本号
-    cdn_version = "(未拉取)"
-    consistent = None
+    cdn_url = published.cdn_url
+    if not cdn_url:
+        return {"code": 0, "data": {"consistent": False, "message": "CDN地址缺失"}}
+
     try:
-        import json as _json
-        import urllib.request
-
-        from app.core.config import get_settings
-        settings = get_settings()
-        cdn_url = f"{settings.CDN_BASE_URL.rstrip('/')}/config/latest.json"
-        req = urllib.request.Request(cdn_url)
-        req.add_header("Cache-Control", "no-cache")
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = _json.loads(resp.read().decode())
-            cdn_version = data.get("version", "(无版本字段)")
-    except Exception:
-        logger.warning("对账: 无法从 CDN 拉取 latest.json", exc_info=True)
-
-    consistent = (db_version == cdn_version) if cdn_version != "(未拉取)" else None
-
-    return {
-        "code": 0,
-        "data": {
-            "db_version": db_version,
-            "cdn_version": cdn_version,
-            "consistent": consistent,
-        },
-    }
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(cdn_url)
+            r.raise_for_status()
+            cdn_data = r.json()
+            cdn_version = cdn_data.get("version")
+            consistent = (cdn_version == published.version)
+            return {"code": 0, "data": {
+                "db_version": published.version,
+                "cdn_version": cdn_version,
+                "consistent": consistent,
+            }}
+    except Exception as e:
+        logger.warning("对账CDN请求失败: %s", e)
+        return {"code": 0, "data": {"consistent": None, "message": f"CDN不可达: {str(e)}"}}
 
 
 @router.get("/configs/{config_id}")
