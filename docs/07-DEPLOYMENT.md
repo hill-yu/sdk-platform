@@ -170,6 +170,7 @@ server {
 
     # SDK API → :8100
     location /api/v1/ {
+        client_max_body_size 1m;
         proxy_pass http://127.0.0.1:8100;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -178,6 +179,7 @@ server {
 
     # 管理后台 API → :8101
     location /api/admin/ {
+        client_max_body_size 5m;
         proxy_pass http://127.0.0.1:8101;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
