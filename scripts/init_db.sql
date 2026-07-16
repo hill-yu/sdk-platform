@@ -147,8 +147,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_hourly ON mv_hourly_trend (hour, event_
 CREATE OR REPLACE FUNCTION refresh_materialized_views()
 RETURNS void AS $$
 BEGIN
-    REFRESH MATERIALIZED VIEW CONCURRENTLY mv_daily_event_stats;
-    REFRESH MATERIALIZED VIEW CONCURRENTLY mv_hourly_trend;
+    IF pg_try_advisory_xact_lock(12345) THEN
+        REFRESH MATERIALIZED VIEW CONCURRENTLY mv_daily_event_stats;
+        REFRESH MATERIALIZED VIEW CONCURRENTLY mv_hourly_trend;
+    END IF;
 END;
 $$ LANGUAGE plpgsql;
 
