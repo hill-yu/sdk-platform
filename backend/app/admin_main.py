@@ -45,8 +45,14 @@ async def etl_refresh_loop() -> None:
 async def lifespan(app: FastAPI):
     # 启动：校验 ADMIN_TOKEN
     settings = get_settings()
-    if not settings.ADMIN_TOKEN or "change-me" in settings.ADMIN_TOKEN:
-        raise RuntimeError("ADMIN_TOKEN 未设置或使用弱默认值！请在 .env 中设置强随机 ADMIN_TOKEN")
+    if (not settings.ADMIN_TOKEN
+        or len(settings.ADMIN_TOKEN) < 32
+        or "change-me" in settings.ADMIN_TOKEN.lower()
+        or "admin" in settings.ADMIN_TOKEN.lower()):
+        raise RuntimeError(
+            "ADMIN_TOKEN 未设置或过于简单！请用 python -c \"import secrets; print(secrets.token_urlsafe(32))\" 生成强随机 Token，\n"
+            "然后在 .env 中设置: ADMIN_TOKEN=<生成的token>"
+        )
     logger.info("ADMIN_TOKEN 校验通过")
 
     # 启动 ETL 定时刷新
