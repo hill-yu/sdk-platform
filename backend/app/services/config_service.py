@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Any
@@ -92,7 +93,6 @@ async def publish_config(db: AsyncSession, config_id: int, published_by: str) ->
     await db.flush()
 
     # ② 再上传 COS
-    settings = get_settings()
     publish_data = {
         "version": version,
         "updated_at": publish_at.isoformat(),
@@ -101,20 +101,8 @@ async def publish_config(db: AsyncSession, config_id: int, published_by: str) ->
     json_bytes = json.dumps(publish_data, ensure_ascii=False).encode()
 
     try:
-        client = CosS3Client(
-            CosConfig(
-                Region=settings.COS_REGION,
-                SecretId=settings.COS_SECRET_ID,
-                SecretKey=settings.COS_SECRET_KEY,
-            )
-        )
-        client.put_object(Bucket=settings.COS_BUCKET, Key=cos_key, Body=json_bytes)
-        client.put_object(
-            Bucket=settings.COS_BUCKET,
-            Key="config/latest.json",
-            Body=json_bytes,
-            CacheControl="max-age=300",
-        )
+        await asyncio.to_thread(_upload_config_payload, cos_key, json_bytes)
+        await asyncio.to_thread(_upload_config_payload, "config/latest.json", json_bytes)
     except Exception:
         # COS 上传失败 → 回滚 DB 状态
         await db.rollback()
@@ -160,9 +148,11 @@ async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by
 
     # ② 再上传 COS
     publish_data = {"version": version, "updated_at": publish_at.isoformat(), "config": config.config_data}
+    json_bytes = json.dumps(publish_data, ensure_ascii=False).encode("utf-8")
 
     try:
-        _upload_config_payload(cos_key, publish_data)
+        await asyncio.to_thread(_upload_config_payload, cos_key, json_bytes)
+        await asyncio.to_thread(_upload_config_payload, "config/latest.json", json_bytes)
     except Exception:
         await db.rollback()
         raise RuntimeError(f"COS 上传失败，配置回滚/发布已撤销: {version}")
@@ -176,9 +166,9 @@ async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by
     }
 
 
-async def _upload_config_payload(cos_key: str, payload: dict[str, Any]) -> None:
+def _upload_config_payload(cos_key: str, json_bytes: bytes) -> str:
+    """上传配置到 COS（同步函数，由调用方通过 to_thread 执行）"""
     settings = get_settings()
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
     if not settings.COS_SECRET_ID or not settings.COS_SECRET_KEY or not settings.COS_BUCKET:
         raise RuntimeError(
@@ -194,13 +184,11 @@ async def _upload_config_payload(cos_key: str, payload: dict[str, Any]) -> None:
             SecretKey=settings.COS_SECRET_KEY,
         )
     )
-    client.put_object(Bucket=settings.COS_BUCKET, Key=cos_key, Body=body)
-    client.put_object(
-        Bucket=settings.COS_BUCKET,
-        Key="config/latest.json",
-        Body=body,
-        CacheControl="max-age=300",
-    )
+    cache_opts = {}
+    if cos_key == "config/latest.json":
+        cache_opts["CacheControl"] = "max-age=300"
+    client.put_object(Bucket=settings.COS_BUCKET, Key=cos_key, Body=json_bytes, **cache_opts)
+    return f"{settings.CDN_BASE_URL.rstrip('/')}/{cos_key}"
 
 
 def _serialize_config(config: SdkConfig | None) -> dict[str, Any] | None:
