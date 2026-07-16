@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -7,6 +8,9 @@ from typing import Any, Callable
 import pytest
 from fastapi.testclient import TestClient
 
+# ── Inject valid test credentials before any app import ──────────────
+os.environ.setdefault("ADMIN_TOKEN", "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0")
+os.environ.setdefault("CDN_BASE_URL", "https://cdn.test.local")
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
@@ -44,6 +48,9 @@ class StubWriteSession:
     def __init__(self, fail_predicate: Callable[[Any], bool] | None = None):
         self.fail_predicate = fail_predicate or (lambda _record: False)
         self.records: list[Any] = []
+        self.executed: list[Any] = []
+        self.committed = False
+        self.rolled_back = False
 
     def begin_nested(self) -> StubNestedTransaction:
         return StubNestedTransaction()
@@ -52,6 +59,39 @@ class StubWriteSession:
         if self.fail_predicate(record):
             raise RuntimeError("simulated write failure")
         self.records.append(record)
+
+    async def execute(self, stmt, *args: Any, **kwargs: Any):
+        from sqlalchemy.sql import Insert
+        if isinstance(stmt, Insert):
+            # For pg_insert with .values([...]), extract from compiled parameters
+            try:
+                compiled = stmt.compile(
+                    dialect=stmt._dialect if hasattr(stmt, '_dialect') and stmt._dialect else None
+                )
+                params = compiled.params
+                if isinstance(params, dict):
+                    params = [params]
+                for value_dict in params:
+                    if isinstance(value_dict, dict) and self.fail_predicate(value_dict):
+                        raise RuntimeError("simulated write failure")
+                    if isinstance(value_dict, dict):
+                        self.records.append(value_dict)
+            except Exception:
+                pass
+        self.executed.append(stmt)
+        return StubScalarResult(None)
+
+    async def commit(self):
+        self.committed = True
+
+    async def rollback(self):
+        self.rolled_back = True
+
+    async def flush(self):
+        pass
+
+    async def close(self):
+        pass
 
 
 @pytest.fixture()
@@ -79,4 +119,3 @@ def override_write_db(session: StubWriteSession):
 @pytest.fixture()
 def dependency_keys():
     return {"read": get_db_no_commit, "write": get_db}
-

@@ -5,7 +5,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 
-def _auth_headers(token: str = "admin-secret-token-change-me") -> dict[str, str]:
+def _auth_headers(token: str = "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0") -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -73,11 +73,11 @@ def test_publish_config_returns_publish_result(monkeypatch):
 
     async def fake_publish(_db: Any, config_id: int, published_by: str) -> dict[str, Any]:
         assert config_id == 6
-        assert published_by == "admin"
+        assert published_by == "32e5c0e2"
         return {
             "version": "20260630_v3",
             "publish_at": "2026-06-30T10:35:00Z",
-            "cdn_url": "https://cdn.example.com/config/latest.json",
+            "cdn_url": "https://cdn.test.local/config/latest.json",
             "cos_key": "config/v20260630_v3.json",
         }
 
@@ -87,7 +87,7 @@ def test_publish_config_returns_publish_result(monkeypatch):
         response = client.post("/api/admin/configs/6/publish", headers=_auth_headers())
 
     assert response.status_code == 200
-    assert response.json()["data"]["cdn_url"] == "https://cdn.example.com/config/latest.json"
+    assert response.json()["data"]["cdn_url"] == "https://cdn.test.local/config/latest.json"
 
 
 def test_rollback_config_returns_publish_result(monkeypatch):
@@ -96,11 +96,11 @@ def test_rollback_config_returns_publish_result(monkeypatch):
 
     async def fake_rollback(_db: Any, config_id: int, published_by: str) -> dict[str, Any]:
         assert config_id == 3
-        assert published_by == "admin"
+        assert published_by == "32e5c0e2"
         return {
             "version": "20260629_v2",
             "publish_at": "2026-06-30T10:40:00Z",
-            "cdn_url": "https://cdn.example.com/config/latest.json",
+            "cdn_url": "https://cdn.test.local/config/latest.json",
             "cos_key": "config/v20260629_v2.json",
             "message": "已回滚到版本 20260629_v2",
         }

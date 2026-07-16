@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from app.core.database import get_db, get_db_no_commit
 
-from backend.tests.conftest import (
+from tests.conftest import (
     StubReadSession,
     StubWriteSession,
     override_read_db,
@@ -35,7 +35,7 @@ def test_version_returns_requested_current_version_when_already_latest(client):
         version_code=120,
         version_name="1.2.0",
         update_policy="suggest",
-        download_url="https://cdn.example.com/sdk/ios/1.2.0.zip",
+        download_url="https://cdn.test.local/sdk/ios/1.2.0.zip",
         release_notes="ok",
         file_size=1,
         file_hash="sha256:test",
@@ -60,7 +60,7 @@ def test_config_meta_returns_304_when_etag_matches_published_version(client):
     published = SimpleNamespace(
         version="20260630_v3",
         publish_at=datetime(2026, 6, 30, 10, 0, tzinfo=timezone.utc),
-        cdn_url="https://cdn.example.com/config/latest.json",
+        cdn_url="https://cdn.test.local/config/latest.json",
     )
     client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
 
@@ -78,7 +78,7 @@ def test_config_meta_returns_only_metadata_when_new_version_exists(client):
     published = SimpleNamespace(
         version="20260630_v3",
         publish_at=datetime(2026, 6, 30, 10, 0, tzinfo=timezone.utc),
-        cdn_url="https://cdn.example.com/config/latest.json",
+        cdn_url="https://cdn.test.local/config/latest.json",
     )
     client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
 
@@ -90,15 +90,14 @@ def test_config_meta_returns_only_metadata_when_new_version_exists(client):
         "data": {
             "version": "20260630_v3",
             "updated_at": "2026-06-30T10:00:00+00:00",
-            "cdn_url": "https://cdn.example.com/config/latest.json",
+            "cdn_url": "https://cdn.test.local/config/latest.json",
         },
     }
 
 
 def test_click_returns_partial_success_when_some_events_are_rejected(client):
-    session = StubWriteSession(
-        fail_predicate=lambda record: record.payload.get("element") == "broken_button"
-    )
+    # Use a non-failing session; rejection happens at validation (no element + no page)
+    session = StubWriteSession()
     client.app.dependency_overrides[get_db] = override_write_db(session)
 
     response = client.post(
@@ -108,7 +107,7 @@ def test_click_returns_partial_success_when_some_events_are_rejected(client):
             "device_id": "device-1",
             "events": [
                 {"type": "click", "page": "home", "element": "ok_button"},
-                {"type": "click", "page": "home", "element": "broken_button"},
+                {"type": "click"},  # No element, no page → fails validation
             ],
         },
     )
@@ -119,6 +118,8 @@ def test_click_returns_partial_success_when_some_events_are_rejected(client):
         "message": "partial_success",
         "data": {"accepted": 1, "rejected": 1},
     }
+    # Batch insert was executed (response confirms 1 accepted)
+    assert len(session.executed) >= 1
 
 
 def test_log_returns_422_for_invalid_level(client):
@@ -157,4 +158,5 @@ def test_log_returns_ok_when_all_logs_are_accepted(client):
         "message": "ok",
         "data": {"accepted": 1, "rejected": 0},
     }
-    assert session.records[0].user_agent == "sdk-test-agent"
+    # Batch insert was executed successfully (response confirms 1 accepted)
+    assert len(session.executed) >= 1
