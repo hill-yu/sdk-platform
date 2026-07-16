@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS sdk_configs (
     published_by    VARCHAR(64),
     cos_key         VARCHAR(256),
     cdn_url         VARCHAR(512),
+    cos_upload_status VARCHAR(20) NOT NULL DEFAULT 'pending',
     change_log      TEXT,
     created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),

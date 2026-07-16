@@ -16,6 +16,7 @@ class SdkConfig(Base):
     published_by = Column(String(64))
     cos_key = Column(String(256))
     cdn_url = Column(String(512))
+    cos_upload_status = Column(String(20), nullable=False, default="pending")
     change_log = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

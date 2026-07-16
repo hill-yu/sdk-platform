@@ -89,10 +89,14 @@ async def publish_config(db: AsyncSession, config_id: int, published_by: str) ->
     config.publish_at = publish_at
     config.published_by = published_by
     config.cos_key = cos_key
+    config.cos_upload_status = "pending"
     config.updated_at = publish_at
     await db.flush()
 
-    # ② 再上传 COS
+    # ② 先 commit 确保 DB 落库
+    await db.commit()
+
+    # ③ COS 上传放在 DB 确认后
     publish_data = {
         "version": version,
         "updated_at": publish_at.isoformat(),
@@ -103,10 +107,15 @@ async def publish_config(db: AsyncSession, config_id: int, published_by: str) ->
     try:
         await asyncio.to_thread(_upload_config_payload, cos_key, json_bytes)
         await asyncio.to_thread(_upload_config_payload, "config/latest.json", json_bytes)
+        config.cos_upload_status = "success"
+        await db.flush()
     except Exception:
-        # COS 上传失败 → 回滚 DB 状态
-        await db.rollback()
-        raise RuntimeError("COS 上传失败，配置发布已回滚")
+        # COS 失败时标记状态（DB 已提交，需异步修复）
+        config.cos_upload_status = "failed"
+        await db.flush()
+        await db.commit()
+        logger.exception("COS 上传失败，DB 已提交，需人工修复: version=%s", version)
+        raise RuntimeError(f"COS 上传失败: {version}，配置已入库但 CDN 未更新，请联系管理员")
 
     cdn_url = _cdn_url(cos_key)
     config.cdn_url = cdn_url
@@ -143,19 +152,29 @@ async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by
     config.published_by = published_by
     config.cos_key = cos_key
     config.cdn_url = _cdn_url(cos_key)
+    config.cos_upload_status = "pending"
     config.updated_at = publish_at
     await db.flush()
 
-    # ② 再上传 COS
+    # ② 先 commit 确保 DB 落库
+    await db.commit()
+
+    # ③ COS 上传放在 DB 确认后
     publish_data = {"version": version, "updated_at": publish_at.isoformat(), "config": config.config_data}
     json_bytes = json.dumps(publish_data, ensure_ascii=False).encode("utf-8")
 
     try:
         await asyncio.to_thread(_upload_config_payload, cos_key, json_bytes)
         await asyncio.to_thread(_upload_config_payload, "config/latest.json", json_bytes)
+        config.cos_upload_status = "success"
+        await db.flush()
     except Exception:
-        await db.rollback()
-        raise RuntimeError(f"COS 上传失败，配置回滚/发布已撤销: {version}")
+        # COS 失败时标记状态（DB 已提交，需异步修复）
+        config.cos_upload_status = "failed"
+        await db.flush()
+        await db.commit()
+        logger.exception("COS 上传失败，DB 已提交，需人工修复: version=%s", version)
+        raise RuntimeError(f"COS 上传失败: {version}，配置已入库但 CDN 未更新，请联系管理员")
 
     return {
         "version": version,
