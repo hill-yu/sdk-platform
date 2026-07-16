@@ -309,10 +309,17 @@ cd backend
 source venv/bin/activate
 pip install -r requirements.txt  # 如有新增依赖
 
-# 4. 重启服务
+# 4. 执行数据库迁移
+psql -U sdk_admin -d sdk_platform -f ../scripts/migrate_cos_upload_status.sql
+if [ $? -ne 0 ]; then
+    echo "数据库迁移失败，禁止重启服务"
+    exit 1
+fi
+
+# 5. 重启服务
 sudo systemctl restart sdk-api sdk-admin
 
-# 5. 验证
+# 6. 验证
 curl http://localhost:8100/health
 curl http://localhost:8101/api/admin/health \
   -H "Authorization: Bearer your_admin_token_here"
