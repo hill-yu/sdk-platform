@@ -5,6 +5,12 @@
       <p class="version">{{ configs.published?.version || "暂无发布版本" }}</p>
       <p class="muted">发布时间：{{ configs.published?.publish_at || "未发布" }}</p>
       <p class="muted">{{ configs.published?.cdn_url || "等待发布" }}</p>
+      <p v-if="configs.published?.cos_upload_status">
+        同步状态：
+        <span :class="syncClass(configs.published.cos_upload_status)">
+          {{ syncLabel(configs.published.cos_upload_status) }}
+        </span>
+      </p>
     </section>
 
     <p v-if="errorMessage" class="feedback error">{{ errorMessage }}</p>
@@ -27,6 +33,9 @@
           >
             <strong>{{ item.version }}</strong>
             <span>{{ item.status }}</span>
+            <span v-if="item.cos_upload_status" :class="['sync-badge', syncClass(item.cos_upload_status)]">
+              {{ syncLabel(item.cos_upload_status) }}
+            </span>
           </button>
         </div>
       </section>
@@ -161,6 +170,24 @@ async function rollbackCurrent() {
 }
 
 onMounted(loadConfigs);
+
+function syncLabel(status: string): string {
+  switch (status) {
+    case "success": return "已同步";
+    case "pending": return "同步中";
+    case "failed": return "同步失败";
+    default: return status;
+  }
+}
+
+function syncClass(status: string): string {
+  switch (status) {
+    case "success": return "sync-success";
+    case "pending": return "sync-pending";
+    case "failed": return "sync-failed";
+    default: return "";
+  }
+}
 </script>
 
 <style scoped>
@@ -271,6 +298,27 @@ onMounted(loadConfigs);
 
 .primary {
   background: linear-gradient(135deg, rgba(214, 140, 69, 0.92), rgba(182, 98, 43, 0.92));
+}
+
+.sync-badge {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.sync-success {
+  background: rgba(83, 168, 123, 0.2);
+  color: #8fe3b2;
+}
+
+.sync-pending {
+  background: rgba(214, 170, 69, 0.2);
+  color: #f0d080;
+}
+
+.sync-failed {
+  background: rgba(209, 89, 89, 0.2);
+  color: #ffb0a8;
 }
 
 @media (max-width: 1000px) {

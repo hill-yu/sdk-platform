@@ -181,6 +181,7 @@ def _serialize_config(config: SdkConfig | None) -> dict[str, Any] | None:
         "published_by": config.published_by,
         "cos_key": config.cos_key,
         "cdn_url": config.cdn_url,
+        "cos_upload_status": config.cos_upload_status,
         "change_log": config.change_log,
         "created_at": config.created_at.isoformat() if config.created_at else None,
         "updated_at": config.updated_at.isoformat() if config.updated_at else None,
