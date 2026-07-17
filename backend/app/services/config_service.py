@@ -108,6 +108,8 @@ async def publish_config(db: AsyncSession, config_id: int, published_by: str) ->
         logger.info("配置发布完成: version=%s", version)
     except Exception:
         logger.exception("数据库提交失败，COS已更新: version=%s", version)
+        # rollback 前保存 ID（避免 rollback 后 expire 导致 MissingGreenlet）
+        config_id = config.id
         # ① 立即 rollback 原事务，释放 advisory lock + 行锁
         await db.rollback()
         # ② 独立 session 持久化失败状态
@@ -115,13 +117,13 @@ async def publish_config(db: AsyncSession, config_id: int, published_by: str) ->
         try:
             async with async_session_factory() as recovery_session:
                 async with recovery_session.begin():
-                    cfg = await recovery_session.get(SdkConfig, config.id)
+                    cfg = await recovery_session.get(SdkConfig, config_id)
                     if cfg:
                         cfg.cos_upload_status = "failed"
                         cfg.change_log = (cfg.change_log or "") + f"\n[COS_UPLOADED_DB_FAILED] version={version}"
-            logger.info("失败状态已持久化: config_id=%d, version=%s", config.id, version)
+            logger.info("失败状态已持久化: config_id=%d, version=%s", config_id, version)
         except Exception as recovery_error:
-            logger.critical("恢复写入也失败! 双重故障: config_id=%d, recovery_error=%s", config.id, recovery_error)
+            logger.critical("恢复写入也失败! 双重故障: config_id=%d, recovery_error=%s", config_id, recovery_error)
         raise HTTPException(
             status_code=500,
             detail="配置已上传CDN但数据库状态更新失败，系统已记录，请联系管理员检查"
@@ -180,6 +182,8 @@ async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by
         logger.info("配置发布完成: version=%s", version)
     except Exception:
         logger.exception("数据库提交失败，COS已更新: version=%s", version)
+        # rollback 前保存 ID（避免 rollback 后 expire 导致 MissingGreenlet）
+        config_id = config.id
         # ① 立即 rollback 原事务，释放 advisory lock + 行锁
         await db.rollback()
         # ② 独立 session 持久化失败状态
@@ -187,13 +191,13 @@ async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by
         try:
             async with async_session_factory() as recovery_session:
                 async with recovery_session.begin():
-                    cfg = await recovery_session.get(SdkConfig, config.id)
+                    cfg = await recovery_session.get(SdkConfig, config_id)
                     if cfg:
                         cfg.cos_upload_status = "failed"
                         cfg.change_log = (cfg.change_log or "") + f"\n[COS_UPLOADED_DB_FAILED] version={version}"
-            logger.info("失败状态已持久化: config_id=%d, version=%s", config.id, version)
+            logger.info("失败状态已持久化: config_id=%d, version=%s", config_id, version)
         except Exception as recovery_error:
-            logger.critical("恢复写入也失败! 双重故障: config_id=%d, recovery_error=%s", config.id, recovery_error)
+            logger.critical("恢复写入也失败! 双重故障: config_id=%d, recovery_error=%s", config_id, recovery_error)
         raise HTTPException(
             status_code=500,
             detail="配置已上传CDN但数据库状态更新失败，系统已记录，请联系管理员检查"
