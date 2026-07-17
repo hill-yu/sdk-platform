@@ -118,12 +118,16 @@ async def publish_config(db: AsyncSession, config_id: int, published_by: str) ->
             async with async_session_factory() as recovery_session:
                 async with recovery_session.begin():
                     cfg = await recovery_session.get(SdkConfig, config_id)
-                    if cfg:
-                        cfg.cos_upload_status = "failed"
-                        cfg.change_log = (cfg.change_log or "") + f"\n[COS_UPLOADED_DB_FAILED] version={version}"
-            logger.info("失败状态已持久化: config_id=%d, version=%s", config_id, version)
+                    if not cfg:
+                        logger.error("恢复失败: config_id=%d 不存在", config_id)
+                        raise HTTPException(500, "配置记录丢失，请联系管理员")
+                    cfg.cos_upload_status = "failed"
+            logger.info("失败状态已持久化: config_id=%d", config_id)
+        except HTTPException:
+            raise
         except Exception as recovery_error:
-            logger.critical("恢复写入也失败! 双重故障: config_id=%d, recovery_error=%s", config_id, recovery_error)
+            logger.critical("恢复写入失败! 双重故障: config_id=%d, error=%s", config_id, recovery_error)
+            raise HTTPException(500, "系统故障已记录，请联系管理员")
         raise HTTPException(
             status_code=500,
             detail="配置已上传CDN但数据库状态更新失败，系统已记录，请联系管理员检查"
@@ -192,12 +196,16 @@ async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by
             async with async_session_factory() as recovery_session:
                 async with recovery_session.begin():
                     cfg = await recovery_session.get(SdkConfig, config_id)
-                    if cfg:
-                        cfg.cos_upload_status = "failed"
-                        cfg.change_log = (cfg.change_log or "") + f"\n[COS_UPLOADED_DB_FAILED] version={version}"
-            logger.info("失败状态已持久化: config_id=%d, version=%s", config_id, version)
+                    if not cfg:
+                        logger.error("恢复失败: config_id=%d 不存在", config_id)
+                        raise HTTPException(500, "配置记录丢失，请联系管理员")
+                    cfg.cos_upload_status = "failed"
+            logger.info("失败状态已持久化: config_id=%d", config_id)
+        except HTTPException:
+            raise
         except Exception as recovery_error:
-            logger.critical("恢复写入也失败! 双重故障: config_id=%d, recovery_error=%s", config_id, recovery_error)
+            logger.critical("恢复写入失败! 双重故障: config_id=%d, error=%s", config_id, recovery_error)
+            raise HTTPException(500, "系统故障已记录，请联系管理员")
         raise HTTPException(
             status_code=500,
             detail="配置已上传CDN但数据库状态更新失败，系统已记录，请联系管理员检查"
