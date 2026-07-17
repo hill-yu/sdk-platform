@@ -4,12 +4,27 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.core.database import get_db
+
 
 # ── SDK API (1MB 限制) ──────────────────────────────────────────
 
 
+@pytest.fixture
+def db_override():
+    """Mock get_db 为 StubWriteSession，避免测试中连接真实 PostgreSQL"""
+    from tests.conftest import StubWriteSession, override_write_db
+
+    session = StubWriteSession()
+    from app.sdk_main import app as sdk_app
+
+    sdk_app.dependency_overrides[get_db] = override_write_db(session)
+    yield session
+    sdk_app.dependency_overrides.clear()
+
+
 @pytest.mark.anyio
-async def test_sdk_normal_request_passes():
+async def test_sdk_normal_request_passes(db_override):
     """正常大小的请求应该通过"""
     from app.sdk_main import app as sdk_app
 

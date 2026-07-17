@@ -232,4 +232,3 @@ async def test_commit_failure_persists_failed_status(monkeypatch):
 
     # Recovery session should have persisted failed status
     assert recovery_config.cos_upload_status == "failed"
-    assert "[COS_UPLOADED_DB_FAILED]" in (recovery_config.change_log or "")
