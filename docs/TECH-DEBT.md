@@ -25,5 +25,5 @@
 - 位置: backend/tests/
 - 问题: 当前测试使用 mock/内存替身，advisory lock、分区表、物化视图刷新等行为未在真实 PostgreSQL 上验证
 - 建议: 后续迭代增加基于真实 PostgreSQL（本地实例或 testcontainers）的集成测试，覆盖发布/回滚并发、对账一致性等关键路径
-- 优先级: Medium
+- 优先级: High
 - 创建日期: 2026-07-16
