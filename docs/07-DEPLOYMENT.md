@@ -160,6 +160,10 @@ sudo vim /etc/nginx/sites-available/sdk-platform
 ```
 
 ```nginx
+# HTTP 层（/etc/nginx/nginx.conf 的 http 块中添加）
+limit_req_zone $binary_remote_addr zone=sdk_api:10m rate=10r/s;
+limit_conn_zone $binary_remote_addr zone=sdk_conn:10m;
+
 server {
     listen 80;
     server_name your-domain.com;
@@ -168,8 +172,10 @@ server {
     root /www/wwwroot/sdk-platform/frontend/dist;
     index index.html;
 
-    # SDK API → :8100
+    # SDK API → :8100（含限流保护）
     location /api/v1/ {
+        limit_req zone=sdk_api burst=5 nodelay;
+        limit_conn sdk_conn 10;
         client_max_body_size 1m;
         proxy_pass http://127.0.0.1:8100;
         proxy_set_header Host $host;
