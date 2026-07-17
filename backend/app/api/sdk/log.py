@@ -5,7 +5,7 @@ POST /api/v1/log
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,17 +63,9 @@ async def report_log(
             await db.execute(stmt)
             accepted = len(values)
         except Exception:
-            logger.exception("批量写入日志事件失败，app_id=%s, count=%d", body.app_id, len(values))
-            rejected = len(values)
-            accepted = 0
-
-    # 全部失败
-    if accepted == 0 and rejected > 0:
-        return {
-            "code": 5001,
-            "message": "all_events_rejected",
-            "data": {"accepted": 0, "rejected": rejected},
-        }
+            logger.exception("批量写入失败，app_id=%s", body.app_id)
+            await db.rollback()
+            raise HTTPException(status_code=500, detail="数据库写入失败")
 
     # 部分成功
     if rejected > 0:
