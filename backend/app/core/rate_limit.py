@@ -35,3 +35,6 @@ class SimpleRateLimiter:
                 oldest = sorted(self._store.keys(), key=lambda k: self._store[k][0])[:-10000]
                 for k in oldest:
                     del self._store[k]
+
+
+write_limiter = SimpleRateLimiter(max_requests=10, window_seconds=1)
