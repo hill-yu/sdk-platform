@@ -66,6 +66,10 @@ async def report_click(
             "user_agent": user_agent,
         })
 
+    if not values:
+        # 全部事件被校验拒绝 → 返回 4001
+        return {"code": 4001, "message": "all_events_rejected", "data": {"accepted": 0, "rejected": rejected}}
+
     if values:
         try:
             stmt = pg_insert(SdkEvent).values(values)
