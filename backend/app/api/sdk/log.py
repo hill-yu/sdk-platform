@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.rate_limit import SimpleRateLimiter
 from app.models.event import SdkEvent
 from app.schemas.sdk_schemas import LogReportRequest
 
@@ -17,12 +18,15 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["SDK - Log"])
 
+write_limiter = SimpleRateLimiter(max_requests=10, window_seconds=1)
+
 
 @router.post("/api/v1/log")
 async def report_log(
     request: Request,
     body: LogReportRequest,
     db: AsyncSession = Depends(get_db),
+    _rate=Depends(write_limiter),
 ):
     """批量上报日志事件"""
     accepted = 0

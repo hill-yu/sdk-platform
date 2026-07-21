@@ -16,5 +16,5 @@ class SimpleRateLimiter:
         now = time.time()
         self._store[ip] = [t for t in self._store[ip] if now - t < self.window]
         if len(self._store[ip]) >= self.max:
-            raise HTTPException(429, "Too many requests")
+            raise HTTPException(status_code=429, detail="Too many requests")
         self._store[ip].append(now)
