@@ -18,3 +18,11 @@ class SimpleRateLimiter:
         if len(self._store[ip]) >= self.max:
             raise HTTPException(status_code=429, detail="Too many requests")
         self._store[ip].append(now)
+
+        # 每 1000 次请求清理一次全部过期 IP
+        self._cleanup_counter = getattr(self, '_cleanup_counter', 0) + 1
+        if self._cleanup_counter >= 1000:
+            self._cleanup_counter = 0
+            expired = [ip for ip, times in self._store.items() if not times]
+            for ip in expired:
+                del self._store[ip]
