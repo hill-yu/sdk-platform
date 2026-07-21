@@ -103,13 +103,12 @@ async def publish_config(db: AsyncSession, config_id: int, published_by: str) ->
     config.cdn_url = _cdn_url(config.cos_key)
 
     # COS 上传成功后立即 commit
+    config_id = config.id  # commit 前缓存，避免 rollback 后 ORM 状态不确定
     try:
         await db.commit()
         logger.info("配置发布完成: version=%s", version)
     except Exception:
         logger.exception("数据库提交失败，COS已更新: version=%s", version)
-        # rollback 前保存 ID（避免 rollback 后 expire 导致 MissingGreenlet）
-        config_id = config.id
         # ① 立即 rollback 原事务，释放 advisory lock + 行锁
         await db.rollback()
         # ② 独立 session 持久化失败状态
@@ -181,13 +180,12 @@ async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by
     config.cdn_url = _cdn_url(cos_key)
 
     # COS 上传成功后立即 commit
+    config_id = config.id  # commit 前缓存，避免 rollback 后 ORM 状态不确定
     try:
         await db.commit()
         logger.info("配置发布完成: version=%s", version)
     except Exception:
         logger.exception("数据库提交失败，COS已更新: version=%s", version)
-        # rollback 前保存 ID（避免 rollback 后 expire 导致 MissingGreenlet）
-        config_id = config.id
         # ① 立即 rollback 原事务，释放 advisory lock + 行锁
         await db.rollback()
         # ② 独立 session 持久化失败状态
