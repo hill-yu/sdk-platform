@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,7 +67,9 @@ async def report_click(
 
     if not values:
         # 全部事件被校验拒绝 → 返回 4001
-        return {"code": 4001, "message": "all_events_rejected", "data": {"accepted": 0, "rejected": rejected}}
+        return JSONResponse(status_code=422, content={
+            "code": 4001, "message": "all_events_rejected", "data": {"accepted": 0, "rejected": rejected}
+        })
 
     if values:
         try:
