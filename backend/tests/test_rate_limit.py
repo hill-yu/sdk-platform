@@ -72,7 +72,7 @@ def test_all_events_rejected_returns_error_code(client):
                 ],
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 422
         body = resp.json()
         assert body["code"] == 4001
         assert body["message"] == "all_events_rejected"
