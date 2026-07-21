@@ -23,6 +23,15 @@ class SimpleRateLimiter:
         self._cleanup_counter = getattr(self, '_cleanup_counter', 0) + 1
         if self._cleanup_counter >= 1000:
             self._cleanup_counter = 0
-            expired = [ip for ip, times in self._store.items() if not times]
-            for ip in expired:
-                del self._store[ip]
+            # 清理所有 IP 的过期时间戳，而非仅删空列表
+            for key, times in list(self._store.items()):
+                active = [t for t in times if now - t < self.window]
+                if active:
+                    self._store[key] = active
+                else:
+                    del self._store[key]
+            # 达到最大容量时删除最旧的键（保留最多 10000 个 IP）
+            if len(self._store) > 10000:
+                oldest = sorted(self._store.keys(), key=lambda k: self._store[k][0])[:-10000]
+                for k in oldest:
+                    del self._store[k]
