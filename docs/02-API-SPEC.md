@@ -211,7 +211,7 @@ SDK 批量上报用户点击事件。
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| app_id | string | 是 | 应用标识 |
+| app_id | string | 是 | 应用标识；匿名采集阶段服务端仅校验长度，不校验是否真实存在或启用 |
 | device_id | string | 是 | 设备唯一 ID |
 | sdk_version | string | 否 | SDK 版本号 |
 | session_id | string | 否 | 会话 ID |
@@ -225,6 +225,8 @@ SDK 批量上报用户点击事件。
 
 #### 响应
 
+成功或部分成功：
+
 ```json
 {
   "code": 0,
@@ -234,6 +236,22 @@ SDK 批量上报用户点击事件。
   }
 }
 ```
+
+全部事件因业务规则被拒绝：
+
+```json
+HTTP/1.1 422 Unprocessable Entity
+{
+  "code": 4001,
+  "message": "all_events_rejected",
+  "data": {
+    "accepted": 0,
+    "rejected": 2
+  }
+}
+```
+
+限流：click 与 log 写入接口共享同一个 IP 配额，合计超过 10 次/秒/IP 时返回 HTTP 429。
 
 #### Codex 实现要点
 
@@ -245,9 +263,10 @@ SDK 批量上报用户点击事件。
 # 3. 合法事件逐条构造 INSERT，event_type = each_event.type（或统一为 'click'）
 # 4. payload = 整条 event 对象的 JSON（含 type/page/element 等均存入 payload JSONB）
 # 5. server_ts = NOW(), client_ts = to_timestamp(timestamp/1000)
-# 6. 数据库写入异常 → 返回 500，不吞错误
-# 7. 仅在全部成功时返回 {"code":0, "message":"ok", "data":{"accepted":N}}
-# 8. 部分成功场景返回 {"code":0, "message":"partial_success", "data":{"accepted":N, "rejected":M}}
+# 6. 全部事件被拒绝 → 返回 HTTP 422 + {"code":4001,"message":"all_events_rejected"}
+# 7. 数据库写入异常 → 返回 500，不吞错误
+# 8. 仅在全部成功时返回 {"code":0, "message":"ok", "data":{"accepted":N}}
+# 9. 部分成功场景返回 {"code":0, "message":"partial_success", "data":{"accepted":N, "rejected":M}}
 ```
 
 ---
@@ -288,7 +307,7 @@ SDK 批量上报日志。
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| app_id | string | 是 | 应用标识 |
+| app_id | string | 是 | 应用标识；匿名采集阶段服务端仅校验长度，不校验是否真实存在或启用 |
 | device_id | string | 是 | 设备唯一 ID |
 | sdk_version | string | 否 | SDK 版本号 |
 | logs | array | 是 | 日志数组，单次最多 100 条 |
@@ -310,6 +329,8 @@ SDK 批量上报日志。
 }
 ```
 
+限流：click 与 log 写入接口共享同一个 IP 配额，合计超过 10 次/秒/IP 时返回 HTTP 429。
+
 #### Codex 实现要点
 
 ```python
@@ -320,7 +341,6 @@ SDK 批量上报日志。
 # 3. payload = 整条 log 对象 JSONB（含 level/tag/message/extra）
 # 4. 数据库写入异常 → 返回 500
 # 5. 全部成功返回 {"code":0, "message":"ok", "data":{"accepted":N}}
-# 6. 部分成功返回 {"code":0, "message":"partial_success", "data":{"accepted":N, "rejected":M}}
 ```
 
 ---

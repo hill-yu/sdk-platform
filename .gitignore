@@ -10,3 +10,6 @@ frontend/dist/
 *.log
 *.out.log
 *.err.log
+
+# Claude/Codex agent intermediate files
+.claude/

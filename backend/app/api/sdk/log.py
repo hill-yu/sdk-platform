@@ -59,27 +59,13 @@ async def report_log(
             "user_agent": user_agent,
         })
 
-    if not values:
-        # 全部日志被校验拒绝 → 返回 4001
-        return {"code": 4001, "message": "all_events_rejected", "data": {"accepted": 0, "rejected": rejected}}
+    try:
+        stmt = pg_insert(SdkEvent).values(values)
+        await db.execute(stmt)
+        accepted = len(values)
+    except Exception:
+        logger.exception("批量写入失败，app_id=%s", body.app_id)
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="数据库写入失败")
 
-    if values:
-        try:
-            stmt = pg_insert(SdkEvent).values(values)
-            await db.execute(stmt)
-            accepted = len(values)
-        except Exception:
-            logger.exception("批量写入失败，app_id=%s", body.app_id)
-            await db.rollback()
-            raise HTTPException(status_code=500, detail="数据库写入失败")
-
-    # 部分成功
-    if rejected > 0:
-        return {
-            "code": 0,
-            "message": "partial_success",
-            "data": {"accepted": accepted, "rejected": rejected},
-        }
-
-    # 全部成功
     return {"code": 0, "message": "ok", "data": {"accepted": accepted, "rejected": 0}}
