@@ -10,7 +10,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """应用配置，从环境变量/.env 读取"""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",  # 允许 .env 中有未在 Settings 中定义的变量（如 CORS_ORIGINS 被 admin_main 使用）
+    )
 
     APP_NAME: str = "SDK Platform"
     DEBUG: bool = False
