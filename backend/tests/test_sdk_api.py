@@ -129,6 +129,31 @@ def test_config_latest_returns_published_config_json(client):
     }
 
 
+def test_config_latest_returns_config_by_type(client):
+    published = SimpleNamespace(
+        version="1.0.11",
+        publish_at=datetime(2026, 6, 30, 10, 0, tzinfo=timezone.utc),
+        cdn_url="https://sdk.deeppopgame.xyz/api/v1/config/latest",
+        config_data={
+            "mainConfig": {"name": "main"},
+            "newTouchConfig": {"name": "touch"},
+            "newTextRuleConfig": {"name": "text"},
+        },
+    )
+    client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
+
+    main_response = client.get("/api/v1/config/latest")
+    touch_response = client.get("/api/v1/config/latest?type=new_touch")
+    text_response = client.get("/api/v1/config/latest?type=new_text_rule")
+
+    assert main_response.status_code == 200
+    assert touch_response.status_code == 200
+    assert text_response.status_code == 200
+    assert main_response.json()["config"] == {"name": "main"}
+    assert touch_response.json()["config"] == {"name": "touch"}
+    assert text_response.json()["config"] == {"name": "text"}
+
+
 def test_config_meta_returns_local_urls_in_local_delivery_mode(client, monkeypatch):
     monkeypatch.setenv("CONFIG_DELIVERY_MODE", "local")
     monkeypatch.setenv("CONFIG_META_LOCAL_BASE_URL", "https://sdk.deeppopgame.xyz")

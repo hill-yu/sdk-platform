@@ -28,6 +28,23 @@ def _local_config_url(query: str = "") -> str:
     return f"{settings.CONFIG_META_LOCAL_BASE_URL.rstrip('/')}/api/v1/config/latest{query}"
 
 
+def _select_config_payload(config_data: dict, config_type: str | None) -> dict:
+    if not isinstance(config_data, dict):
+        return config_data
+
+    type_to_key = {
+        None: "mainConfig",
+        "": "mainConfig",
+        "main": "mainConfig",
+        "new_touch": "newTouchConfig",
+        "new_text_rule": "newTextRuleConfig",
+    }
+    selected_key = type_to_key.get(config_type)
+    if selected_key and selected_key in config_data:
+        return config_data[selected_key]
+    return config_data
+
+
 @router.get("/api/v1/config/meta")
 async def get_config_meta(
     request: Request,
@@ -122,5 +139,5 @@ async def get_config_latest(
     return {
         "version": published.version,
         "updated_at": published.publish_at.isoformat() if published.publish_at else None,
-        "config": published.config_data,
+        "config": _select_config_payload(published.config_data, type),
     }
