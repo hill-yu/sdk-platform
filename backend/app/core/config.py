@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     COS_BUCKET: str = "sdk-config-bucket"
     CDN_BASE_URL: str = "https://cdn.example.com"
 
+    # SDK 配置元信息接口开关与 CDN 地址
+    CONFIG_META_IS_OPEN: bool = True
+    CONFIG_META_IS_NEWS_TOUCH: bool = True
+    CONFIG_META_IS_NEW_TEXT_RULE: bool = True
+    CONFIG_META_CDN_URL: str = "https://cdnversion.deeppopgame.xyz/config/latest.json"
+    CONFIG_META_CDN_URL2: str = "https://cdnNewtouch.deeppopgame.xyz/config/latest.json"
+    CONFIG_META_CDN_URL3: str = "https://cdnNewTextRule.deeppopgame.xyz/config/latest.json"
+
     LOG_LEVEL: str = "INFO"
 
     @property

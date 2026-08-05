@@ -1,14 +1,15 @@
 """
-SDK 交互 API — 配置元信息获取接口
-GET /api/v1/config/meta
+SDK 交互 API：配置元信息获取接口 GET /api/v1/config/meta
 
-注意：此接口仅返回配置元信息（version + updated_at + cdn_url），
-完整配置内容由 SDK 直接从 CDN 拉取。
+注意：此接口仅返回配置元信息与 CDN 地址，不返回完整配置 JSON。
+完整配置内容由 SDK 根据开关直接从对应 CDN 拉取。
 """
-from fastapi import APIRouter, Query, Request, Depends
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import get_settings
 from app.core.database import get_db_no_commit
 from app.models.config import SdkConfig
 
@@ -18,20 +19,20 @@ router = APIRouter(tags=["SDK - Config"])
 @router.get("/api/v1/config/meta")
 async def get_config_meta(
     request: Request,
-    app_id: str = Query(..., description="应用 ID"),
+    app_id: str | None = Query(None, description="应用 ID（可选，仅用于兼容旧 SDK）"),
     config_version: str = Query("", description="SDK 当前缓存配置版本号"),
     db: AsyncSession = Depends(get_db_no_commit),
 ):
     """
     配置元信息获取接口。
 
-    SDK 获取当前已发布配置的版本信息，用于判断是否需要重新从 CDN 拉取配置。
+    SDK 获取当前已发布配置的版本信息，并按返回的开关决定是否从对应 CDN 拉取 JSON。
     此接口不返回完整 config JSON。
     """
     result = await db.execute(
         select(SdkConfig).where(
             SdkConfig.status == "published",
-            SdkConfig.cos_upload_status == "success"
+            SdkConfig.cos_upload_status == "success",
         ).limit(1)
     )
     published: SdkConfig | None = result.scalar_one_or_none()
@@ -48,17 +49,21 @@ async def get_config_meta(
 
     etag_value = f'"{published.version}"'
 
-    # 检查 If-None-Match 头
     if_none_match = request.headers.get("If-None-Match", "")
     if if_none_match == etag_value or config_version == published.version:
         headers = {"ETag": etag_value, "Cache-Control": "max-age=300"}
         return Response(status_code=304, headers=headers)
 
-    if not published.cdn_url:
-        return JSONResponse(status_code=500, content={
-            "code": 2, "message": "配置已发布但 CDN 地址缺失，请联系管理员", "data": None
-        })
-    cdn_url = published.cdn_url
+    settings = get_settings()
+    if not settings.CONFIG_META_CDN_URL:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "code": 2,
+                "message": "配置已发布但主 CDN 地址缺失，请检查环境变量 CONFIG_META_CDN_URL",
+                "data": None,
+            },
+        )
 
     return JSONResponse(
         status_code=200,
@@ -67,7 +72,12 @@ async def get_config_meta(
             "data": {
                 "version": published.version,
                 "updated_at": published.publish_at.isoformat() if published.publish_at else None,
-                "cdn_url": cdn_url,
+                "isOpen": settings.CONFIG_META_IS_OPEN,
+                "isNewsTouch": settings.CONFIG_META_IS_NEWS_TOUCH,
+                "isNewTextRule": settings.CONFIG_META_IS_NEW_TEXT_RULE,
+                "cdn_url": settings.CONFIG_META_CDN_URL,
+                "cdn_url2": settings.CONFIG_META_CDN_URL2,
+                "cdn_url3": settings.CONFIG_META_CDN_URL3,
             },
         },
         headers={

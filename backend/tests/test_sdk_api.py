@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+from app.core.config import get_settings
 from app.core.database import get_db, get_db_no_commit
 
 from tests.conftest import (
@@ -74,25 +75,38 @@ def test_config_meta_returns_304_when_etag_matches_published_version(client):
     assert response.headers["etag"] == '"20260630_v3"'
 
 
-def test_config_meta_returns_only_metadata_when_new_version_exists(client):
+def test_config_meta_returns_environment_configured_metadata_without_required_params(client, monkeypatch):
+    monkeypatch.setenv("CONFIG_META_IS_OPEN", "true")
+    monkeypatch.setenv("CONFIG_META_IS_NEWS_TOUCH", "true")
+    monkeypatch.setenv("CONFIG_META_IS_NEW_TEXT_RULE", "true")
+    monkeypatch.setenv("CONFIG_META_CDN_URL", "https://cdnversion.deeppopgame.xyz/config/latest.json")
+    monkeypatch.setenv("CONFIG_META_CDN_URL2", "https://cdnNewtouch.deeppopgame.xyz/config/latest.json")
+    monkeypatch.setenv("CONFIG_META_CDN_URL3", "https://cdnNewTextRule.deeppopgame.xyz/config/latest.json")
+    get_settings.cache_clear()
     published = SimpleNamespace(
-        version="20260630_v3",
+        version="1.0.11",
         publish_at=datetime(2026, 6, 30, 10, 0, tzinfo=timezone.utc),
         cdn_url="https://cdn.test.local/config/latest.json",
     )
     client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
 
-    response = client.get("/api/v1/config/meta", params={"app_id": "demo"})
+    response = client.get("/api/v1/config/meta")
 
     assert response.status_code == 200
     assert response.json() == {
         "code": 0,
         "data": {
-            "version": "20260630_v3",
+            "version": "1.0.11",
             "updated_at": "2026-06-30T10:00:00+00:00",
-            "cdn_url": "https://cdn.test.local/config/latest.json",
+            "isOpen": True,
+            "isNewsTouch": True,
+            "isNewTextRule": True,
+            "cdn_url": "https://cdnversion.deeppopgame.xyz/config/latest.json",
+            "cdn_url2": "https://cdnNewtouch.deeppopgame.xyz/config/latest.json",
+            "cdn_url3": "https://cdnNewTextRule.deeppopgame.xyz/config/latest.json",
         },
     }
+    get_settings.cache_clear()
 
 
 def test_click_returns_partial_success_when_some_events_are_rejected(client):
