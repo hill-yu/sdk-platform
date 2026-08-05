@@ -83,6 +83,25 @@ def test_config_meta_returns_environment_configured_metadata_without_required_pa
     monkeypatch.setenv("CONFIG_META_CDN_URL2", "https://cdnNewtouch.deeppopgame.xyz/config/latest.json")
     monkeypatch.setenv("CONFIG_META_CDN_URL3", "https://cdnNewTextRule.deeppopgame.xyz/config/latest.json")
     get_settings.cache_clear()
+
+
+def test_config_latest_returns_published_config_json(client):
+    published = SimpleNamespace(
+        version="1.0.11",
+        publish_at=datetime(2026, 6, 30, 10, 0, tzinfo=timezone.utc),
+        cdn_url="https://sdk.deeppopgame.xyz/api/v1/config/latest",
+        config_data={"features": {"demo": True}},
+    )
+    client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
+
+    response = client.get("/api/v1/config/latest")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "version": "1.0.11",
+        "updated_at": "2026-06-30T10:00:00+00:00",
+        "config": {"features": {"demo": True}},
+    }
     published = SimpleNamespace(
         version="1.0.11",
         publish_at=datetime(2026, 6, 30, 10, 0, tzinfo=timezone.utc),

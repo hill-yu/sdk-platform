@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     CONFIG_META_CDN_URL: str = "https://cdnversion.deeppopgame.xyz/config/latest.json"
     CONFIG_META_CDN_URL2: str = "https://cdnNewtouch.deeppopgame.xyz/config/latest.json"
     CONFIG_META_CDN_URL3: str = "https://cdnNewTextRule.deeppopgame.xyz/config/latest.json"
+    CONFIG_DELIVERY_MODE: str = "cos"
+    CONFIG_META_LOCAL_BASE_URL: str = "https://sdk.deeppopgame.xyz"
 
     LOG_LEVEL: str = "INFO"
 

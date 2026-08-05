@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any
-import logging
 
 from fastapi import HTTPException
 from sqlalchemy import desc, select, text, update
@@ -25,6 +25,15 @@ except Exception:  # pragma: no cover - import depends on optional runtime deps
 def _cdn_url(cos_key: str) -> str:
     settings = get_settings()
     return f"{settings.CDN_BASE_URL.rstrip('/')}/{cos_key}"
+
+
+def _is_local_delivery_mode() -> bool:
+    return get_settings().CONFIG_DELIVERY_MODE.lower() == "local"
+
+
+def _local_config_url(query: str = "") -> str:
+    settings = get_settings()
+    return f"{settings.CONFIG_META_LOCAL_BASE_URL.rstrip('/')}/api/v1/config/latest{query}"
 
 
 async def list_configs(db: AsyncSession) -> dict[str, Any]:
@@ -52,7 +61,7 @@ async def create_config(db: AsyncSession, config_data: dict[str, Any], change_lo
         config_data=config_data,
         status="draft",
         change_log=change_log,
-        cdn_url=_cdn_url("config/latest.json"),
+        cdn_url=_local_config_url() if _is_local_delivery_mode() else _cdn_url("config/latest.json"),
     )
     db.add(config)
     await db.flush()
@@ -77,7 +86,6 @@ async def publish_config(db: AsyncSession, config_id: int, published_by: str) ->
     if config is None or config.status != "draft":
         raise ValueError("只能发布草稿状态的配置")
 
-    # 获取发布排他锁
     result = await db.execute(text("SELECT pg_try_advisory_xact_lock(9999)"))
     if not result.scalar():
         raise HTTPException(status_code=409, detail="另一发布操作正在进行，请稍后重试")
@@ -85,12 +93,12 @@ async def publish_config(db: AsyncSession, config_id: int, published_by: str) ->
     version = datetime.now().strftime("%Y%m%d_v%H%M%S_%f")
     publish_data = {"version": version, "updated_at": datetime.now().isoformat(), "config": config.config_data}
     json_bytes = json.dumps(publish_data, ensure_ascii=False).encode()
+    local_delivery = _is_local_delivery_mode()
 
-    # ① 先上传 COS（版本文件 + latest.json），带重试
-    await _upload_with_retry(f"config/v{version}.json", json_bytes)
-    await _upload_with_retry("config/latest.json", json_bytes)
+    if not local_delivery:
+        await _upload_with_retry(f"config/v{version}.json", json_bytes)
+        await _upload_with_retry("config/latest.json", json_bytes)
 
-    # ② COS 成功 → 归档旧 + 当前变 published
     await db.execute(
         update(SdkConfig).where(SdkConfig.status == "published").values(status="archived")
     )
@@ -98,39 +106,11 @@ async def publish_config(db: AsyncSession, config_id: int, published_by: str) ->
     config.version = version
     config.publish_at = datetime.now()
     config.published_by = published_by
-    config.cos_key = f"config/v{version}.json"
+    config.cos_key = "local:config/latest.json" if local_delivery else f"config/v{version}.json"
     config.cos_upload_status = "success"
-    config.cdn_url = _cdn_url(config.cos_key)
+    config.cdn_url = _local_config_url() if local_delivery else _cdn_url(config.cos_key)
 
-    # COS 上传成功后立即 commit
-    config_id = config.id  # commit 前缓存，避免 rollback 后 ORM 状态不确定
-    try:
-        await db.commit()
-        logger.info("配置发布完成: version=%s", version)
-    except Exception:
-        logger.exception("数据库提交失败，COS已更新: version=%s", version)
-        # ① 立即 rollback 原事务，释放 advisory lock + 行锁
-        await db.rollback()
-        # ② 独立 session 持久化失败状态
-        from app.core.database import async_session_factory
-        try:
-            async with async_session_factory() as recovery_session:
-                async with recovery_session.begin():
-                    cfg = await recovery_session.get(SdkConfig, config_id)
-                    if not cfg:
-                        logger.error("恢复失败: config_id=%d 不存在", config_id)
-                        raise HTTPException(500, "配置记录丢失，请联系管理员")
-                    cfg.cos_upload_status = "failed"
-            logger.info("失败状态已持久化: config_id=%d", config_id)
-        except HTTPException:
-            raise
-        except Exception as recovery_error:
-            logger.critical("恢复写入失败! 双重故障: config_id=%d, error=%s", config_id, recovery_error)
-            raise HTTPException(500, "系统故障已记录，请联系管理员")
-        raise HTTPException(
-            status_code=500,
-            detail="配置已上传CDN但数据库状态更新失败，系统已记录，请联系管理员检查"
-        )
+    await _commit_publish(db, config.id, version)
 
     return {
         "version": version,
@@ -153,21 +133,18 @@ async def rollback_config(db: AsyncSession, config_id: int, published_by: str) -
 
 
 async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by: str) -> dict[str, Any]:
-    """从已有记录发布（用于回滚和首次发布），先COS后DB
-
-    调用方已持 advisory lock (9999)，此处不重复获取。
-    """
+    """从已有记录发布，用于回滚。"""
     is_rollback = config.status == "archived"
     version = datetime.now().strftime("%Y%m%d_v%H%M%S_%f")
-    cos_key = f"config/v{version}.json"
+    local_delivery = _is_local_delivery_mode()
+    cos_key = "local:config/latest.json" if local_delivery else f"config/v{version}.json"
 
-    # ① 先上传 COS，带重试
     publish_data = {"version": version, "updated_at": datetime.now().isoformat(), "config": config.config_data}
     json_bytes = json.dumps(publish_data, ensure_ascii=False).encode()
-    await _upload_with_retry(cos_key, json_bytes)
-    await _upload_with_retry("config/latest.json", json_bytes)
+    if not local_delivery:
+        await _upload_with_retry(cos_key, json_bytes)
+        await _upload_with_retry("config/latest.json", json_bytes)
 
-    # ② COS 成功 → 归档旧 + 当前变 published
     await db.execute(
         update(SdkConfig).where(SdkConfig.status == "published").values(status="archived")
     )
@@ -177,37 +154,9 @@ async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by
     config.published_by = published_by
     config.cos_key = cos_key
     config.cos_upload_status = "success"
-    config.cdn_url = _cdn_url(cos_key)
+    config.cdn_url = _local_config_url() if local_delivery else _cdn_url(cos_key)
 
-    # COS 上传成功后立即 commit
-    config_id = config.id  # commit 前缓存，避免 rollback 后 ORM 状态不确定
-    try:
-        await db.commit()
-        logger.info("配置发布完成: version=%s", version)
-    except Exception:
-        logger.exception("数据库提交失败，COS已更新: version=%s", version)
-        # ① 立即 rollback 原事务，释放 advisory lock + 行锁
-        await db.rollback()
-        # ② 独立 session 持久化失败状态
-        from app.core.database import async_session_factory
-        try:
-            async with async_session_factory() as recovery_session:
-                async with recovery_session.begin():
-                    cfg = await recovery_session.get(SdkConfig, config_id)
-                    if not cfg:
-                        logger.error("恢复失败: config_id=%d 不存在", config_id)
-                        raise HTTPException(500, "配置记录丢失，请联系管理员")
-                    cfg.cos_upload_status = "failed"
-            logger.info("失败状态已持久化: config_id=%d", config_id)
-        except HTTPException:
-            raise
-        except Exception as recovery_error:
-            logger.critical("恢复写入失败! 双重故障: config_id=%d, error=%s", config_id, recovery_error)
-            raise HTTPException(500, "系统故障已记录，请联系管理员")
-        raise HTTPException(
-            status_code=500,
-            detail="配置已上传CDN但数据库状态更新失败，系统已记录，请联系管理员检查"
-        )
+    await _commit_publish(db, config.id, version)
 
     return {
         "version": version,
@@ -218,8 +167,32 @@ async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by
     }
 
 
+async def _commit_publish(db: AsyncSession, config_id: int, version: str) -> None:
+    try:
+        await db.commit()
+        logger.info("配置发布完成: version=%s", version)
+    except Exception:
+        logger.exception("数据库提交失败，配置对象可能已更新: version=%s", version)
+        await db.rollback()
+        from app.core.database import async_session_factory
+
+        try:
+            async with async_session_factory() as recovery_session:
+                async with recovery_session.begin():
+                    cfg = await recovery_session.get(SdkConfig, config_id)
+                    if not cfg:
+                        raise HTTPException(500, "配置记录丢失，请联系管理员")
+                    cfg.cos_upload_status = "failed"
+        except HTTPException:
+            raise
+        except Exception as recovery_error:
+            logger.critical("恢复写入失败: config_id=%d, error=%s", config_id, recovery_error)
+            raise HTTPException(500, "系统故障已记录，请联系管理员")
+        raise HTTPException(status_code=500, detail="配置已上传 CDN 但数据库状态更新失败，请联系管理员检查")
+
+
 async def _upload_with_retry(cos_key: str, json_bytes: bytes, max_retries: int = 2):
-    """上传配置到 COS，失败自动重试"""
+    """上传配置到 COS，失败自动重试。"""
     for attempt in range(max_retries + 1):
         try:
             await asyncio.to_thread(_upload_config_payload, cos_key, json_bytes)
@@ -231,7 +204,7 @@ async def _upload_with_retry(cos_key: str, json_bytes: bytes, max_retries: int =
 
 
 def _upload_config_payload(cos_key: str, json_bytes: bytes) -> str:
-    """上传配置到 COS（同步函数，由调用方通过 to_thread 执行）"""
+    """同步上传配置到 COS，由调用方通过 to_thread 执行。"""
     settings = get_settings()
 
     if not settings.COS_SECRET_ID or not settings.COS_SECRET_KEY or not settings.COS_BUCKET:
