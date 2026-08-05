@@ -76,6 +76,7 @@ def test_config_meta_returns_304_when_etag_matches_published_version(client):
 
 
 def test_config_meta_returns_environment_configured_metadata_without_required_params(client, monkeypatch):
+    monkeypatch.setenv("CONFIG_DELIVERY_MODE", "cos")
     monkeypatch.setenv("CONFIG_META_IS_OPEN", "true")
     monkeypatch.setenv("CONFIG_META_IS_NEWS_TOUCH", "true")
     monkeypatch.setenv("CONFIG_META_IS_NEW_TEXT_RULE", "true")
@@ -83,25 +84,6 @@ def test_config_meta_returns_environment_configured_metadata_without_required_pa
     monkeypatch.setenv("CONFIG_META_CDN_URL2", "https://cdnNewtouch.deeppopgame.xyz/config/latest.json")
     monkeypatch.setenv("CONFIG_META_CDN_URL3", "https://cdnNewTextRule.deeppopgame.xyz/config/latest.json")
     get_settings.cache_clear()
-
-
-def test_config_latest_returns_published_config_json(client):
-    published = SimpleNamespace(
-        version="1.0.11",
-        publish_at=datetime(2026, 6, 30, 10, 0, tzinfo=timezone.utc),
-        cdn_url="https://sdk.deeppopgame.xyz/api/v1/config/latest",
-        config_data={"features": {"demo": True}},
-    )
-    client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
-
-    response = client.get("/api/v1/config/latest")
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "version": "1.0.11",
-        "updated_at": "2026-06-30T10:00:00+00:00",
-        "config": {"features": {"demo": True}},
-    }
     published = SimpleNamespace(
         version="1.0.11",
         publish_at=datetime(2026, 6, 30, 10, 0, tzinfo=timezone.utc),
@@ -125,6 +107,45 @@ def test_config_latest_returns_published_config_json(client):
             "cdn_url3": "https://cdnNewTextRule.deeppopgame.xyz/config/latest.json",
         },
     }
+    get_settings.cache_clear()
+
+
+def test_config_latest_returns_published_config_json(client):
+    published = SimpleNamespace(
+        version="1.0.11",
+        publish_at=datetime(2026, 6, 30, 10, 0, tzinfo=timezone.utc),
+        cdn_url="https://sdk.deeppopgame.xyz/api/v1/config/latest",
+        config_data={"features": {"demo": True}},
+    )
+    client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
+
+    response = client.get("/api/v1/config/latest")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "version": "1.0.11",
+        "updated_at": "2026-06-30T10:00:00+00:00",
+        "config": {"features": {"demo": True}},
+    }
+
+
+def test_config_meta_returns_local_urls_in_local_delivery_mode(client, monkeypatch):
+    monkeypatch.setenv("CONFIG_DELIVERY_MODE", "local")
+    monkeypatch.setenv("CONFIG_META_LOCAL_BASE_URL", "https://sdk.deeppopgame.xyz")
+    get_settings.cache_clear()
+    published = SimpleNamespace(
+        version="1.0.11",
+        publish_at=datetime(2026, 6, 30, 10, 0, tzinfo=timezone.utc),
+        cdn_url="https://sdk.deeppopgame.xyz/api/v1/config/latest",
+    )
+    client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
+
+    response = client.get("/api/v1/config/meta")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["cdn_url"] == "https://sdk.deeppopgame.xyz/api/v1/config/latest"
+    assert response.json()["data"]["cdn_url2"] == "https://sdk.deeppopgame.xyz/api/v1/config/latest?type=new_touch"
+    assert response.json()["data"]["cdn_url3"] == "https://sdk.deeppopgame.xyz/api/v1/config/latest?type=new_text_rule"
     get_settings.cache_clear()
 
 
