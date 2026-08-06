@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 # ── Inject valid test credentials before any app import ──────────────
 os.environ.setdefault("ADMIN_TOKEN", "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0")
+os.environ.setdefault("SDK_CONFIG_TOKEN", "sdk-config-test-token-1234567890")
 os.environ.setdefault("CDN_BASE_URL", "https://cdn.test.local")
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]

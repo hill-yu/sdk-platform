@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     SDK_API_PORT: int = 8100
     ADMIN_API_PORT: int = 8101
     ADMIN_TOKEN: str = Field(default="", repr=False)
+    SDK_CONFIG_TOKEN: str = Field(default="", repr=False)
 
     # 腾讯云 COS
     COS_SECRET_ID: str = ""

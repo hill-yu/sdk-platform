@@ -1,7 +1,9 @@
 """
 SDK 交互 API：配置元信息与配置 JSON 获取接口。
 """
-from fastapi import APIRouter, Depends, Query, Request
+import hmac
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +13,24 @@ from app.core.database import get_db_no_commit
 from app.models.config import SdkConfig
 
 router = APIRouter(tags=["SDK - Config"])
+
+
+async def require_sdk_config_token(authorization: str | None = Header(None)) -> None:
+    settings = get_settings()
+    expected_token = settings.SDK_CONFIG_TOKEN
+    if not expected_token:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="SDK_CONFIG_TOKEN 未配置",
+        )
+
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not hmac.compare_digest(token, expected_token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid SDK config token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 async def _get_published_config(db: AsyncSession) -> SdkConfig | None:
@@ -28,7 +48,7 @@ def _local_config_url(query: str = "") -> str:
     return f"{settings.CONFIG_META_LOCAL_BASE_URL.rstrip('/')}/api/v1/config/latest{query}"
 
 
-def _select_config_payload(config_data: dict, config_type: str | None) -> dict:
+def _select_config_payload(config_data: dict, config_type: str | None):
     if not isinstance(config_data, dict):
         return config_data
 
@@ -45,7 +65,7 @@ def _select_config_payload(config_data: dict, config_type: str | None) -> dict:
     return config_data
 
 
-@router.get("/api/v1/config/meta")
+@router.post("/api/v1/config/meta", dependencies=[Depends(require_sdk_config_token)])
 async def get_config_meta(
     request: Request,
     app_id: str | None = Query(None, description="应用 ID（可选，仅用于兼容旧 SDK）"),
@@ -114,9 +134,9 @@ async def get_config_meta(
     )
 
 
-@router.get("/api/v1/config/latest")
+@router.post("/api/v1/config/latest", dependencies=[Depends(require_sdk_config_token)])
 async def get_config_latest(
-    type: str | None = Query(None, description="配置类型，local 测试模式下暂返回同一份已发布配置"),
+    type: str | None = Query(None, description="配置类型：main/new_touch/new_text_rule"),
     db: AsyncSession = Depends(get_db_no_commit),
 ):
     """

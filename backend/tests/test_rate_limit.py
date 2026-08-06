@@ -186,8 +186,9 @@ def test_read_routes_exempt_from_write_rate_limit(client, dependency_keys):
     client.app.dependency_overrides[get_db] = override_write_db(session)
 
     try:
+        headers = {"Authorization": "Bearer sdk-config-test-token-1234567890"}
         for _ in range(20):
-            assert client.get("/api/v1/config/meta", params={"app_id": "test"}).status_code == 200
+            assert client.post("/api/v1/config/meta", params={"app_id": "test"}, headers=headers).status_code == 200
             assert client.get("/api/v1/version", params={"platform": "ios"}).status_code == 200
 
         resp = client.post(

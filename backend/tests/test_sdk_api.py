@@ -14,6 +14,10 @@ from tests.conftest import (
 )
 
 
+def _sdk_auth_headers(token: str = "sdk-config-test-token-1234567890") -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
 def test_version_returns_no_available_version_when_table_is_empty(client):
     client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(None))
 
@@ -65,10 +69,10 @@ def test_config_meta_returns_304_when_etag_matches_published_version(client):
     )
     client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
 
-    response = client.get(
+    response = client.post(
         "/api/v1/config/meta",
         params={"app_id": "demo", "config_version": "20260630_v2"},
-        headers={"If-None-Match": '"20260630_v3"'},
+        headers={**_sdk_auth_headers(), "If-None-Match": '"20260630_v3"'},
     )
 
     assert response.status_code == 304
@@ -91,7 +95,7 @@ def test_config_meta_returns_environment_configured_metadata_without_required_pa
     )
     client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
 
-    response = client.get("/api/v1/config/meta")
+    response = client.post("/api/v1/config/meta", headers=_sdk_auth_headers())
 
     assert response.status_code == 200
     assert response.json() == {
@@ -119,7 +123,7 @@ def test_config_latest_returns_published_config_json(client):
     )
     client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
 
-    response = client.get("/api/v1/config/latest")
+    response = client.post("/api/v1/config/latest", headers=_sdk_auth_headers())
 
     assert response.status_code == 200
     assert response.json() == {
@@ -142,9 +146,9 @@ def test_config_latest_returns_config_by_type(client):
     )
     client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
 
-    main_response = client.get("/api/v1/config/latest")
-    touch_response = client.get("/api/v1/config/latest?type=new_touch")
-    text_response = client.get("/api/v1/config/latest?type=new_text_rule")
+    main_response = client.post("/api/v1/config/latest", headers=_sdk_auth_headers())
+    touch_response = client.post("/api/v1/config/latest?type=new_touch", headers=_sdk_auth_headers())
+    text_response = client.post("/api/v1/config/latest?type=new_text_rule", headers=_sdk_auth_headers())
 
     assert main_response.status_code == 200
     assert touch_response.status_code == 200
@@ -165,13 +169,30 @@ def test_config_meta_returns_local_urls_in_local_delivery_mode(client, monkeypat
     )
     client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
 
-    response = client.get("/api/v1/config/meta")
+    response = client.post("/api/v1/config/meta", headers=_sdk_auth_headers())
 
     assert response.status_code == 200
     assert response.json()["data"]["cdn_url"] == "https://sdk.deeppopgame.xyz/api/v1/config/latest"
     assert response.json()["data"]["cdn_url2"] == "https://sdk.deeppopgame.xyz/api/v1/config/latest?type=new_touch"
     assert response.json()["data"]["cdn_url3"] == "https://sdk.deeppopgame.xyz/api/v1/config/latest?type=new_text_rule"
     get_settings.cache_clear()
+
+
+def test_config_meta_rejects_missing_sdk_token(client):
+    response = client.post("/api/v1/config/meta")
+
+    assert response.status_code == 401
+
+
+def test_config_latest_rejects_missing_sdk_token(client):
+    response = client.post("/api/v1/config/latest")
+
+    assert response.status_code == 401
+
+
+def test_config_get_methods_are_disabled(client):
+    assert client.get("/api/v1/config/meta").status_code == 405
+    assert client.get("/api/v1/config/latest").status_code == 405
 
 
 def test_click_returns_partial_success_when_some_events_are_rejected(client):
