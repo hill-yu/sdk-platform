@@ -127,3 +127,19 @@ SDK 比较响应中的 `version` 与本地成功启用版本。版本不同才�
 - 本仓库不包含 iOS/Android SDK 客户端源码，因此客户端解密、原子缓存替换和失败保留旧配置需由 SDK 仓库使用公开测试向量完成验收；本次实现不将该外部工作虚报为已完成。
 - 管理后台读取配置详情时会通过 HTTPS 获得解密后的编辑数据，但数据库、COS/CDN 和 SDK 下发内容均为密文。
 - npm 依赖审计中的既有告警及 Vite 包体积警告不属于本次需求范围，本次未做依赖大版本升级或拆包重构。
+
+## 8. 生产部署记录
+
+部署日期：2026-08-10  
+生产包名：`test.package`
+
+- 部署前数据库备份：`/root/sdk_platform_before_package_encryption_20260810_060424.dump`
+- 旧单份配置经业务方确认，整体映射为 `mainConfig`，另外两份为空对象。
+- 数据迁移结果：6 条记录全部生成密文，1 条 published、1 条 draft、4 条 archived，状态未丢失。
+- 观察期保留旧 `config_data` 列，尚未执行 cleanup。
+- 生产后端测试：66 项通过。
+- 生产前端测试：3 项通过，Vite 构建成功。
+- SDK API 与 Admin API 服务均为 active，宝塔 Nginx 配置检查成功。
+- 公网 `POST /api/v1/config/meta` 返回 200；三个加密配置地址均返回 200。
+- 旧 `/api/v1/config/latest` 返回 404；缺少包名的 meta 请求返回 422。
+- Admin 配置列表和详情返回 200；数据库 6 条密文信封中未发现业务字段明文标记。
