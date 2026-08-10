@@ -56,7 +56,7 @@ async def get_trend(db: AsyncSession, range_value: str = "24h", event_type: str 
             SELECT hour AS time, event_count AS count, unique_devices AS uv
             FROM mv_hourly_trend
             WHERE hour >= :start_time
-              AND (:event_type::varchar IS NULL OR event_type = :event_type::varchar)
+              AND (CAST(:event_type AS varchar) IS NULL OR event_type = CAST(:event_type AS varchar))
             ORDER BY hour ASC
             """
         )
@@ -69,7 +69,7 @@ async def get_trend(db: AsyncSession, range_value: str = "24h", event_type: str 
             SELECT stat_date::text AS time, SUM(event_count) AS count, SUM(unique_devices) AS uv
             FROM mv_daily_event_stats
             WHERE stat_date >= :start_date
-              AND (:event_type::varchar IS NULL OR event_type = :event_type::varchar)
+              AND (CAST(:event_type AS varchar) IS NULL OR event_type = CAST(:event_type AS varchar))
             GROUP BY stat_date
             ORDER BY stat_date ASC
             """
