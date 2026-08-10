@@ -137,6 +137,7 @@ SDK 比较响应中的 `version` 与本地成功启用版本。版本不同才�
 - 旧单份配置经业务方确认，整体映射为 `mainConfig`，另外两份为空对象。
 - 数据迁移结果：6 条记录全部生成密文，1 条 published、1 条 draft、4 条 archived，状态未丢失。
 - 观察期保留旧 `config_data` 列，尚未执行 cleanup。
+- 观察期内旧 `config_data` 列允许 NULL，新建和修改配置只写入 `encrypted_config`。
 - 生产后端测试：66 项通过。
 - 生产前端测试：3 项通过，Vite 构建成功。
 - SDK API 与 Admin API 服务均为 active，宝塔 Nginx 配置检查成功。

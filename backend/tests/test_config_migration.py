@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 
 from scripts.migrate_package_encrypted_configs import prepare_legacy_config
 
@@ -20,3 +21,10 @@ def test_explicit_legacy_conversion_wraps_whole_payload_as_main():
         "newTouchConfig": {},
         "newTextRuleConfig": {},
     }
+
+
+def test_expand_migration_makes_retained_plaintext_column_nullable():
+    script = (
+        Path(__file__).resolve().parents[2] / "scripts" / "migrate_package_encrypted_configs.py"
+    ).read_text(encoding="utf-8")
+    assert "ALTER TABLE sdk_configs ALTER COLUMN config_data DROP NOT NULL" in script

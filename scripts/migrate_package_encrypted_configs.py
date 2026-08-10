@@ -57,6 +57,8 @@ async def migrate(
             await connection.execute(text("ALTER TABLE sdk_configs ALTER COLUMN package_name SET NOT NULL"))
             await connection.execute(text("ALTER TABLE sdk_configs ALTER COLUMN encrypted_config SET NOT NULL"))
             await connection.execute(text("ALTER TABLE sdk_configs ALTER COLUMN encryption_key_id SET NOT NULL"))
+            # 观察期保留旧明文列，但新版写入不再提供该值，因此必须允许 NULL。
+            await connection.execute(text("ALTER TABLE sdk_configs ALTER COLUMN config_data DROP NOT NULL"))
             await connection.execute(text("ALTER TABLE sdk_configs DROP CONSTRAINT IF EXISTS uq_configs_version"))
             await connection.execute(text("ALTER TABLE sdk_configs DROP CONSTRAINT IF EXISTS uq_configs_package_version"))
             await connection.execute(text("DROP INDEX IF EXISTS uq_configs_one_published"))
