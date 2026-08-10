@@ -77,10 +77,11 @@ source .env
 set +a
 
 python scripts/migrate_package_encrypted_configs.py \
-  --default-package-name com.example.app
+  --default-package-name com.example.app \
+  --legacy-single-as-main
 ```
 
-将示例包名替换为现有配置实际所属包名。旧配置若缺少三个标准根字段，迁移会整体回滚，必须先人工转换并核对，脚本不会猜测字段归属。迁移脚本不会打印 Token 或配置明文。迁移成功后再部署新版后端和前端；不要先启动依赖新字段的新版服务。
+将示例包名替换为现有配置实际所属包名。`--legacy-single-as-main` 只在业务方明确确认后使用，它会把旧单份配置整体映射为 `mainConfig`，另外两份设为空对象；不传该参数时，缺少三个标准根字段会使迁移整体回滚。迁移脚本不会打印 Token 或配置明文。迁移成功后再部署新版后端和前端；不要先启动依赖新字段的新版服务。
 
 新版稳定运行并完成数据库抽样验证后，才能显式删除旧明文列：
 

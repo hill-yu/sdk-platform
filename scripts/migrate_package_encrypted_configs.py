@@ -19,16 +19,27 @@ from app.services.config_crypto import decrypt_payload, encrypt_payload, normali
 REQUIRED_ROOT_KEYS = {"mainConfig", "newTouchConfig", "newTextRuleConfig"}
 
 
-def validate_legacy_config(config_data: object) -> dict:
+def prepare_legacy_config(config_data: object, legacy_single_as_main: bool = False) -> dict:
     if not isinstance(config_data, dict):
         raise ValueError("旧配置根节点必须是 JSON 对象")
     missing = sorted(REQUIRED_ROOT_KEYS - set(config_data))
     if missing:
+        if legacy_single_as_main and not (REQUIRED_ROOT_KEYS & set(config_data)):
+            return {
+                "mainConfig": config_data,
+                "newTouchConfig": {},
+                "newTextRuleConfig": {},
+            }
         raise ValueError(f"旧配置缺少必填根字段: {', '.join(missing)}")
     return config_data
 
 
-async def migrate(database_url: str, token: str, default_package_name: str) -> None:
+async def migrate(
+    database_url: str,
+    token: str,
+    default_package_name: str,
+    legacy_single_as_main: bool = False,
+) -> None:
     package_name = normalize_package_name(default_package_name)
     engine = create_async_engine(database_url)
     try:
@@ -38,7 +49,7 @@ async def migrate(database_url: str, token: str, default_package_name: str) -> N
             await connection.execute(text("ALTER TABLE sdk_configs ADD COLUMN IF NOT EXISTS encryption_key_id VARCHAR(32) DEFAULT 'v1'"))
             rows = (await connection.execute(text("SELECT id, version, config_data FROM sdk_configs FOR UPDATE"))).mappings().all()
             for row in rows:
-                config_data = validate_legacy_config(row["config_data"])
+                config_data = prepare_legacy_config(row["config_data"], legacy_single_as_main)
                 envelope = encrypt_payload(config_data, package_name, row["version"], "full", token)
                 if decrypt_payload(envelope, token) != config_data:
                     raise RuntimeError(f"记录 {row['id']} 加密回读校验失败")
@@ -75,6 +86,11 @@ def main() -> None:
     parser.add_argument("--default-package-name")
     parser.add_argument("--cleanup-plaintext", action="store_true")
     parser.add_argument("--confirm-cleanup")
+    parser.add_argument(
+        "--legacy-single-as-main",
+        action="store_true",
+        help="显式将不含三分根字段的旧配置整体映射为 mainConfig",
+    )
     args = parser.parse_args()
     database_url = os.environ.get("DATABASE_URL", "")
     token = os.environ.get("SDK_CONFIG_TOKEN", "")
@@ -89,7 +105,7 @@ def main() -> None:
             raise SystemExit("首次迁移必须设置 SDK_CONFIG_TOKEN")
         if not args.default_package_name:
             raise SystemExit("首次迁移必须指定 --default-package-name")
-        asyncio.run(migrate(database_url, token, args.default_package_name))
+        asyncio.run(migrate(database_url, token, args.default_package_name, args.legacy_single_as_main))
 
 
 if __name__ == "__main__":
