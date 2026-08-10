@@ -15,6 +15,7 @@ from app.services.config_crypto import normalize_package_name
 from app.services import config_service
 
 logger = logging.getLogger(__name__)
+timing_logger = logging.getLogger("uvicorn.error")
 
 
 router = APIRouter(tags=["Admin - Config"], dependencies=[Depends(require_admin_token)])
@@ -116,7 +117,7 @@ async def update_config(
         await db.rollback()
         raise
     upload_ms = float(getattr(request.state, "request_body_read_ms", 0.0))
-    logger.info(
+    timing_logger.info(
         "config_save_timing config_id=%s request_body_bytes=%s upload_ms=%.2f validation_ms=%.2f "
         "encryption_ms=%.2f db_flush_ms=%.2f db_commit_ms=%.2f total_ms=%.2f",
         config_id,
