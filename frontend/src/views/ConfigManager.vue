@@ -23,8 +23,8 @@
         <textarea v-if="mode === 'json'" v-model="editorValue" class="editor" :disabled="!editable" />
         <ConfigTableEditor v-else v-model="tableRows" :disabled="!editable" />
         <div class="actions">
-          <button class="ghost" :disabled="!editable" @click="saveDraft">保存草稿</button>
-          <button class="primary" :disabled="!editable" @click="publishCurrent">发布</button>
+          <button class="ghost" :disabled="!editable || operationBusy" @click="saveDraft">{{ saving ? "正在加密保存…" : "保存草稿" }}</button>
+          <button class="primary" :disabled="!editable || operationBusy" @click="publishCurrent">{{ publishing ? "正在发布…" : "发布" }}</button>
           <button v-if="selectedConfig?.status === 'archived'" class="ghost" @click="rollbackCurrent">回滚到此版本</button>
         </div>
       </section>
@@ -37,6 +37,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import ConfigTableEditor from "@/components/ConfigTableEditor.vue";
 import { createConfig, getConfig, getConfigs, publishConfig, rollbackConfig, updateConfig } from "@/api/config";
 import { flattenConfig, rowsToConfig, type ConfigRow } from "@/utils/configTable";
+import { isPublishConfirmed, isRequestTimeout, isSaveConfirmed } from "@/utils/configOperation";
 import { beginFeedback, setFeedbackError, setFeedbackSuccess } from "@/utils/feedback";
 
 type ConfigItem = Record<string, any>;
@@ -48,9 +49,12 @@ const tableRows = ref<ConfigRow[]>([]);
 const mode = ref<"json" | "table">("json");
 const changeLog = ref("");
 const feedback = reactive({ error: "", success: "" });
+const saving = ref(false);
+const publishing = ref(false);
 const allConfigs = computed(() => [...configs.published, ...configs.drafts, ...configs.history]);
 const selectedConfig = computed(() => allConfigs.value.find((item) => item.id === selectedId.value) || null);
 const editable = computed(() => selectedConfig.value?.status === "draft");
+const operationBusy = computed(() => saving.value || publishing.value);
 
 function message(error: unknown) { return error instanceof SyntaxError ? "配置 JSON 格式错误" : (error as Error).message; }
 function currentData() { return mode.value === "json" ? JSON.parse(editorValue.value) : rowsToConfig(tableRows.value); }
@@ -86,10 +90,43 @@ async function createDraft() {
 }
 async function saveDraft() {
   if (!selectedId.value || !editable.value) return;
-  try { beginFeedback(feedback); await updateConfig(selectedId.value, { config_data: currentData(), change_log: changeLog.value }); await loadConfigs(); setFeedbackSuccess(feedback, "配置已加密保存"); }
-  catch (error) { setFeedbackError(feedback, message(error)); }
+  const configId = selectedId.value;
+  const before = { ...selectedConfig.value };
+  try {
+    beginFeedback(feedback); saving.value = true;
+    await updateConfig(configId, { config_data: currentData(), change_log: changeLog.value });
+    await loadConfigs(); setFeedbackSuccess(feedback, "配置已加密保存");
+  } catch (error) {
+    if (isRequestTimeout(error)) {
+      try {
+        const response = await getConfig(configId);
+        if (isSaveConfirmed(before, response.data)) {
+          await loadConfigs(); setFeedbackSuccess(feedback, "请求虽超时，但已确认配置保存成功"); return;
+        }
+      } catch { /* 保留原始超时错误 */ }
+    }
+    setFeedbackError(feedback, message(error));
+  } finally { saving.value = false; }
 }
-async function publishCurrent() { if (selectedId.value && editable.value) { try { beginFeedback(feedback); await publishConfig(selectedId.value); await loadConfigs(); setFeedbackSuccess(feedback, "配置已发布"); } catch (error) { setFeedbackError(feedback, message(error)); } } }
+async function publishCurrent() {
+  if (!selectedId.value || !editable.value) return;
+  const configId = selectedId.value;
+  const before = { ...selectedConfig.value };
+  try {
+    beginFeedback(feedback); publishing.value = true;
+    await publishConfig(configId); await loadConfigs(); setFeedbackSuccess(feedback, "配置已发布");
+  } catch (error) {
+    if (isRequestTimeout(error)) {
+      try {
+        const response = await getConfig(configId);
+        if (isPublishConfirmed(before, response.data)) {
+          await loadConfigs(); setFeedbackSuccess(feedback, "请求虽超时，但已确认配置发布成功"); return;
+        }
+      } catch { /* 保留原始超时错误 */ }
+    }
+    setFeedbackError(feedback, message(error));
+  } finally { publishing.value = false; }
+}
 async function rollbackCurrent() { if (selectedId.value) { try { beginFeedback(feedback); await rollbackConfig(selectedId.value); await loadConfigs(); setFeedbackSuccess(feedback, "配置已回滚为新版本"); } catch (error) { setFeedbackError(feedback, message(error)); } } }
 onMounted(loadConfigs);
 </script>

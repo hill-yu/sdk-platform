@@ -194,3 +194,26 @@ async def test_rollback_preserves_history_and_creates_new_record(monkeypatch):
     assert created.status == "published"
     assert created.version == result["version"]
     get_settings.cache_clear()
+
+
+@pytest.mark.anyio
+async def test_update_config_reports_validation_encryption_and_flush_timings(monkeypatch):
+    monkeypatch.setenv("SDK_CONFIG_TOKEN", "sdk-config-test-token-1234567890")
+    from app.core.config import get_settings
+    get_settings.cache_clear()
+    db = FakeDbLock()
+    draft = FakeConfig(config_id=8, version="draft_v1", status="draft")
+    db.add_config(draft)
+    timings: dict[str, float] = {}
+
+    await config_service.update_config(
+        db,
+        8,
+        {"mainConfig": {}, "newTouchConfig": {}, "newTextRuleConfig": {}},
+        "save",
+        timings=timings,
+    )
+
+    assert set(timings) == {"validation_ms", "encryption_ms", "flush_ms"}
+    assert all(value >= 0 for value in timings.values())
+    get_settings.cache_clear()

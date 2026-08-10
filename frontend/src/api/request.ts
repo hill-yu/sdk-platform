@@ -32,7 +32,8 @@ request.interceptors.response.use(
   (response) => response.data,
   (error) => {
     const message = error?.response?.data?.detail || error?.message || "Request failed";
-    return Promise.reject(new Error(message));
+    error.message = message;
+    return Promise.reject(error);
   }
 );
 

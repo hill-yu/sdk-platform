@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 from datetime import datetime, timezone
+from time import perf_counter
 from typing import Any
 
 from fastapi import HTTPException
@@ -99,17 +100,33 @@ async def create_config(db: AsyncSession, package_name: str, config_data: dict[s
     return _serialize_summary(config)
 
 
-async def update_config(db: AsyncSession, config_id: int, config_data: dict[str, Any], change_log: str) -> dict[str, Any]:
+async def update_config(
+    db: AsyncSession,
+    config_id: int,
+    config_data: dict[str, Any],
+    change_log: str,
+    *,
+    timings: dict[str, float] | None = None,
+) -> dict[str, Any]:
     config = await db.get(SdkConfig, config_id)
     if config is None:
         raise ValueError("配置不存在")
     if config.status != "draft":
         raise ValueError("仅可编辑 draft 状态的配置")
+    phase_started = perf_counter()
     _validate_full_config(config_data)
+    if timings is not None:
+        timings["validation_ms"] = (perf_counter() - phase_started) * 1000
+    phase_started = perf_counter()
     config.encrypted_config = encrypt_payload(config_data, config.package_name, config.version, "full", _token())
+    if timings is not None:
+        timings["encryption_ms"] = (perf_counter() - phase_started) * 1000
     config.change_log = change_log
     config.updated_at = datetime.now(timezone.utc)
+    phase_started = perf_counter()
     await db.flush()
+    if timings is not None:
+        timings["flush_ms"] = (perf_counter() - phase_started) * 1000
     return _serialize_summary(config)
 
 

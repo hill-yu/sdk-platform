@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from time import perf_counter
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin.deps import require_admin_token
@@ -93,11 +94,37 @@ async def create_config(payload: ConfigCreateRequest, db: AsyncSession = Depends
 
 
 @router.put("/configs/{config_id}")
-async def update_config(config_id: int, payload: ConfigUpsertRequest, db: AsyncSession = Depends(get_db)):
+async def update_config(
+    config_id: int,
+    payload: ConfigUpsertRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db_no_commit),
+):
+    route_started = perf_counter()
+    timings: dict[str, float] = {}
     try:
-        data = await config_service.update_config(db, config_id, payload.config_data, payload.change_log)
+        data = await config_service.update_config(
+            db, config_id, payload.config_data, payload.change_log, timings=timings
+        )
+        commit_started = perf_counter()
+        await db.commit()
+        timings["commit_ms"] = (perf_counter() - commit_started) * 1000
     except ValueError as exc:
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception:
+        await db.rollback()
+        raise
+    upload_ms = float(getattr(request.state, "request_body_read_ms", 0.0))
+    logger.info(
+        "config_save_timing config_id=%s request_body_bytes=%s upload_ms=%.2f validation_ms=%.2f "
+        "encryption_ms=%.2f db_flush_ms=%.2f db_commit_ms=%.2f total_ms=%.2f",
+        config_id,
+        getattr(request.state, "request_body_bytes", 0),
+        upload_ms,
+        timings["validation_ms"], timings["encryption_ms"], timings["flush_ms"], timings["commit_ms"],
+        upload_ms + (perf_counter() - route_started) * 1000,
+    )
     return {"code": 0, "data": data}
 
 
