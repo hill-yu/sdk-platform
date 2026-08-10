@@ -10,3 +10,4 @@ httpx==0.28.*
 python-multipart==0.0.*
 pytest==8.3.*
 pytest-asyncio==0.25.*
+cryptography==45.*

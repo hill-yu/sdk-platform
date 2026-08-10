@@ -49,9 +49,10 @@ def test_get_configs_returns_grouped_payload(monkeypatch):
     from app.admin_main import app
     from app.api.admin import config_mgr
 
-    async def fake_list_configs(_db: Any) -> dict[str, Any]:
+    async def fake_list_configs(_db: Any, package_name: str | None = None) -> dict[str, Any]:
+        assert package_name is None
         return {
-            "published": {"id": 1, "version": "20260630_v3"},
+            "published": [{"id": 1, "version": "20260630_v3"}],
             "drafts": [{"id": 2, "version": "draft_001"}],
             "history": [{"id": 3, "version": "20260629_v2", "status": "archived"}],
         }
@@ -64,7 +65,42 @@ def test_get_configs_returns_grouped_payload(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["code"] == 0
-    assert body["data"]["published"]["version"] == "20260630_v3"
+    assert body["data"]["published"][0]["version"] == "20260630_v3"
+
+
+def test_create_config_requires_package_name():
+    from app.admin_main import app
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/admin/configs",
+            headers=_auth_headers(),
+            json={"config_data": {"mainConfig": {}, "newTouchConfig": {}, "newTextRuleConfig": {}}},
+        )
+    assert response.status_code == 422
+
+
+def test_create_config_passes_normalized_package_name(monkeypatch):
+    from app.admin_main import app
+    from app.api.admin import config_mgr
+
+    async def fake_create(_db, package_name, config_data, change_log):
+        assert package_name == "com.example.app"
+        assert set(config_data) == {"mainConfig", "newTouchConfig", "newTextRuleConfig"}
+        return {"id": 9, "package_name": package_name}
+
+    monkeypatch.setattr(config_mgr.config_service, "create_config", fake_create)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/admin/configs",
+            headers=_auth_headers(),
+            json={
+                "package_name": "COM.EXAMPLE.APP",
+                "config_data": {"mainConfig": {}, "newTouchConfig": {}, "newTextRuleConfig": {}},
+                "change_log": "init",
+            },
+        )
+    assert response.status_code == 200
+    assert response.json()["data"]["package_name"] == "com.example.app"
 
 
 def test_publish_config_returns_publish_result(monkeypatch):
