@@ -115,13 +115,36 @@ python scripts/migrate_config_versions.py --apply --confirm MIGRATE_CONFIG_VERSI
 ### 6.1 本地验证
 
 ```text
-后端：91 passed
+后端：93 passed
 前端：4 个测试文件、11 项测试通过
 前端构建：成功，662 个模块完成转换
 ```
 
 全量测试首次运行发现两个旧测试替身缺少新增版本查询所需的 `scalars().all()` 接口；根因确认后只补齐测试替身，定点 2 项和后端全量 91 项均重新通过。
 
-### 6.2 生产验证
+### 6.2 生产迁移
 
-生产迁移和冒烟结果将在部署执行后追加。记录只包含测试数量、HTTP 状态和脱敏版本信息。
+- 部署提交：`7005990`；
+- 部署前保存了源码归档、工作区补丁和 PostgreSQL 自定义格式完整备份；
+- 迁移预检：2 个包、8 条正式记录、8 条需要迁移；
+- 正式迁移：2 个包、8 条记录全部完成；
+- 迁移后重复预检：`changes=0`；
+- `com.techflow.note.fight.apppp`：3 条正式历史记录，范围 `1.0.0–1.0.2`；
+- `test.package`：5 条正式历史记录，范围 `1.0.0–1.0.4`。
+
+### 6.3 生产数据库验证
+
+```text
+非法正式版本：0
+同包重复版本：0
+每包 published 数量异常：0
+```
+
+### 6.4 生产接口与解密验证
+
+| 包名 | Meta 当前版本 | 三类 POST 下载 | 三类 GET | AES-GCM/AAD 解密 |
+|---|---|---|---|---|
+| `test.package` | `1.0.4` | 全部 200 | 全部 405 | 全部通过 |
+| `com.techflow.note.fight.apppp` | `1.0.2` | 全部 200 | 全部 405 | 全部通过 |
+
+OpenAPI 中配置下载路径只包含 POST。`sdk-api` 和 `sdk-admin` 均为 active，部署后最近日志未发现 `Traceback`、`ERROR` 或 `CRITICAL`。
