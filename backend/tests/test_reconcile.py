@@ -164,6 +164,12 @@ class _FakeScalarResult:
     def scalar(self):
         return self._scalar_value
 
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._scalar_value
+
 
 class FakeDbCommitFail:
     """commit 时抛异常，get 返回指定 config"""
@@ -177,6 +183,8 @@ class FakeDbCommitFail:
         stmt_str = str(stmt)
         if "pg_try_advisory_xact_lock" in stmt_str:
             return _FakeScalarResult(True)
+        if "SELECT sdk_configs.version" in stmt_str:
+            return _FakeScalarResult([])
         return _FakeScalarResult(None)
 
     async def get(self, model, config_id):

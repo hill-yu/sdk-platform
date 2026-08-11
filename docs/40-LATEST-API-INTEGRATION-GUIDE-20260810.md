@@ -1,13 +1,15 @@
 # SDK 平台最新接口对接文档
 
-> 文档版本：1.0  
-> 更新时间：2026-08-10  
-> 对应生产功能版本：`ed9ff13`  
+> 文档版本：1.1
+>
+> 更新时间：2026-08-11
+>
+> 对应功能分支：`codex/post-config-download-semver`
 > 生产域名：`https://sdk.deeppopgame.xyz`
 
 ## 1. 文档说明
 
-本文档以当前生产环境实际接口为准，覆盖 SDK 侧接口和管理后台接口。配置下发协议已经升级为“包名隔离 + 版本判断 + AES-256-GCM 加密信封”。
+本文档描述本次部署后的接口基线，覆盖 SDK 侧接口和管理后台接口。配置下发协议为“包名隔离 + 三段版本判断 + POST 下载 + AES-256-GCM 加密信封”。
 
 以下旧协议已经停用：
 
@@ -96,14 +98,14 @@ Content-Type: application/json
   "code": 0,
   "data": {
     "package_name": "test.package",
-    "version": "20260806_v074910_366388",
+    "version": "1.0.0",
     "updated_at": "2026-08-06T07:49:10.366388+00:00",
     "isOpen": true,
     "isNewsTouch": true,
     "isNewTextRule": true,
-    "cdn_url": "https://sdk.deeppopgame.xyz/api/v1/config/packages/test.package/versions/20260806_v074910_366388/main",
-    "cdn_url2": "https://sdk.deeppopgame.xyz/api/v1/config/packages/test.package/versions/20260806_v074910_366388/new-touch",
-    "cdn_url3": "https://sdk.deeppopgame.xyz/api/v1/config/packages/test.package/versions/20260806_v074910_366388/new-text-rule"
+    "cdn_url": "https://sdk.deeppopgame.xyz/api/v1/config/packages/test.package/versions/1.0.0/main",
+    "cdn_url2": "https://sdk.deeppopgame.xyz/api/v1/config/packages/test.package/versions/1.0.0/new-touch",
+    "cdn_url3": "https://sdk.deeppopgame.xyz/api/v1/config/packages/test.package/versions/1.0.0/new-text-rule"
   }
 }
 ```
@@ -145,9 +147,11 @@ curl -X POST 'https://sdk.deeppopgame.xyz/api/v1/config/meta' \
 三个地址均由 `meta` 动态返回，SDK 不应自行拼接。当前本地下发模式使用以下接口：
 
 ```http
-GET /api/v1/config/packages/{package_name}/versions/{version}/{config_type}
+POST /api/v1/config/packages/{package_name}/versions/{version}/{config_type}
 Authorization: Bearer <SDK_CONFIG_TOKEN>
 ```
+
+下载请求没有请求体。旧 GET 方法不兼容，返回 `405 Method Not Allowed`。
 
 `config_type` 只允许：
 
@@ -160,7 +164,7 @@ Authorization: Bearer <SDK_CONFIG_TOKEN>
 请求示例：
 
 ```bash
-curl 'https://sdk.deeppopgame.xyz/api/v1/config/packages/test.package/versions/20260806_v074910_366388/main' \
+curl -X POST 'https://sdk.deeppopgame.xyz/api/v1/config/packages/test.package/versions/1.0.0/main' \
   -H "Authorization: Bearer $SDK_CONFIG_TOKEN"
 ```
 
@@ -168,7 +172,7 @@ curl 'https://sdk.deeppopgame.xyz/api/v1/config/packages/test.package/versions/2
 
 ```json
 {
-  "version": "20260806_v074910_366388",
+  "version": "1.0.0",
   "package_name": "test.package",
   "config_type": "main",
   "algorithm": "AES-256-GCM",
@@ -186,6 +190,21 @@ curl 'https://sdk.deeppopgame.xyz/api/v1/config/packages/test.package/versions/2
 |---|---:|
 | Token 缺失或错误 | 401 |
 | 包名、版本或类型不存在 | 404/422 |
+| 使用 GET 下载 | 405 |
+
+### 5.1 配置版本规则
+
+每个包名分别从 `1.0.0` 开始递增：
+
+```text
+1.0.0 → 1.0.1 → ... → 1.0.9 → 1.1.0 → ... → 1.9.9 → 2.0.0
+```
+
+- 草稿不占用正式版本；
+- 发布成功时才分配新版本；
+- Meta 的 `version`、三个 URL 中的版本和下载信封的 `version` 必须一致；
+- 回滚直接恢复历史配置原版本，不创建新版本；
+- 回滚后的下一次发布仍从该包所有历史记录中的最大版本继续递增。
 
 ## 6. 配置解密协议
 
@@ -210,7 +229,7 @@ package_name=<package_name>&version=<version>&config_type=<config_type>
 示例：
 
 ```text
-package_name=test.package&version=20260806_v074910_366388&config_type=main
+package_name=test.package&version=1.0.0&config_type=main
 ```
 
 ### 6.3 AES-GCM 参数
@@ -356,7 +375,7 @@ Content-Type: application/json
 | POST | `/configs` | 创建加密草稿 |
 | PUT | `/configs/{config_id}` | 修改草稿并重新加密 |
 | POST | `/configs/{config_id}/publish` | 发布草稿 |
-| POST | `/configs/{config_id}/rollback` | 基于历史记录创建新版本并发布 |
+| POST | `/configs/{config_id}/rollback` | 恢复历史记录及其原版本，不创建新版本 |
 | GET | `/configs/reconcile?package_name=test.package` | 对账数据库版本与下发信封版本 |
 
 ### 10.2 创建草稿

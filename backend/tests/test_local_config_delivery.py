@@ -35,6 +35,12 @@ class FakeScalarResult:
     def scalar(self):
         return self._value
 
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._value
+
 
 class FakeDb:
     def __init__(self, config: FakeConfig):
@@ -49,6 +55,8 @@ class FakeDb:
         self.executed.append(stmt)
         if "pg_try_advisory_xact_lock" in str(stmt):
             return FakeScalarResult(True)
+        if "SELECT sdk_configs.version" in str(stmt):
+            return FakeScalarResult([])
         return FakeScalarResult(None)
 
     async def commit(self):
