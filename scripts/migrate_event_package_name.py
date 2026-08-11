@@ -5,9 +5,27 @@ import argparse
 import asyncio
 import os
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+
+
+@dataclass(frozen=True)
+class SchemaSnapshot:
+    total_count: int
+    non_null_package_count: int
+    partition_counts: dict[str, int]
+    partition_columns: dict[str, set[str]]
+    event_columns: set[str]
+    view_columns: set[str]
+
+
+@dataclass(frozen=True)
+class MigrationReport:
+    statements: Sequence[str]
+    before: SchemaSnapshot
+    after: SchemaSnapshot | None = None
 
 
 def build_migration_statements(
@@ -68,52 +86,100 @@ async def _columns(connection, relation: str) -> set[str]:
     return {str(row[0]) for row in rows}
 
 
-async def migrate(database_url: str, *, apply: bool) -> Sequence[str]:
+def _quoted_identifier(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
+
+
+async def read_snapshot(connection) -> SchemaSnapshot:
+    event_columns = await _columns(connection, "sdk_events")
+    if "app_id" in event_columns and "package_name" in event_columns:
+        raise RuntimeError("sdk_events 同时存在 app_id 和 package_name")
+    package_column = "package_name" if "package_name" in event_columns else "app_id"
+    if package_column not in event_columns:
+        raise RuntimeError("sdk_events 缺少包名列")
+
+    total_count = int(
+        (await connection.execute(text("SELECT COUNT(*) FROM sdk_events"))).scalar_one()
+    )
+    non_null_package_count = int(
+        (
+            await connection.execute(
+                text(f"SELECT COUNT(*) FROM sdk_events WHERE {package_column} IS NOT NULL")
+            )
+        ).scalar_one()
+    )
+    partition_names = (
+        await connection.execute(
+            text(
+                "SELECT child.relname FROM pg_inherits i "
+                "JOIN pg_class parent ON parent.oid=i.inhparent "
+                "JOIN pg_class child ON child.oid=i.inhrelid "
+                "JOIN pg_namespace namespace ON namespace.oid=child.relnamespace "
+                "WHERE parent.relname='sdk_events' AND namespace.nspname=current_schema() "
+                "ORDER BY child.relname"
+            )
+        )
+    ).scalars().all()
+    partition_columns: dict[str, set[str]] = {}
+    partition_counts: dict[str, int] = {}
+    for raw_name in partition_names:
+        name = str(raw_name)
+        columns = await _columns(connection, name)
+        partition_columns[name] = columns
+        if package_column not in columns:
+            raise RuntimeError(f"分区表 {name} 缺少 {package_column} 列")
+        partition_counts[name] = int(
+            (
+                await connection.execute(
+                    text(f"SELECT COUNT(*) FROM {_quoted_identifier(name)}")
+                )
+            ).scalar_one()
+        )
+    return SchemaSnapshot(
+        total_count=total_count,
+        non_null_package_count=non_null_package_count,
+        partition_counts=partition_counts,
+        partition_columns=partition_columns,
+        event_columns=event_columns,
+        view_columns=await _columns(connection, "mv_daily_event_stats"),
+    )
+
+
+def verify_lossless(before: SchemaSnapshot, after: SchemaSnapshot) -> None:
+    if before.total_count != after.total_count:
+        raise RuntimeError(
+            f"迁移前后事件数不一致: {before.total_count} != {after.total_count}"
+        )
+    if before.non_null_package_count != after.non_null_package_count:
+        raise RuntimeError("迁移前后非空包名数不一致")
+    if before.partition_counts != after.partition_counts:
+        raise RuntimeError("迁移前后分区行数不一致")
+    if "package_name" not in after.event_columns or "app_id" in after.event_columns:
+        raise RuntimeError("sdk_events 列迁移验证失败")
+    if "package_name" not in after.view_columns or "app_id" in after.view_columns:
+        raise RuntimeError("物化视图迁移验证失败")
+    invalid_partitions = [
+        name
+        for name, columns in after.partition_columns.items()
+        if "package_name" not in columns or "app_id" in columns
+    ]
+    if invalid_partitions:
+        raise RuntimeError("分区表列迁移失败: " + ", ".join(invalid_partitions))
+
+
+async def migrate(database_url: str, *, apply: bool) -> MigrationReport:
     engine = create_async_engine(database_url)
     try:
         async with engine.begin() as connection:
-            event_columns = await _columns(connection, "sdk_events")
-            view_columns = await _columns(connection, "mv_daily_event_stats")
-            statements = build_migration_statements(event_columns, view_columns)
+            before = await read_snapshot(connection)
+            statements = build_migration_statements(before.event_columns, before.view_columns)
             if not apply:
-                return statements
-
-            before_count = (
-                await connection.execute(text("SELECT COUNT(*) FROM sdk_events"))
-            ).scalar_one()
+                return MigrationReport(statements=statements, before=before)
             for statement in statements:
                 await connection.execute(text(statement))
-
-            after_columns = await _columns(connection, "sdk_events")
-            after_view_columns = await _columns(connection, "mv_daily_event_stats")
-            after_count = (
-                await connection.execute(text("SELECT COUNT(*) FROM sdk_events"))
-            ).scalar_one()
-            missing_partition_columns = (
-                await connection.execute(
-                    text(
-                        "SELECT child.relname FROM pg_inherits i "
-                        "JOIN pg_class parent ON parent.oid=i.inhparent "
-                        "JOIN pg_class child ON child.oid=i.inhrelid "
-                        "WHERE parent.relname='sdk_events' AND NOT EXISTS ("
-                        "SELECT 1 FROM pg_attribute a WHERE a.attrelid=child.oid "
-                        "AND a.attname='package_name' AND NOT a.attisdropped)"
-                    )
-                )
-            ).scalars().all()
-            if before_count != after_count:
-                raise RuntimeError(
-                    f"迁移前后事件数不一致: {before_count} != {after_count}"
-                )
-            if "package_name" not in after_columns or "app_id" in after_columns:
-                raise RuntimeError("sdk_events 列迁移验证失败")
-            if "package_name" not in after_view_columns or "app_id" in after_view_columns:
-                raise RuntimeError("物化视图迁移验证失败")
-            if missing_partition_columns:
-                raise RuntimeError(
-                    "分区表缺少 package_name: " + ", ".join(missing_partition_columns)
-                )
-            return statements
+            after = await read_snapshot(connection)
+            verify_lossless(before, after)
+            return MigrationReport(statements=statements, before=before, after=after)
     finally:
         await engine.dispose()
 
@@ -130,10 +196,16 @@ def main() -> None:
         raise SystemExit(
             "正式迁移必须传入 --confirm MIGRATE_EVENT_PACKAGE_NAME"
         )
-    statements = asyncio.run(migrate(database_url, apply=args.apply))
+    report = asyncio.run(migrate(database_url, apply=args.apply))
     action = "迁移完成" if args.apply else "预检通过"
-    print(f"{action}: statements={len(statements)}")
-    for statement in statements:
+    print(
+        f"{action}: statements={len(report.statements)}, events={report.before.total_count}, "
+        f"non_null_package={report.before.non_null_package_count}, "
+        f"partitions={len(report.before.partition_counts)}"
+    )
+    for name, count in report.before.partition_counts.items():
+        print(f"partition={name}, rows={count}")
+    for statement in report.statements:
         print(statement.splitlines()[0])
 
 

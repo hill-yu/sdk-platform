@@ -55,6 +55,7 @@
 - `extra` 必传且只能为 string；不要求是合法 JSON，不解析、不转换；
 - `message` 可省略、为 `null` 或空字符串，服务端统一保存为空字符串；
 - `tag` 和 `timestamp` 可选；
+- 顶层 `device_id` 可选，未传时按 `null` 存储；
 - 每批 1～100 条；
 - 整体请求体仍受 SDK API 1 MB 限制。
 

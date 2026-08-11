@@ -1,6 +1,13 @@
 import asyncio
 
-from scripts.migrate_event_package_name import _columns, build_migration_statements
+import pytest
+
+from scripts.migrate_event_package_name import (
+    SchemaSnapshot,
+    _columns,
+    build_migration_statements,
+    verify_lossless,
+)
 
 
 def test_old_event_schema_builds_lossless_package_name_migration():
@@ -62,3 +69,31 @@ def test_column_inspection_uses_postgres_catalog_for_materialized_views():
 
     columns = asyncio.run(_columns(Connection(), "mv_daily_event_stats"))
     assert columns == {"package_name", "event_type"}
+
+
+def _snapshot(*, total=3, non_null=3, partitions=None):
+    return SchemaSnapshot(
+        total_count=total,
+        non_null_package_count=non_null,
+        partition_counts=partitions or {"sdk_events_202608": 3},
+        partition_columns={"sdk_events_202608": {"package_name"}},
+        event_columns={"package_name"},
+        view_columns={"package_name"},
+    )
+
+
+def test_lossless_verification_accepts_identical_counts_and_migrated_columns():
+    verify_lossless(_snapshot(), _snapshot())
+
+
+@pytest.mark.parametrize(
+    "after,error",
+    [
+        (_snapshot(total=2), "事件数"),
+        (_snapshot(non_null=2), "非空包名数"),
+        (_snapshot(partitions={"sdk_events_202608": 2}), "分区行数"),
+    ],
+)
+def test_lossless_verification_rejects_changed_data_counts(after, error):
+    with pytest.raises(RuntimeError, match=error):
+        verify_lossless(_snapshot(), after)

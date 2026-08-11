@@ -29,7 +29,7 @@ Content-Type: application/json
 | 字段 | 类型 | 必传 | 规则 |
 |---|---|---|---|
 | `package_name` | string | 是 | 1～255 字符，按系统包名规则校验 |
-| `device_id` | string | 是 | 最大 64 字符 |
+| `device_id` | string/null | 否 | 最大 64 字符 |
 | `sdk_version` | string | 否 | 最大 20 字符 |
 | `logs` | array | 是 | 1～100 条 |
 | `logs[].level` | string | 是 | `debug` / `info` / `warn` / `error`，大小写不敏感 |

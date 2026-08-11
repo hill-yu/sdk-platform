@@ -68,7 +68,7 @@ class LogEntry(BaseModel):
 class LogReportRequest(BaseModel):
     """日志上报请求"""
     package_name: str = Field(..., min_length=1, max_length=255)
-    device_id: str = Field(..., max_length=64)
+    device_id: Optional[str] = Field(None, max_length=64)
     sdk_version: Optional[str] = Field(None, max_length=20)
     logs: list[LogEntry] = Field(..., min_length=1, max_length=100)
 

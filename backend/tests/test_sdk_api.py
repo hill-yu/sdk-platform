@@ -165,6 +165,28 @@ def test_log_accepts_empty_message_and_preserves_raw_extra(client, monkeypatch, 
     assert value["payload"]["extra"] == "{ouoghaougoagahdgjalglauoi|dlaugouojlJ}"
 
 
+def test_log_accepts_target_payload_without_device_id(client, monkeypatch):
+    from app.api.sdk import log as log_api
+    captured = {}
+
+    class Insert:
+        def values(self, values):
+            captured["values"] = values
+            return self
+
+    monkeypatch.setattr(log_api, "pg_insert", lambda _model: Insert())
+    client.app.dependency_overrides[get_db] = override_write_db(StubWriteSession())
+    response = client.post(
+        "/api/v1/log",
+        json={
+            "package_name": "com.example.app",
+            "logs": [{"level": "info", "message": "", "extra": "raw"}],
+        },
+    )
+    assert response.status_code == 200
+    assert captured["values"][0]["device_id"] is None
+
+
 @pytest.mark.parametrize("missing_field", ["level", "extra"])
 def test_log_requires_level_and_extra(client, missing_field):
     log_entry = {"level": "info", "extra": "raw"}
