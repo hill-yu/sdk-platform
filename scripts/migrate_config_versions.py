@@ -18,7 +18,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1] / "backend"
 sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.services.config_crypto import decrypt_payload, encrypt_payload  # noqa: E402
-from app.services.config_version import next_version  # noqa: E402
+from app.services.config_version import next_version, parse_version  # noqa: E402
 
 
 REQUIRED_ROOT_KEYS = {"mainConfig", "newTouchConfig", "newTextRuleConfig"}
@@ -37,7 +37,20 @@ def build_version_mapping(rows: Sequence[Mapping[str, Any]]) -> dict[int, str]:
 
     mapping: dict[int, str] = {}
     for package_rows in grouped.values():
+        expected: list[str] = []
         version: str | None = None
+        for _ in package_rows:
+            version = next_version(version)
+            expected.append(version)
+        try:
+            existing = sorted((str(row["version"]) for row in package_rows), key=parse_version)
+        except ValueError:
+            existing = []
+        if existing == expected:
+            mapping.update({int(row["id"]): str(row["version"]) for row in package_rows})
+            continue
+
+        version = None
         for row in sorted(package_rows, key=_sort_key):
             version = next_version(version)
             mapping[int(row["id"])] = version
@@ -105,48 +118,54 @@ async def migrate(
             prepared = prepare_migration(rows, token)
             if not apply:
                 return prepared
-
-            changed = [item for item in prepared if item["changed"]]
-            for item in changed:
-                await connection.execute(
-                    text("UPDATE sdk_configs SET version=:temporary WHERE id=:id"),
-                    {"temporary": f"__version_migration_{item['id']}", "id": item["id"]},
-                )
-            for item in changed:
-                await connection.execute(
-                    text(
-                        "UPDATE sdk_configs SET version=:version, encrypted_config=CAST(:envelope AS jsonb), "
-                        "cdn_url=:cdn_url, cos_key='local', updated_at=NOW() WHERE id=:id"
-                    ),
-                    {
-                        "version": item["version"],
-                        "envelope": json.dumps(item["envelope"], ensure_ascii=False),
-                        "cdn_url": local_delivery_url(
-                            local_base_url, item["package_name"], item["version"]
-                        ),
-                        "id": item["id"],
-                    },
-                )
-            await connection.execute(text("ALTER TABLE sdk_configs DROP CONSTRAINT IF EXISTS chk_configs_formal_version"))
-            await connection.execute(
-                text(
-                    "ALTER TABLE sdk_configs ADD CONSTRAINT chk_configs_formal_version "
-                    "CHECK (status = 'draft' OR version ~ '^[0-9]+\\.[0-9]\\.[0-9]$')"
-                )
-            )
-            invalid = (
-                await connection.execute(
-                    text(
-                        "SELECT COUNT(*) FROM sdk_configs WHERE status IN ('published', 'archived') "
-                        "AND version !~ '^[0-9]+\\.[0-9]\\.[0-9]$'"
-                    )
-                )
-            ).scalar_one()
-            if invalid:
-                raise RuntimeError(f"迁移后仍有 {invalid} 条非法正式版本")
+            await apply_prepared(connection, prepared, local_base_url)
             return prepared
     finally:
         await engine.dispose()
+
+
+async def apply_prepared(connection, prepared: Sequence[Mapping[str, Any]], local_base_url: str) -> None:
+    """在调用方事务内安装准备好的版本和信封。"""
+    await connection.execute(
+        text("ALTER TABLE sdk_configs DROP CONSTRAINT IF EXISTS chk_configs_formal_version")
+    )
+    changed = [item for item in prepared if item["changed"]]
+    for item in changed:
+        await connection.execute(
+            text("UPDATE sdk_configs SET version=:temporary WHERE id=:id"),
+            {"temporary": f"__version_migration_{item['id']}", "id": item["id"]},
+        )
+    for item in changed:
+        await connection.execute(
+            text(
+                "UPDATE sdk_configs SET version=:version, encrypted_config=CAST(:envelope AS jsonb), "
+                "cdn_url=:cdn_url, cos_key='local', updated_at=NOW() WHERE id=:id"
+            ),
+            {
+                "version": item["version"],
+                "envelope": json.dumps(item["envelope"], ensure_ascii=False),
+                "cdn_url": local_delivery_url(
+                    local_base_url, item["package_name"], item["version"]
+                ),
+                "id": item["id"],
+            },
+        )
+    await connection.execute(
+        text(
+            "ALTER TABLE sdk_configs ADD CONSTRAINT chk_configs_formal_version "
+            "CHECK (status = 'draft' OR version ~ '^[0-9]+\\.[0-9]\\.[0-9]$')"
+        )
+    )
+    invalid = (
+        await connection.execute(
+            text(
+                "SELECT COUNT(*) FROM sdk_configs WHERE status IN ('published', 'archived') "
+                "AND version !~ '^[0-9]+\\.[0-9]\\.[0-9]$'"
+            )
+        )
+    ).scalar_one()
+    if invalid:
+        raise RuntimeError(f"迁移后仍有 {invalid} 条非法正式版本")
 
 
 def main() -> None:
