@@ -77,7 +77,7 @@ def test_rate_limit_returns_429_after_exceed(client):
             resp = client.post(
                 "/api/v1/click",
                 json={
-                    "app_id": "test",
+                    "package_name": "test",
                     "device_id": f"dev-{i}",
                     "events": [{"type": "click", "page": "home", "element": "btn"}],
                 },
@@ -88,7 +88,7 @@ def test_rate_limit_returns_429_after_exceed(client):
         resp = client.post(
             "/api/v1/click",
             json={
-                "app_id": "test",
+                "package_name": "test",
                 "device_id": "dev-overflow",
                 "events": [{"type": "click", "page": "home", "element": "btn"}],
             },
@@ -122,7 +122,7 @@ def test_all_events_rejected_returns_error_code(client):
         resp = client.post(
             "/api/v1/click",
             json={
-                "app_id": "test",
+                "package_name": "test",
                 "device_id": "dev-1",
                 "events": [
                     {"type": "click"},  # 无 page 无 element → 校验失败
@@ -154,7 +154,7 @@ def test_log_route_uses_shared_rate_limit_bucket(client):
             resp = client.post(
                 "/api/v1/click",
                 json={
-                    "app_id": "test",
+                    "package_name": "test",
                     "device_id": f"click-{i}",
                     "events": [{"type": "click", "page": "home", "element": "btn"}],
                 },
@@ -164,7 +164,7 @@ def test_log_route_uses_shared_rate_limit_bucket(client):
         resp = client.post(
             "/api/v1/log",
             json={
-                "app_id": "test",
+                "package_name": "test",
                 "device_id": "log-overflow",
                 "logs": [{"level": "info", "message": "overflow"}],
             },
@@ -194,7 +194,7 @@ def test_read_routes_exempt_from_write_rate_limit(client, dependency_keys):
         resp = client.post(
             "/api/v1/click",
             json={
-                "app_id": "test",
+                "package_name": "test",
                 "device_id": "dev-after-reads",
                 "events": [{"type": "click", "page": "home", "element": "btn"}],
             },
@@ -221,7 +221,7 @@ def test_click_db_execute_failure_rolls_back_and_returns_500(client):
         resp = client.post(
             "/api/v1/click",
             json={
-                "app_id": "test",
+                "package_name": "test",
                 "device_id": "dev-db-fail",
                 "events": [{"type": "click", "page": "home", "element": "btn"}],
             },

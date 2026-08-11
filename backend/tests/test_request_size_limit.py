@@ -33,7 +33,7 @@ async def test_sdk_normal_request_passes(db_override):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         r = await client.post(
             "/api/v1/click",
-            json={"app_id": "t", "device_id": "d", "events": [{"type": "click", "page": "p"}]},
+            json={"package_name": "t", "device_id": "d", "events": [{"type": "click", "page": "p"}]},
         )
     assert r.status_code == 200
 

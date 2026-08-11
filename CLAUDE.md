@@ -42,9 +42,9 @@ D:\code\SDK\
 5. 验证 4 个接口（用 curl）：
    - GET /health
    - GET /api/v1/version?platform=ios&current_version=0
-   - GET /api/v1/config/meta?app_id=test
-   - POST /api/v1/click {"app_id":"test","device_id":"dev1","events":[{"type":"click","page":"home","element":"btn"}]}
-   - POST /api/v1/log {"app_id":"test","device_id":"dev1","logs":[{"level":"info","message":"test"}]}
+   - POST /api/v1/config/meta {"package_name":"test"}
+   - POST /api/v1/click {"package_name":"test","device_id":"dev1","events":[{"type":"click","page":"home","element":"btn"}]}
+   - POST /api/v1/log {"package_name":"test","device_id":"dev1","logs":[{"level":"info","message":"test","extra":"raw"}]}
 
 ### Phase 2（Phase 1 通过后）
 按照 D:\code\SDK\docs\04-IMPLEMENTATION-PLAN.md 中的 Task 2.1~2.7 依次执行：

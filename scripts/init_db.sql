@@ -15,7 +15,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE IF NOT EXISTS sdk_events (
     id              BIGSERIAL,
     event_type      VARCHAR(50)   NOT NULL,
-    app_id          VARCHAR(32)   NOT NULL,
+    package_name    VARCHAR(255)  NOT NULL,
     device_id       VARCHAR(64),
     sdk_version     VARCHAR(20),
     session_id      VARCHAR(64),
@@ -52,7 +52,7 @@ END $$;
 -- 索引
 CREATE INDEX IF NOT EXISTS idx_events_type_ts ON sdk_events (event_type, server_ts DESC);
 CREATE INDEX IF NOT EXISTS idx_events_device ON sdk_events (device_id, server_ts DESC);
-CREATE INDEX IF NOT EXISTS idx_events_app ON sdk_events (app_id, server_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_events_package ON sdk_events (package_name, server_ts DESC);
 CREATE INDEX IF NOT EXISTS idx_events_session ON sdk_events (session_id, server_ts DESC);
 CREATE INDEX IF NOT EXISTS idx_events_payload ON sdk_events USING GIN (payload jsonb_path_ops);
 CREATE INDEX IF NOT EXISTS idx_events_client_ts ON sdk_events (client_ts DESC);
@@ -125,7 +125,7 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS mv_daily_event_stats AS
 SELECT
     date_trunc('day', server_ts)::DATE AS stat_date,
     event_type,
-    app_id,
+    package_name,
     payload->>'page'     AS page,
     payload->>'element' AS element,
     COUNT(*)            AS event_count,
@@ -133,7 +133,7 @@ SELECT
 FROM sdk_events
 GROUP BY 1, 2, 3, 4, 5;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_daily ON mv_daily_event_stats (stat_date, event_type, app_id, page, element);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_daily ON mv_daily_event_stats (stat_date, event_type, package_name, page, element);
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_hourly_trend AS
 SELECT
