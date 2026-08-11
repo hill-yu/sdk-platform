@@ -65,7 +65,7 @@ def test_meta_returns_404_for_unknown_package(client):
 def test_package_payload_is_encrypted_and_bound_to_type(client):
     published = _published()
     client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
-    response = client.get(
+    response = client.post(
         "/api/v1/config/packages/com.example.app/versions/1.0.11/new-touch",
         headers=_headers(),
     )
@@ -77,8 +77,16 @@ def test_package_payload_is_encrypted_and_bound_to_type(client):
 
 
 def test_package_payload_requires_token(client):
-    response = client.get("/api/v1/config/packages/com.example.app/versions/1.0.11/main")
+    response = client.post("/api/v1/config/packages/com.example.app/versions/1.0.11/main")
     assert response.status_code == 401
+
+
+def test_package_payload_get_method_is_disabled(client):
+    response = client.get(
+        "/api/v1/config/packages/com.example.app/versions/1.0.11/main",
+        headers=_headers(),
+    )
+    assert response.status_code == 405
 
 
 def test_old_latest_route_is_removed(client):

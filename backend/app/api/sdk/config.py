@@ -43,7 +43,7 @@ async def get_config_meta(body: ConfigMetaRequest, db: AsyncSession = Depends(ge
     }
 
 
-@router.get(
+@router.post(
     "/api/v1/config/packages/{package_name}/versions/{version}/{config_type}",
     dependencies=[Depends(require_sdk_config_token)],
 )
