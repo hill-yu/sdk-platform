@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
 
 import pytest
@@ -51,29 +50,6 @@ class FakeDb:
         pass
 
 
-@pytest.mark.asyncio
-async def test_rollback_keeps_original_version(monkeypatch):
-    db = FakeDbLock(lock_ok=True)
-    config = FakeConfig(config_id=3, version="20260629_v2", status="archived")
-
-    # _upload_config_payload is now sync, called via asyncio.to_thread
-    def fake_upload(_cos_key: str, _json_bytes: bytes) -> str:
-        return "https://cdn.test.local/config/test.json"
-
-    monkeypatch.setattr(config_service, "_upload_config_payload", fake_upload)
-
-    result = await config_service._publish_from_record(db, config, "admin")
-
-    # Version is now generated with %f microseconds, so it won't match old value
-    assert result["version"] != "20260629_v2"
-    assert config.version != "20260629_v2"
-    # Verify version format: YYYYMMDD_vHHMMSS_ffffff
-    assert re.match(r"\d{8}_v\d{6}_\d{6}", result["version"]), f"Unexpected version format: {result['version']}"
-    # 3.1 重构后 service 不再自行 flush/commit，事务由外层 get_db 管理
-    assert db.executed
-    assert config.cos_upload_status == "success"
-
-
 class _FakeScalarResult:
     """可配置 scalar() 返回值的假结果对象"""
     def __init__(self, scalar_value):
@@ -85,14 +61,21 @@ class _FakeScalarResult:
     def scalar_one_or_none(self):
         return self._scalar_value
 
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._scalar_value
+
 
 class FakeDbLock:
     """支持可配置返回值 + lock 模拟的假 DB"""
-    def __init__(self, lock_ok: bool = True):
+    def __init__(self, lock_ok: bool = True, versions: list[str] | None = None):
         self.executed = []
         self.committed = False
         self.rolled_back = False
         self._lock_ok = lock_ok
+        self._versions = versions or []
         self._configs: dict[int, object] = {}
 
     def add_config(self, config):
@@ -110,6 +93,8 @@ class FakeDbLock:
         stmt_str = str(stmt)
         if "pg_try_advisory_xact_lock" in stmt_str:
             return _FakeScalarResult(self._lock_ok)
+        if "SELECT sdk_configs.version" in stmt_str:
+            return _FakeScalarResult(self._versions)
         return _FakeScalarResult(None)
 
     async def flush(self):
@@ -159,6 +144,60 @@ async def test_publish_cos_failure_rollback(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_publish_uses_next_version_from_same_package_history(monkeypatch):
+    monkeypatch.setenv("CONFIG_DELIVERY_MODE", "local")
+    from app.core.config import get_settings
+    get_settings.cache_clear()
+    db = FakeDbLock(lock_ok=True, versions=["1.0.8", "1.0.9"])
+    draft = FakeConfig(config_id=1, version="draft_v1", status="draft")
+    db.add_config(draft)
+
+    result = await config_service.publish_config(db, 1, "admin")
+
+    assert result["version"] == "1.1.0"
+    assert draft.version == "1.1.0"
+    get_settings.cache_clear()
+
+
+@pytest.mark.anyio
+async def test_first_publish_for_each_package_starts_at_1_0_0(monkeypatch):
+    monkeypatch.setenv("CONFIG_DELIVERY_MODE", "local")
+    from app.core.config import get_settings
+    get_settings.cache_clear()
+    db = FakeDbLock(lock_ok=True, versions=[])
+    draft = FakeConfig(config_id=1, version="draft_v1", status="draft")
+    draft.package_name = "com.new.app"
+    draft.encrypted_config = encrypt_payload(
+        {"mainConfig": {}, "newTouchConfig": {}, "newTextRuleConfig": {}},
+        draft.package_name,
+        draft.version,
+        "full",
+        "sdk-config-test-token-1234567890",
+    )
+    db.add_config(draft)
+
+    result = await config_service.publish_config(db, 1, "admin")
+
+    assert result["version"] == "1.0.0"
+    get_settings.cache_clear()
+
+
+@pytest.mark.anyio
+async def test_publish_after_rollback_continues_from_historical_maximum(monkeypatch):
+    monkeypatch.setenv("CONFIG_DELIVERY_MODE", "local")
+    from app.core.config import get_settings
+    get_settings.cache_clear()
+    db = FakeDbLock(lock_ok=True, versions=["1.0.3", "1.1.1"])
+    draft = FakeConfig(config_id=4, version="draft_v2", status="draft")
+    db.add_config(draft)
+
+    result = await config_service.publish_config(db, 4, "admin")
+
+    assert result["version"] == "1.1.2"
+    get_settings.cache_clear()
+
+
+@pytest.mark.anyio
 async def test_rollback_cos_failure_no_change(monkeypatch):
     """回滚 COS 失败时 published 不变，archived 不变"""
     from fastapi import HTTPException
@@ -180,19 +219,19 @@ async def test_rollback_cos_failure_no_change(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_rollback_preserves_history_and_creates_new_record(monkeypatch):
+async def test_rollback_reuses_history_record_and_version(monkeypatch):
     monkeypatch.setenv("CONFIG_DELIVERY_MODE", "local")
     from app.core.config import get_settings
     get_settings.cache_clear()
     db = FakeDbLock(lock_ok=True)
-    archived = FakeConfig(config_id=3, version="20260629_v2", status="archived")
+    archived = FakeConfig(config_id=3, version="1.0.3", status="archived")
     db.add_config(archived)
+    before_ids = set(db._configs)
     result = await config_service.rollback_config(db, 3, "admin")
-    assert archived.status == "archived"
-    assert archived.version == "20260629_v2"
-    created = db._configs[4]
-    assert created.status == "published"
-    assert created.version == result["version"]
+    assert set(db._configs) == before_ids
+    assert archived.status == "published"
+    assert archived.version == "1.0.3"
+    assert result["version"] == "1.0.3"
     get_settings.cache_clear()
 
 

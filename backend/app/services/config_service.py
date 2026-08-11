@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.models.config import SdkConfig
 from app.services.config_crypto import decrypt_payload, encrypt_payload, normalize_package_name
+from app.services.config_version import max_version, next_version
 
 logger = logging.getLogger(__name__)
 ROOT_KEYS = {
@@ -141,40 +142,39 @@ async def rollback_config(db: AsyncSession, config_id: int, published_by: str) -
     source = await db.get(SdkConfig, config_id)
     if source is None or source.status != "archived":
         raise ValueError("只能回滚 archived 状态的配置")
+    await _acquire_package_lock(db, source.package_name)
     plain = decrypt_payload(source.encrypted_config, _token())
     _validate_full_config(plain)
-    draft_version = f"draft_{datetime.now(timezone.utc):%Y%m%d%H%M%S_%f}"
-    config = SdkConfig(
-        package_name=source.package_name,
-        version=draft_version,
-        encrypted_config=encrypt_payload(plain, source.package_name, draft_version, "full", _token()),
-        encryption_key_id="v1",
-        status="draft",
-        change_log=f"回滚自历史版本 {source.version}",
-        cos_upload_status="pending",
+    envelopes = _delivery_envelopes(plain, source.package_name, source.version)
+    if not _is_local_delivery_mode():
+        await _upload_envelopes(source.package_name, source.version, envelopes)
+
+    await db.execute(
+        update(SdkConfig).where(
+            SdkConfig.package_name == source.package_name,
+            SdkConfig.status == "published",
+            SdkConfig.id != source.id,
+        ).values(status="archived")
     )
-    db.add(config)
+    source.status = "published"
+    source.publish_at = datetime.now(timezone.utc)
+    source.published_by = published_by
+    source.cos_key = "local" if _is_local_delivery_mode() else _object_key(source.package_name, source.version, "main")
+    source.cos_upload_status = "success"
+    source.cdn_url = _delivery_url(source.package_name, source.version, "main")
     await db.flush()
-    return await _publish_from_record(db, config, published_by)
+    return _publish_result(source)
 
 
 async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by: str) -> dict[str, Any]:
-    lock_key = int.from_bytes(hashlib.sha256(config.package_name.encode()).digest()[:8], "big", signed=True)
-    result = await db.execute(text("SELECT pg_try_advisory_xact_lock(:lock_key)").bindparams(lock_key=lock_key))
-    if not result.scalar():
-        raise HTTPException(status_code=409, detail="同一包名的另一发布操作正在进行，请稍后重试")
+    await _acquire_package_lock(db, config.package_name)
 
     plain = decrypt_payload(config.encrypted_config, _token())
     _validate_full_config(plain)
-    version = datetime.now(timezone.utc).strftime("%Y%m%d_v%H%M%S_%f")
-    envelopes = {
-        config_type: encrypt_payload(plain[root_key], config.package_name, version, config_type, _token())
-        for config_type, root_key in ROOT_KEYS.items()
-    }
+    version = await _next_package_version(db, config.package_name)
+    envelopes = _delivery_envelopes(plain, config.package_name, version)
     if not _is_local_delivery_mode():
-        for config_type, envelope in envelopes.items():
-            body = json.dumps(envelope, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-            await _upload_with_retry(_object_key(config.package_name, version, config_type), body)
+        await _upload_envelopes(config.package_name, version, envelopes)
 
     await db.execute(
         update(SdkConfig).where(
@@ -192,13 +192,49 @@ async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by
     config.cos_upload_status = "success"
     config.cdn_url = _delivery_url(config.package_name, version, "main")
     await db.flush()
+    return _publish_result(config)
+
+
+async def _acquire_package_lock(db: AsyncSession, package_name: str) -> None:
+    lock_key = int.from_bytes(hashlib.sha256(package_name.encode()).digest()[:8], "big", signed=True)
+    result = await db.execute(text("SELECT pg_try_advisory_xact_lock(:lock_key)").bindparams(lock_key=lock_key))
+    if not result.scalar():
+        raise HTTPException(status_code=409, detail="同一包名的另一发布操作正在进行，请稍后重试")
+
+
+async def _next_package_version(db: AsyncSession, package_name: str) -> str:
+    versions = (
+        await db.execute(
+            select(SdkConfig.version).where(
+                SdkConfig.package_name == package_name,
+                SdkConfig.status.in_(("published", "archived")),
+            )
+        )
+    ).scalars().all()
+    return next_version(max_version(versions))
+
+
+def _delivery_envelopes(plain: dict[str, Any], package_name: str, version: str) -> dict[str, dict[str, str]]:
+    return {
+        config_type: encrypt_payload(plain[root_key], package_name, version, config_type, _token())
+        for config_type, root_key in ROOT_KEYS.items()
+    }
+
+
+async def _upload_envelopes(package_name: str, version: str, envelopes: dict[str, dict[str, str]]) -> None:
+    for config_type, envelope in envelopes.items():
+        body = json.dumps(envelope, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        await _upload_with_retry(_object_key(package_name, version, config_type), body)
+
+
+def _publish_result(config: SdkConfig) -> dict[str, Any]:
     return {
         "package_name": config.package_name,
-        "version": version,
+        "version": config.version,
         "publish_at": config.publish_at.isoformat(),
         "cdn_url": config.cdn_url,
-        "cdn_url2": _delivery_url(config.package_name, version, "new_touch"),
-        "cdn_url3": _delivery_url(config.package_name, version, "new_text_rule"),
+        "cdn_url2": _delivery_url(config.package_name, config.version, "new_touch"),
+        "cdn_url3": _delivery_url(config.package_name, config.version, "new_text_rule"),
         "cos_key": config.cos_key,
     }
 
