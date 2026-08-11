@@ -5,6 +5,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core.database import get_db
+from app.core.middleware import RequestSizeLimitMiddleware
 
 
 # ── SDK API (1MB 限制) ──────────────────────────────────────────
@@ -247,3 +248,28 @@ async def test_admin_negative_content_length_returns_400():
             },
         )
     assert r.status_code == 400
+
+
+@pytest.mark.anyio
+async def test_request_body_read_time_is_exposed_in_asgi_state():
+    captured_state = {}
+
+    async def inner(scope, receive, send):
+        captured_state.update(scope["state"])
+        await receive()
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    app = RequestSizeLimitMiddleware(inner, max_bytes=100)
+    messages = iter([{"type": "http.request", "body": b"{}", "more_body": False}])
+
+    async def receive():
+        return next(messages)
+
+    async def send(_message):
+        pass
+
+    await app({"type": "http", "headers": [], "state": {}}, receive, send)
+
+    assert captured_state["request_body_bytes"] == 2
+    assert captured_state["request_body_read_ms"] >= 0

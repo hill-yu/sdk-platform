@@ -65,8 +65,10 @@ COMMENT ON COLUMN sdk_events.payload IS 'JSONB灵活存储事件数据';
 -- ============================================================
 CREATE TABLE IF NOT EXISTS sdk_configs (
     id              SERIAL PRIMARY KEY,
-    version         VARCHAR(32)   NOT NULL,
-    config_data     JSONB         NOT NULL,
+    package_name    VARCHAR(255)  NOT NULL,
+    version         VARCHAR(64)   NOT NULL,
+    encrypted_config JSONB        NOT NULL,
+    encryption_key_id VARCHAR(32) NOT NULL DEFAULT 'v1',
     status          VARCHAR(20)   NOT NULL DEFAULT 'draft',
     publish_at      TIMESTAMPTZ,
     published_by    VARCHAR(64),
@@ -77,13 +79,13 @@ CREATE TABLE IF NOT EXISTS sdk_configs (
     created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
 
-    CONSTRAINT uq_configs_version UNIQUE (version),
+    CONSTRAINT uq_configs_package_version UNIQUE (package_name, version),
     CONSTRAINT chk_configs_status CHECK (status IN ('draft', 'published', 'archived')),
     CONSTRAINT chk_configs_cos_upload_status CHECK (cos_upload_status IN ('pending', 'success', 'failed'))
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_configs_one_published ON sdk_configs (status) WHERE status = 'published';
-CREATE INDEX IF NOT EXISTS idx_configs_status ON sdk_configs (status, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sdk_configs_published_package ON sdk_configs (package_name) WHERE status = 'published';
+CREATE INDEX IF NOT EXISTS idx_configs_status ON sdk_configs (package_name, status, created_at DESC);
 
 COMMENT ON TABLE sdk_configs IS '配置表版本记录';
 
@@ -203,21 +205,7 @@ $$ LANGUAGE plpgsql;
 -- ============================================================
 -- 8. 初始数据
 -- ============================================================
-INSERT INTO sdk_configs (version, config_data, status, change_log, cos_upload_status)
-VALUES (
-    '20260630_init',
-    '{
-        "features": {},
-        "rules": [],
-        "urls": {
-            "api_base": "https://api.example.com",
-            "cdn_base": "https://cdn.example.com"
-        }
-    }'::jsonb,
-    'draft',
-    '初始配置模板（部署后请通过管理后台编辑并正式发布）',
-    'pending'
-) ON CONFLICT (version) DO NOTHING;
+-- 加密配置必须由管理后台创建；初始化脚本不写入明文配置或默认包名。
 
 -- ============================================================
 -- 完成

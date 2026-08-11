@@ -1,6 +1,9 @@
 """ASGI 中间件: 请求体大小限制"""
 
 
+from time import perf_counter
+
+
 class RequestSizeLimitMiddleware:
     """纯 ASGI 中间件：限制请求体大小，超限返回413
 
@@ -35,6 +38,7 @@ class RequestSizeLimitMiddleware:
                 return
 
         # ① 缓冲全部 body chunk
+        read_started = perf_counter()
         total = 0
         chunks = []
         more_body = True
@@ -61,6 +65,9 @@ class RequestSizeLimitMiddleware:
             chunks.append(message)
 
         # ② 未超限：重放 body 给 app
+        scope.setdefault("state", {})["request_body_bytes"] = total
+        scope["state"]["request_body_read_ms"] = (perf_counter() - read_started) * 1000
+
         chunk_iter = iter(chunks)
         async def replay_receive():
             try:

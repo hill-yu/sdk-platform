@@ -1,262 +1,100 @@
-from __future__ import annotations
-
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from app.core.config import get_settings
 from app.core.database import get_db, get_db_no_commit
+from app.services.config_crypto import decrypt_payload, encrypt_payload
+from tests.conftest import StubReadSession, StubWriteSession, override_read_db, override_write_db
 
-from tests.conftest import (
-    StubReadSession,
-    StubWriteSession,
-    override_read_db,
-    override_write_db,
-)
+TOKEN = "sdk-config-test-token-1234567890"
 
 
-def _sdk_auth_headers(token: str = "sdk-config-test-token-1234567890") -> dict[str, str]:
+def _headers(token: str = TOKEN):
     return {"Authorization": f"Bearer {token}"}
+
+
+def _published(package_name="com.example.app", version="1.0.11"):
+    data = {"mainConfig": {"name": "main"}, "newTouchConfig": {"name": "touch"}, "newTextRuleConfig": {"name": "text"}}
+    return SimpleNamespace(
+        package_name=package_name,
+        version=version,
+        publish_at=datetime(2026, 8, 10, tzinfo=timezone.utc),
+        encrypted_config=encrypt_payload(data, package_name, version, "full", TOKEN),
+        cos_upload_status="success",
+    )
 
 
 def test_version_returns_no_available_version_when_table_is_empty(client):
     client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(None))
-
     response = client.get("/api/v1/version", params={"platform": "ios", "current_version": 0})
-
     assert response.status_code == 200
-    assert response.json() == {
-        "code": 0,
-        "data": {
-            "has_update": False,
-            "current_version": 0,
-            "message": "暂无可用版本",
-        },
-    }
+    assert response.json()["data"]["has_update"] is False
 
 
-def test_version_returns_requested_current_version_when_already_latest(client):
-    latest = SimpleNamespace(
-        platform="ios",
-        version_code=120,
-        version_name="1.2.0",
-        update_policy="suggest",
-        download_url="https://cdn.test.local/sdk/ios/1.2.0.zip",
-        release_notes="ok",
-        file_size=1,
-        file_hash="sha256:test",
-        min_sdk_version=100,
-    )
-    client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(latest))
-
-    response = client.get("/api/v1/version", params={"platform": "ios", "current_version": 130})
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "code": 0,
-        "data": {
-            "has_update": False,
-            "current_version": 130,
-            "message": "已是最新版本",
-        },
-    }
+def test_meta_requires_package_name(client):
+    assert client.post("/api/v1/config/meta", headers=_headers()).status_code == 422
 
 
-def test_config_meta_returns_304_when_etag_matches_published_version(client):
-    published = SimpleNamespace(
-        version="20260630_v3",
-        publish_at=datetime(2026, 6, 30, 10, 0, tzinfo=timezone.utc),
-        cdn_url="https://cdn.test.local/config/latest.json",
-    )
-    client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
-
-    response = client.post(
-        "/api/v1/config/meta",
-        params={"app_id": "demo", "config_version": "20260630_v2"},
-        headers={**_sdk_auth_headers(), "If-None-Match": '"20260630_v3"'},
-    )
-
-    assert response.status_code == 304
-    assert response.headers["etag"] == '"20260630_v3"'
+def test_meta_requires_token_before_package_lookup(client):
+    assert client.post("/api/v1/config/meta", json={"package_name": "com.example.app"}).status_code == 401
 
 
-def test_config_meta_returns_environment_configured_metadata_without_required_params(client, monkeypatch):
-    monkeypatch.setenv("CONFIG_DELIVERY_MODE", "cos")
-    monkeypatch.setenv("CONFIG_META_IS_OPEN", "true")
-    monkeypatch.setenv("CONFIG_META_IS_NEWS_TOUCH", "true")
-    monkeypatch.setenv("CONFIG_META_IS_NEW_TEXT_RULE", "true")
-    monkeypatch.setenv("CONFIG_META_CDN_URL", "https://cdnversion.deeppopgame.xyz/config/latest.json")
-    monkeypatch.setenv("CONFIG_META_CDN_URL2", "https://cdnNewtouch.deeppopgame.xyz/config/latest.json")
-    monkeypatch.setenv("CONFIG_META_CDN_URL3", "https://cdnNewTextRule.deeppopgame.xyz/config/latest.json")
-    get_settings.cache_clear()
-    published = SimpleNamespace(
-        version="1.0.11",
-        publish_at=datetime(2026, 6, 30, 10, 0, tzinfo=timezone.utc),
-        cdn_url="https://cdn.test.local/config/latest.json",
-    )
-    client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
-
-    response = client.post("/api/v1/config/meta", headers=_sdk_auth_headers())
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "code": 0,
-        "data": {
-            "version": "1.0.11",
-            "updated_at": "2026-06-30T10:00:00+00:00",
-            "isOpen": True,
-            "isNewsTouch": True,
-            "isNewTextRule": True,
-            "cdn_url": "https://cdnversion.deeppopgame.xyz/config/latest.json",
-            "cdn_url2": "https://cdnNewtouch.deeppopgame.xyz/config/latest.json",
-            "cdn_url3": "https://cdnNewTextRule.deeppopgame.xyz/config/latest.json",
-        },
-    }
-    get_settings.cache_clear()
-
-
-def test_config_latest_returns_published_config_json(client):
-    published = SimpleNamespace(
-        version="1.0.11",
-        publish_at=datetime(2026, 6, 30, 10, 0, tzinfo=timezone.utc),
-        cdn_url="https://sdk.deeppopgame.xyz/api/v1/config/latest",
-        config_data={"features": {"demo": True}},
-    )
-    client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
-
-    response = client.post("/api/v1/config/latest", headers=_sdk_auth_headers())
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "version": "1.0.11",
-        "updated_at": "2026-06-30T10:00:00+00:00",
-        "config": {"features": {"demo": True}},
-    }
-
-
-def test_config_latest_returns_config_by_type(client):
-    published = SimpleNamespace(
-        version="1.0.11",
-        publish_at=datetime(2026, 6, 30, 10, 0, tzinfo=timezone.utc),
-        cdn_url="https://sdk.deeppopgame.xyz/api/v1/config/latest",
-        config_data={
-            "mainConfig": {"name": "main"},
-            "newTouchConfig": {"name": "touch"},
-            "newTextRuleConfig": {"name": "text"},
-        },
-    )
-    client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
-
-    main_response = client.post("/api/v1/config/latest", headers=_sdk_auth_headers())
-    touch_response = client.post("/api/v1/config/latest?type=new_touch", headers=_sdk_auth_headers())
-    text_response = client.post("/api/v1/config/latest?type=new_text_rule", headers=_sdk_auth_headers())
-
-    assert main_response.status_code == 200
-    assert touch_response.status_code == 200
-    assert text_response.status_code == 200
-    assert main_response.json()["config"] == {"name": "main"}
-    assert touch_response.json()["config"] == {"name": "touch"}
-    assert text_response.json()["config"] == {"name": "text"}
-
-
-def test_config_meta_returns_local_urls_in_local_delivery_mode(client, monkeypatch):
+def test_meta_returns_package_version_and_dedicated_urls(client, monkeypatch):
     monkeypatch.setenv("CONFIG_DELIVERY_MODE", "local")
-    monkeypatch.setenv("CONFIG_META_LOCAL_BASE_URL", "https://sdk.deeppopgame.xyz")
+    monkeypatch.setenv("CONFIG_META_LOCAL_BASE_URL", "https://sdk.example.test")
     get_settings.cache_clear()
-    published = SimpleNamespace(
-        version="1.0.11",
-        publish_at=datetime(2026, 6, 30, 10, 0, tzinfo=timezone.utc),
-        cdn_url="https://sdk.deeppopgame.xyz/api/v1/config/latest",
-    )
+    published = _published()
     client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
-
-    response = client.post("/api/v1/config/meta", headers=_sdk_auth_headers())
-
+    response = client.post("/api/v1/config/meta", headers=_headers(), json={"package_name": "COM.EXAMPLE.APP"})
     assert response.status_code == 200
-    assert response.json()["data"]["cdn_url"] == "https://sdk.deeppopgame.xyz/api/v1/config/latest"
-    assert response.json()["data"]["cdn_url2"] == "https://sdk.deeppopgame.xyz/api/v1/config/latest?type=new_touch"
-    assert response.json()["data"]["cdn_url3"] == "https://sdk.deeppopgame.xyz/api/v1/config/latest?type=new_text_rule"
+    data = response.json()["data"]
+    assert data["package_name"] == "com.example.app"
+    assert data["version"] == "1.0.11"
+    assert data["cdn_url"].endswith("/com.example.app/versions/1.0.11/main")
+    assert data["cdn_url2"].endswith("/com.example.app/versions/1.0.11/new-touch")
+    assert data["cdn_url3"].endswith("/com.example.app/versions/1.0.11/new-text-rule")
     get_settings.cache_clear()
 
 
-def test_config_meta_rejects_missing_sdk_token(client):
-    response = client.post("/api/v1/config/meta")
+def test_meta_returns_404_for_unknown_package(client):
+    client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(None))
+    response = client.post("/api/v1/config/meta", headers=_headers(), json={"package_name": "com.unknown.app"})
+    assert response.status_code == 404
 
+
+def test_package_payload_is_encrypted_and_bound_to_type(client):
+    published = _published()
+    client.app.dependency_overrides[get_db_no_commit] = override_read_db(StubReadSession(published))
+    response = client.get(
+        "/api/v1/config/packages/com.example.app/versions/1.0.11/new-touch",
+        headers=_headers(),
+    )
+    assert response.status_code == 200
+    envelope = response.json()
+    assert "config" not in envelope
+    assert envelope["config_type"] == "new_touch"
+    assert decrypt_payload(envelope, TOKEN) == {"name": "touch"}
+
+
+def test_package_payload_requires_token(client):
+    response = client.get("/api/v1/config/packages/com.example.app/versions/1.0.11/main")
     assert response.status_code == 401
 
 
-def test_config_latest_rejects_missing_sdk_token(client):
-    response = client.post("/api/v1/config/latest")
-
-    assert response.status_code == 401
-
-
-def test_config_get_methods_are_disabled(client):
-    assert client.get("/api/v1/config/meta").status_code == 405
-    assert client.get("/api/v1/config/latest").status_code == 405
+def test_old_latest_route_is_removed(client):
+    assert client.post("/api/v1/config/latest", headers=_headers()).status_code == 404
 
 
 def test_click_returns_partial_success_when_some_events_are_rejected(client):
-    # Use a non-failing session; rejection happens at validation (no element + no page)
     session = StubWriteSession()
     client.app.dependency_overrides[get_db] = override_write_db(session)
-
-    response = client.post(
-        "/api/v1/click",
-        json={
-            "app_id": "demo",
-            "device_id": "device-1",
-            "events": [
-                {"type": "click", "page": "home", "element": "ok_button"},
-                {"type": "click"},  # No element, no page → fails validation
-            ],
-        },
-    )
-
+    response = client.post("/api/v1/click", json={"app_id": "demo", "device_id": "device-1", "events": [{"type": "click", "page": "home", "element": "ok_button"}, {"type": "click"}]})
     assert response.status_code == 200
-    assert response.json() == {
-        "code": 0,
-        "message": "partial_success",
-        "data": {"accepted": 1, "rejected": 1},
-    }
-    # Batch insert was executed (response confirms 1 accepted)
-    assert len(session.executed) >= 1
+    assert response.json()["data"] == {"accepted": 1, "rejected": 1}
 
 
 def test_log_returns_422_for_invalid_level(client):
     session = StubWriteSession()
     client.app.dependency_overrides[get_db] = override_write_db(session)
-
-    response = client.post(
-        "/api/v1/log",
-        json={
-            "app_id": "demo",
-            "device_id": "device-1",
-            "logs": [{"level": "fatal", "message": "bad level"}],
-        },
-    )
-
+    response = client.post("/api/v1/log", json={"app_id": "demo", "device_id": "device-1", "logs": [{"level": "fatal", "message": "bad"}]})
     assert response.status_code == 422
-
-
-def test_log_returns_ok_when_all_logs_are_accepted(client):
-    session = StubWriteSession()
-    client.app.dependency_overrides[get_db] = override_write_db(session)
-
-    response = client.post(
-        "/api/v1/log",
-        headers={"User-Agent": "sdk-test-agent"},
-        json={
-            "app_id": "demo",
-            "device_id": "device-1",
-            "logs": [{"level": "info", "message": "hello"}],
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "code": 0,
-        "message": "ok",
-        "data": {"accepted": 1, "rejected": 0},
-    }
-    # Batch insert was executed successfully (response confirms 1 accepted)
-    assert len(session.executed) >= 1

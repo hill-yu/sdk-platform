@@ -54,6 +54,7 @@ async def test_reconcile_latest_matches_db(monkeypatch):
     # 构造模拟 DB 返回
     class FakeConfig:
         id = 1
+        package_name = "com.example.app"
         version = "20260716_v120000_000001"
         status = "published"
         cos_upload_status = "success"
@@ -80,7 +81,7 @@ async def test_reconcile_latest_matches_db(monkeypatch):
     monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: fake_client)
 
     with TestClient(app) as client:
-        resp = client.get("/api/admin/configs/reconcile", headers=_auth_headers())
+        resp = client.get("/api/admin/configs/reconcile?package_name=com.example.app", headers=_auth_headers())
 
     assert resp.status_code == 200
     data = resp.json()["data"]
@@ -97,6 +98,7 @@ async def test_reconcile_latest_mismatch(monkeypatch):
 
     class FakeConfig:
         id = 1
+        package_name = "com.example.app"
         version = "20260716_v120000_000001"
         status = "published"
         cos_upload_status = "success"
@@ -123,7 +125,7 @@ async def test_reconcile_latest_mismatch(monkeypatch):
     monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: fake_client)
 
     with TestClient(app) as client:
-        resp = client.get("/api/admin/configs/reconcile", headers=_auth_headers())
+        resp = client.get("/api/admin/configs/reconcile?package_name=com.example.app", headers=_auth_headers())
 
     assert resp.status_code == 200
     data = resp.json()["data"]
@@ -137,9 +139,14 @@ async def test_reconcile_latest_mismatch(monkeypatch):
 class FakeConfigForCommitFail:
     def __init__(self, *, config_id: int, version: str, status: str):
         self.id = config_id
+        self.package_name = "com.example.app"
         self.version = version
         self.status = status
-        self.config_data = {"features": {}}
+        from app.services.config_crypto import encrypt_payload
+        self.encrypted_config = encrypt_payload(
+            {"mainConfig": {}, "newTouchConfig": {}, "newTextRuleConfig": {}},
+            self.package_name, version, "full", "sdk-config-test-token-1234567890"
+        )
         self.publish_at = None
         self.published_by = None
         self.cos_key = None
@@ -201,8 +208,8 @@ class _FakeAsyncContextManager:
 
 
 @pytest.mark.anyio
-async def test_commit_failure_persists_failed_status(monkeypatch):
-    """数据库 commit 失败后，failed 状态被独立 session 持久化"""
+async def test_publish_leaves_commit_to_request_transaction(monkeypatch):
+    """发布服务只 flush，最终 commit 由 get_db 请求事务负责。"""
     config = FakeConfigForCommitFail(config_id=1, version="draft_v1", status="draft")
     db = FakeDbCommitFail(config_for_recovery=config)
 
@@ -212,23 +219,7 @@ async def test_commit_failure_persists_failed_status(monkeypatch):
 
     monkeypatch.setattr(config_service, "_upload_config_payload", fake_upload)
 
-    # Mock async_session_factory 返回 recovery session
-    recovery_config = FakeConfigForCommitFail(config_id=1, version="draft_v1", status="draft")
-    recovery_db = FakeDbCommitFail(config_for_recovery=recovery_config)
-    # Override commit to succeed in recovery
-    recovery_db.commit = lambda: None  # type: ignore
-    recovery_db.committed = False
-
-    fake_factory = type("FakeFactory", (), {"__call__": lambda self: _FakeAsyncContextManager(recovery_db)})()
-    import app.core.database as db_module
-    monkeypatch.setattr(db_module, "async_session_factory", fake_factory)
-
-    # publish_config should raise HTTPException(500) after commit fails
-    with pytest.raises(HTTPException) as exc_info:
-        await config_service.publish_config(db, 1, "admin")
-
-    assert exc_info.value.status_code == 500
-    assert "CDN" in exc_info.value.detail
-
-    # Recovery session should have persisted failed status
-    assert recovery_config.cos_upload_status == "failed"
+    result = await config_service.publish_config(db, 1, "admin")
+    assert result["package_name"] == "com.example.app"
+    assert db.committed is False
+    assert config.status == "published"

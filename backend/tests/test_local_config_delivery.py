@@ -5,14 +5,19 @@ from datetime import datetime, timezone
 import pytest
 
 from app.services import config_service
+from app.services.config_crypto import encrypt_payload
 
 
 class FakeConfig:
     def __init__(self, *, config_id: int, version: str, status: str):
         self.id = config_id
+        self.package_name = "com.example.app"
         self.version = version
         self.status = status
-        self.config_data = {"features": {"demo": True}}
+        self.encrypted_config = encrypt_payload(
+            {"mainConfig": {"demo": True}, "newTouchConfig": {}, "newTextRuleConfig": {}},
+            self.package_name, version, "full", "sdk-config-test-token-1234567890"
+        )
         self.publish_at = None
         self.published_by = None
         self.cos_key = None
@@ -52,6 +57,9 @@ class FakeDb:
     async def rollback(self):
         pass
 
+    async def flush(self):
+        pass
+
 
 @pytest.mark.anyio
 async def test_publish_local_mode_skips_cos_upload_and_publishes(monkeypatch):
@@ -71,9 +79,9 @@ async def test_publish_local_mode_skips_cos_upload_and_publishes(monkeypatch):
 
     result = await config_service.publish_config(db, 2, "admin")
 
-    assert db.committed is True
+    assert db.committed is False  # commit 由 get_db 请求事务负责
     assert draft.status == "published"
     assert draft.cos_upload_status == "success"
-    assert draft.cos_key == "local:config/latest.json"
-    assert result["cdn_url"] == "https://sdk.deeppopgame.xyz/api/v1/config/latest"
+    assert draft.cos_key == "local"
+    assert result["cdn_url"].endswith(f"/{draft.version}/main")
     get_settings.cache_clear()

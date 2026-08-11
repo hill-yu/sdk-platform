@@ -6,14 +6,22 @@ from datetime import datetime, timezone
 import pytest
 
 from app.services import config_service
+from app.services.config_crypto import encrypt_payload
 
 
 class FakeConfig:
     def __init__(self, *, config_id: int, version: str, status: str):
         self.id = config_id
+        self.package_name = "com.example.app"
         self.version = version
         self.status = status
-        self.config_data = {"features": {}}
+        self.encrypted_config = encrypt_payload(
+            {"mainConfig": {}, "newTouchConfig": {}, "newTextRuleConfig": {}},
+            self.package_name,
+            version,
+            "full",
+            "sdk-config-test-token-1234567890",
+        )
         self.publish_at = None
         self.published_by = None
         self.cos_key = None
@@ -62,7 +70,7 @@ async def test_rollback_keeps_original_version(monkeypatch):
     # Verify version format: YYYYMMDD_vHHMMSS_ffffff
     assert re.match(r"\d{8}_v\d{6}_\d{6}", result["version"]), f"Unexpected version format: {result['version']}"
     # 3.1 重构后 service 不再自行 flush/commit，事务由外层 get_db 管理
-    assert db.executed  # 至少执行了旧 published 归档的 update
+    assert db.executed
     assert config.cos_upload_status == "success"
 
 
@@ -88,6 +96,10 @@ class FakeDbLock:
         self._configs: dict[int, object] = {}
 
     def add_config(self, config):
+        self._configs[config.id] = config
+
+    def add(self, config):
+        config.id = max(self._configs, default=0) + 1
         self._configs[config.id] = config
 
     async def get(self, model, config_id):
@@ -165,3 +177,43 @@ async def test_rollback_cos_failure_no_change(monkeypatch):
 
     # COS 失败 → archived 状态不变
     assert archived.status == "archived"
+
+
+@pytest.mark.anyio
+async def test_rollback_preserves_history_and_creates_new_record(monkeypatch):
+    monkeypatch.setenv("CONFIG_DELIVERY_MODE", "local")
+    from app.core.config import get_settings
+    get_settings.cache_clear()
+    db = FakeDbLock(lock_ok=True)
+    archived = FakeConfig(config_id=3, version="20260629_v2", status="archived")
+    db.add_config(archived)
+    result = await config_service.rollback_config(db, 3, "admin")
+    assert archived.status == "archived"
+    assert archived.version == "20260629_v2"
+    created = db._configs[4]
+    assert created.status == "published"
+    assert created.version == result["version"]
+    get_settings.cache_clear()
+
+
+@pytest.mark.anyio
+async def test_update_config_reports_validation_encryption_and_flush_timings(monkeypatch):
+    monkeypatch.setenv("SDK_CONFIG_TOKEN", "sdk-config-test-token-1234567890")
+    from app.core.config import get_settings
+    get_settings.cache_clear()
+    db = FakeDbLock()
+    draft = FakeConfig(config_id=8, version="draft_v1", status="draft")
+    db.add_config(draft)
+    timings: dict[str, float] = {}
+
+    await config_service.update_config(
+        db,
+        8,
+        {"mainConfig": {}, "newTouchConfig": {}, "newTextRuleConfig": {}},
+        "save",
+        timings=timings,
+    )
+
+    assert set(timings) == {"validation_ms", "encryption_ms", "flush_ms"}
+    assert all(value >= 0 for value in timings.values())
+    get_settings.cache_clear()

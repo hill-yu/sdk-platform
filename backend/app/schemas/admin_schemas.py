@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.services.config_crypto import normalize_package_name
+
 
 class ConfigUpsertRequest(BaseModel):
     config_data: dict[str, Any]
@@ -17,6 +19,15 @@ class ConfigUpsertRequest(BaseModel):
         if len(json_bytes) > 500_000:
             raise ValueError(f"config_data JSON 大小超过 500KB 限制（当前 {len(json_bytes)} 字节）")
         return v
+
+
+class ConfigCreateRequest(ConfigUpsertRequest):
+    package_name: str = Field(..., min_length=1, max_length=255)
+
+    @field_validator("package_name")
+    @classmethod
+    def validate_package_name(cls, value: str) -> str:
+        return normalize_package_name(value)
 
 
 class VersionCreateRequest(BaseModel):
