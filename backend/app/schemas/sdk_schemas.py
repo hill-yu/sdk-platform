@@ -4,6 +4,8 @@ SDK 接口 Pydantic 请求/响应模型
 from typing import Optional, Any
 from pydantic import BaseModel, Field, field_validator
 
+from app.services.config_crypto import normalize_package_name
+
 
 # ============================================================
 # 点击事件
@@ -21,11 +23,16 @@ class ClickEvent(BaseModel):
 
 class ClickReportRequest(BaseModel):
     """点击上报请求"""
-    app_id: str = Field(..., max_length=32)
+    package_name: str = Field(..., min_length=1, max_length=255)
     device_id: str = Field(..., max_length=64)
     sdk_version: Optional[str] = Field(None, max_length=20)
     session_id: Optional[str] = Field(None, max_length=64)
     events: list[ClickEvent] = Field(..., min_length=1, max_length=100)
+
+    @field_validator("package_name")
+    @classmethod
+    def validate_package_name(cls, value: str) -> str:
+        return normalize_package_name(value)
 
 
 class ClickReportResponse(BaseModel):
@@ -45,9 +52,9 @@ class LogEntry(BaseModel):
     """单条日志"""
     level: str
     tag: Optional[str] = Field(None, max_length=100)
-    message: str = Field(..., max_length=10000)
+    message: Optional[str] = Field(None, max_length=10000)
     timestamp: Optional[int] = None
-    extra: Optional[dict] = Field(default_factory=dict)
+    extra: str
 
     @field_validator("level")
     @classmethod
@@ -60,10 +67,15 @@ class LogEntry(BaseModel):
 
 class LogReportRequest(BaseModel):
     """日志上报请求"""
-    app_id: str = Field(..., max_length=32)
+    package_name: str = Field(..., min_length=1, max_length=255)
     device_id: str = Field(..., max_length=64)
     sdk_version: Optional[str] = Field(None, max_length=20)
     logs: list[LogEntry] = Field(..., min_length=1, max_length=100)
+
+    @field_validator("package_name")
+    @classmethod
+    def validate_package_name(cls, value: str) -> str:
+        return normalize_package_name(value)
 
 
 class LogReportResponse(BaseModel):

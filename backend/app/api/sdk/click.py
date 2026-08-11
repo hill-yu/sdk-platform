@@ -48,7 +48,7 @@ async def report_click(
 
         values.append({
             "event_type": "click",
-            "app_id": body.app_id,
+            "package_name": body.package_name,
             "device_id": body.device_id,
             "sdk_version": body.sdk_version,
             "session_id": body.session_id,
@@ -77,7 +77,7 @@ async def report_click(
             await db.execute(stmt)
             accepted = len(values)
         except Exception:
-            logger.exception("批量写入失败，app_id=%s", body.app_id)
+            logger.exception("批量写入失败，package_name=%s", body.package_name)
             await db.rollback()
             raise HTTPException(status_code=500, detail="数据库写入失败")
 

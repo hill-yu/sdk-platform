@@ -10,7 +10,7 @@ class SdkEvent(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     event_type = Column(String(50), nullable=False)
-    app_id = Column(String(32), nullable=False)
+    package_name = Column(String(255), nullable=False)
     device_id = Column(String(64))
     sdk_version = Column(String(20))
     session_id = Column(String(64))

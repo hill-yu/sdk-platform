@@ -43,15 +43,15 @@ async def report_log(
 
         values.append({
             "event_type": "log",
-            "app_id": body.app_id,
+            "package_name": body.package_name,
             "device_id": body.device_id,
             "sdk_version": body.sdk_version,
             "session_id": None,
             "payload": {
                 "level": log_entry.level,
                 "tag": log_entry.tag,
-                "message": log_entry.message,
-                "extra": log_entry.extra or {},
+                "message": log_entry.message or "",
+                "extra": log_entry.extra,
             },
             "client_ts": client_ts,
             "server_ts": datetime.now(timezone.utc),
@@ -64,7 +64,7 @@ async def report_log(
         await db.execute(stmt)
         accepted = len(values)
     except Exception:
-        logger.exception("批量写入失败，app_id=%s", body.app_id)
+        logger.exception("批量写入失败，package_name=%s", body.package_name)
         await db.rollback()
         raise HTTPException(status_code=500, detail="数据库写入失败")
 

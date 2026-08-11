@@ -1,12 +1,22 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
 from app.core.config import get_settings
 from app.core.database import get_db, get_db_no_commit
 from app.services.config_crypto import decrypt_payload, encrypt_payload
+from app.core.rate_limit import write_limiter
 from tests.conftest import StubReadSession, StubWriteSession, override_read_db, override_write_db
 
 TOKEN = "sdk-config-test-token-1234567890"
+
+
+@pytest.fixture(autouse=True)
+def reset_write_limiter():
+    write_limiter._store.clear()
+    yield
+    write_limiter._store.clear()
 
 
 def _headers(token: str = TOKEN):
@@ -96,13 +106,73 @@ def test_old_latest_route_is_removed(client):
 def test_click_returns_partial_success_when_some_events_are_rejected(client):
     session = StubWriteSession()
     client.app.dependency_overrides[get_db] = override_write_db(session)
-    response = client.post("/api/v1/click", json={"app_id": "demo", "device_id": "device-1", "events": [{"type": "click", "page": "home", "element": "ok_button"}, {"type": "click"}]})
+    response = client.post("/api/v1/click", json={"package_name": "demo", "device_id": "device-1", "events": [{"type": "click", "page": "home", "element": "ok_button"}, {"type": "click"}]})
     assert response.status_code == 200
     assert response.json()["data"] == {"accepted": 1, "rejected": 1}
 
 
+def test_click_uses_normalized_package_name(client, monkeypatch):
+    from app.api.sdk import click as click_api
+    captured = {}
+
+    class Insert:
+        def values(self, values):
+            captured["values"] = values
+            return self
+
+    monkeypatch.setattr(click_api, "pg_insert", lambda _model: Insert())
+    client.app.dependency_overrides[get_db] = override_write_db(StubWriteSession())
+    response = client.post("/api/v1/click", json={"package_name": " COM.Example.App ", "device_id": "device-1", "events": [{"type": "click", "page": "home"}]})
+    assert response.status_code == 200
+    assert captured["values"][0]["package_name"] == "com.example.app"
+
+
+def test_click_rejects_legacy_app_id(client):
+    response = client.post("/api/v1/click", json={"app_id": "demo", "device_id": "device-1", "events": [{"type": "click", "page": "home"}]})
+    assert response.status_code == 422
+
+
 def test_log_returns_422_for_invalid_level(client):
-    session = StubWriteSession()
-    client.app.dependency_overrides[get_db] = override_write_db(session)
-    response = client.post("/api/v1/log", json={"app_id": "demo", "device_id": "device-1", "logs": [{"level": "fatal", "message": "bad"}]})
+    response = client.post("/api/v1/log", json={"package_name": "demo", "device_id": "device-1", "logs": [{"level": "fatal", "extra": "bad"}]})
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("extra", [{"key": "value"}, ["value"], 1, True, None])
+def test_log_requires_string_extra(client, extra):
+    response = client.post("/api/v1/log", json={"package_name": "com.example.app", "device_id": "device-1", "logs": [{"level": "info", "extra": extra}]})
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("log_fields", [{}, {"message": None}, {"message": ""}])
+def test_log_accepts_empty_message_and_preserves_raw_extra(client, monkeypatch, log_fields):
+    from app.api.sdk import log as log_api
+    captured = {}
+
+    class Insert:
+        def values(self, values):
+            captured["values"] = values
+            return self
+
+    monkeypatch.setattr(log_api, "pg_insert", lambda _model: Insert())
+    client.app.dependency_overrides[get_db] = override_write_db(StubWriteSession())
+    log_entry = {"level": "INFO", "extra": "{ouoghaougoagahdgjalglauoi|dlaugouojlJ}", **log_fields}
+    response = client.post("/api/v1/log", json={"package_name": " COM.Example.App ", "device_id": "device-1", "logs": [log_entry]})
+    assert response.status_code == 200
+    value = captured["values"][0]
+    assert value["package_name"] == "com.example.app"
+    assert value["payload"]["level"] == "info"
+    assert value["payload"]["message"] == ""
+    assert value["payload"]["extra"] == "{ouoghaougoagahdgjalglauoi|dlaugouojlJ}"
+
+
+@pytest.mark.parametrize("missing_field", ["level", "extra"])
+def test_log_requires_level_and_extra(client, missing_field):
+    log_entry = {"level": "info", "extra": "raw"}
+    del log_entry[missing_field]
+    response = client.post("/api/v1/log", json={"package_name": "com.example.app", "device_id": "device-1", "logs": [log_entry]})
+    assert response.status_code == 422
+
+
+def test_log_rejects_legacy_app_id(client):
+    response = client.post("/api/v1/log", json={"app_id": "demo", "device_id": "device-1", "logs": [{"level": "info", "extra": "raw"}]})
     assert response.status_code == 422
