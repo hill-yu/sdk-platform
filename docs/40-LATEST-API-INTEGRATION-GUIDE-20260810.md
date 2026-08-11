@@ -294,7 +294,7 @@ Content-Type: application/json
 
 ```json
 {
-  "app_id": "test.package",
+  "package_name": "test.package",
   "device_id": "device-001",
   "sdk_version": "1.0.0",
   "session_id": "session-001",
@@ -314,7 +314,7 @@ Content-Type: application/json
 限制：
 
 - `events` 每次 1～100 条。
-- `app_id` 最大 32 字符，`device_id` 最大 64 字符。
+- `package_name` 必传，最大 255 字符；`device_id` 最大 64 字符。
 - 单条事件的 `page` 和 `element` 不能同时为空。
 - `timestamp` 为毫秒时间戳；非法时间戳会被忽略并使用服务端时间。
 
@@ -341,7 +341,7 @@ Content-Type: application/json
 
 ```json
 {
-  "app_id": "test.package",
+  "package_name": "test.package",
   "device_id": "device-001",
   "sdk_version": "1.0.0",
   "logs": [
@@ -350,7 +350,7 @@ Content-Type: application/json
       "tag": "Config",
       "message": "config loaded",
       "timestamp": 1786330000000,
-      "extra": {}
+      "extra": "{ouoghaougoagahdgjalglauoi|dlaugouojlJ}"
     }
   ]
 }
@@ -360,7 +360,11 @@ Content-Type: application/json
 
 - `logs` 每次 1～100 条。
 - `level` 只允许 `debug`、`info`、`warn`、`error`。
-- `message` 最大 10000 字符，`tag` 最大 100 字符。
+- `package_name` 必传，最大 255 字符。
+- `level` 必传，只允许 `debug`、`info`、`warn`、`error`。
+- `extra` 必传且必须是字符串；服务端不解析、不校验其内部格式，会原样保存。
+- `message` 可不传、传 `null` 或空字符串；服务端统一保存为空字符串。非空时最大 10000 字符。
+- `tag` 可选，最大 100 字符。
 
 ## 10. Admin 配置管理接口
 
@@ -446,7 +450,7 @@ PUT /api/admin/configs/{config_id}
 | GET | `/api/admin/dashboard/breakdown?date=2026-08-10&dimension=event_type` | 维度分布 |
 | GET | `/api/admin/events` | 事件明细分页查询 |
 
-事件查询支持：`page`、`page_size`、`event_type`、`app_id`、`device_id`、`date_from`、`date_to`。`page_size` 范围为 1～100。
+事件查询支持：`page`、`page_size`、`event_type`、`package_name`、`device_id`、`date_from`、`date_to`。`page_size` 范围为 1～100。
 
 ## 12. 对接验收清单
 
