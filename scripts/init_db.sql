@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS sdk_configs (
 
     CONSTRAINT uq_configs_package_version UNIQUE (package_name, version),
     CONSTRAINT chk_configs_status CHECK (status IN ('draft', 'published', 'archived')),
+    CONSTRAINT chk_configs_formal_version CHECK (status = 'draft' OR version ~ '^[0-9]+\.[0-9]\.[0-9]$'),
     CONSTRAINT chk_configs_cos_upload_status CHECK (cos_upload_status IN ('pending', 'success', 'failed'))
 );
 
