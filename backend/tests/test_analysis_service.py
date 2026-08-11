@@ -4,7 +4,9 @@ from typing import Any
 
 import pytest
 
-from app.services.analysis_service import get_trend
+from types import SimpleNamespace
+
+from app.services.analysis_service import get_events, get_trend
 
 
 class _Rows:
@@ -36,3 +38,59 @@ async def test_trend_sql_binds_the_complete_event_type_parameter(range_value: st
     assert "event_type" in db.statement._bindparams
     assert "event_typ" not in db.statement._bindparams
     assert ":event_type::varchar" not in str(db.statement)
+
+
+class _EventResults:
+    def __init__(self, *, total: int | None = None, rows: list[Any] | None = None):
+        self.total = total
+        self.rows = rows or []
+
+    def scalar_one(self) -> int:
+        assert self.total is not None
+        return self.total
+
+    def scalars(self) -> "_EventResults":
+        return self
+
+    def all(self) -> list[Any]:
+        return self.rows
+
+
+class _EventSession:
+    def __init__(self, event):
+        self.event = event
+        self.statements = []
+
+    async def execute(self, statement):
+        self.statements.append(statement)
+        if len(self.statements) == 1:
+            return _EventResults(total=1)
+        return _EventResults(rows=[self.event])
+
+
+@pytest.mark.asyncio
+async def test_events_filter_and_response_use_package_name() -> None:
+    event = SimpleNamespace(
+        id=1,
+        event_type="log",
+        package_name="com.example.app",
+        device_id="device-1",
+        payload={"extra": "raw"},
+        client_ts=None,
+        server_ts=None,
+    )
+    db = _EventSession(event)
+
+    result = await get_events(
+        db,  # type: ignore[arg-type]
+        page=1,
+        page_size=20,
+        event_type=None,
+        package_name="com.example.app",
+        device_id=None,
+        date_from=None,
+        date_to=None,
+    )
+
+    assert result["items"][0]["package_name"] == "com.example.app"
+    assert "app_id" not in result["items"][0]

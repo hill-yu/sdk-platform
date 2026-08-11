@@ -116,7 +116,7 @@ async def get_events(
     page: int,
     page_size: int,
     event_type: str | None,
-    app_id: str | None,
+    package_name: str | None,
     device_id: str | None,
     date_from: date | None,
     date_to: date | None,
@@ -126,8 +126,8 @@ async def get_events(
 
     if event_type:
         stmt = stmt.where(SdkEvent.event_type == event_type)
-    if app_id:
-        stmt = stmt.where(SdkEvent.app_id == app_id)
+    if package_name:
+        stmt = stmt.where(SdkEvent.package_name == package_name)
     if device_id:
         stmt = stmt.where(SdkEvent.device_id == device_id)
     if date_from:
@@ -147,7 +147,7 @@ async def get_events(
         {
             "id": e.id,
             "event_type": e.event_type,
-            "app_id": e.app_id,
+            "package_name": e.package_name,
             "device_id": e.device_id,
             "payload": e.payload,
             "client_ts": e.client_ts,

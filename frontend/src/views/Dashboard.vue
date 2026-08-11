@@ -61,7 +61,7 @@
             <option value="click">click</option>
             <option value="log">log</option>
           </select>
-          <input v-model="appIdFilter" type="text" placeholder="app_id" />
+          <input v-model="packageNameFilter" type="text" placeholder="package_name" />
           <input v-model="dateFromFilter" type="date" />
           <input v-model="dateToFilter" type="date" />
           <button class="ghost" @click="loadEvents">筛选</button>
@@ -142,7 +142,7 @@ const page = ref(1);
 const pageSize = ref(8);
 const expandedId = ref<number | null>(null);
 const eventTypeFilter = ref("");
-const appIdFilter = ref("");
+const packageNameFilter = ref("");
 const dateFromFilter = ref("");
 const dateToFilter = ref("");
 const totalPages = computed(() => Math.max(1, Math.ceil(events.total / pageSize.value)));
@@ -175,7 +175,7 @@ async function loadEvents() {
     page: page.value,
     page_size: pageSize.value,
     event_type: eventTypeFilter.value || undefined,
-    app_id: appIdFilter.value || undefined,
+    package_name: packageNameFilter.value || undefined,
     date_from: dateFromFilter.value || undefined,
     date_to: dateToFilter.value || undefined,
   });
