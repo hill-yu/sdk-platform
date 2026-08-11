@@ -57,8 +57,11 @@ GROUP BY 1, 2, 3, 4, 5""",
 async def _columns(connection, relation: str) -> set[str]:
     rows = await connection.execute(
         text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_schema = current_schema() AND table_name = :relation"
+            "SELECT attribute.attname FROM pg_attribute attribute "
+            "JOIN pg_class relation ON relation.oid=attribute.attrelid "
+            "JOIN pg_namespace namespace ON namespace.oid=relation.relnamespace "
+            "WHERE namespace.nspname=current_schema() AND relation.relname=:relation "
+            "AND attribute.attnum > 0 AND NOT attribute.attisdropped"
         ),
         {"relation": relation},
     )

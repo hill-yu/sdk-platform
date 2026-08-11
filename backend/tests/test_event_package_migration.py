@@ -1,4 +1,6 @@
-from scripts.migrate_event_package_name import build_migration_statements
+import asyncio
+
+from scripts.migrate_event_package_name import _columns, build_migration_statements
 
 
 def test_old_event_schema_builds_lossless_package_name_migration():
@@ -45,3 +47,18 @@ def test_migration_rejects_ambiguous_event_columns():
         assert "同时存在" in str(exc)
     else:
         raise AssertionError("expected ambiguous schema to be rejected")
+
+
+def test_column_inspection_uses_postgres_catalog_for_materialized_views():
+    class Result:
+        def __iter__(self):
+            return iter([("package_name",), ("event_type",)])
+
+    class Connection:
+        async def execute(self, statement, params):
+            assert "pg_attribute" in str(statement)
+            assert params == {"relation": "mv_daily_event_stats"}
+            return Result()
+
+    columns = asyncio.run(_columns(Connection(), "mv_daily_event_stats"))
+    assert columns == {"package_name", "event_type"}
