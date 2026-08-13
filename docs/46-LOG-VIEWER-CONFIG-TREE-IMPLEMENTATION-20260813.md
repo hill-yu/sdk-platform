@@ -91,6 +91,16 @@ rg -n "log_level" backend frontend docs/40-LATEST-API-INTEGRATION-GUIDE-20260810
 git diff --check
 ```
 
+2026-08-13 已在隔离工作树执行以下本地真实冒烟验证，未记录或输出任何 Token、密码或密钥：
+
+- 启动 SDK API `127.0.0.1:8100`、Admin API `127.0.0.1:8101` 和前端 `127.0.0.1:5173`；
+- `GET http://127.0.0.1:8101/api/admin/health` 返回 HTTP 200；
+- `GET http://127.0.0.1:5173/logs` 返回 HTTP 200；
+- 使用本地 Admin 鉴权查询 `GET /api/admin/events?event_type=log&log_level=info&page=1&page_size=20`，响应 `code=0`、`total=11`、`items=11`；首条结果包含 `sdk_version`，`payload.extra` 长度为 25，读取结果与数据库响应中的原始字符串一致；
+- 使用专用本地测试包 `codex.task6.smoke.20260813b` 创建草稿 ID `7`，保存包含特殊键与嵌套数组的完整三根配置；重新读取后 `exact_roundtrip=true`，状态保持 `draft`；
+- 整个冒烟过程没有调用 publish 接口。草稿 ID `7` 验证后已从本地数据库删除；此前用于排查 Windows PowerShell 中文请求编码的探测草稿 ID `6` 也已删除；
+- 冒烟完成后 SDK API、Admin API、前端开发服务及临时启动的 PostgreSQL 均已关闭，隔离工作树中的临时 `.env` 已删除。
+
 部署前还需确认生产环境 Admin Token、数据库迁移基线、反向代理路由和前端静态资源版本。部署后应使用专用测试包验证日志筛选和配置草稿保存；不得将冒烟测试草稿发布为正式版本。
 
 ## 7. 回滚边界

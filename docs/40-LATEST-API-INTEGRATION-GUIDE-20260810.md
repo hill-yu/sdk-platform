@@ -459,7 +459,7 @@ GET /api/admin/events?event_type=log&package_name=com.example.app&log_level=erro
 Authorization: Bearer <ADMIN_TOKEN>
 ```
 
-`log_level` 为可选枚举，只允许 `debug`、`info`、`warn`、`error`，且仅在 `event_type=log` 时生效；非法值返回 HTTP 422。响应事件项包含 `sdk_version`，并在 `payload` 中保留完整的 `level`、`tag`、`message` 和原始 `extra` 字符串。分页从第 1 页开始，`page_size` 允许 1～100，响应中的 `total` 是符合筛选条件的总条数。
+`log_level` 为可选枚举，只允许 `debug`、`info`、`warn`、`error`；非法值返回 HTTP 422。只要传入 `log_level`，后端就同时强制限定 `event_type=log`：省略 `event_type` 时仅返回匹配级别的日志事件，同时显式传入非 `log` 的 `event_type` 时返回空结果。前端独立日志页固定传 `event_type=log`。响应事件项包含 `sdk_version`，并在 `payload` 中保留完整的 `level`、`tag`、`message` 和原始 `extra` 字符串。分页从第 1 页开始，`page_size` 允许 1～100，响应中的 `total` 是符合筛选条件的总条数。
 
 ## 12. 对接验收清单
 
