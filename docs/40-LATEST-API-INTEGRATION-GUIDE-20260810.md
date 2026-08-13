@@ -1,8 +1,8 @@
 # SDK 平台最新接口对接文档
 
-> 文档版本：1.1
+> 文档版本：1.2
 >
-> 更新时间：2026-08-11
+> 更新时间：2026-08-13
 >
 > 对应功能分支：`codex/post-config-download-semver`
 > 生产域名：`https://sdk.deeppopgame.xyz`
@@ -450,7 +450,16 @@ PUT /api/admin/configs/{config_id}
 | GET | `/api/admin/dashboard/breakdown?date=2026-08-10&dimension=event_type` | 维度分布 |
 | GET | `/api/admin/events` | 事件明细分页查询 |
 
-事件查询支持：`page`、`page_size`、`event_type`、`package_name`、`device_id`、`date_from`、`date_to`。`page_size` 范围为 1～100。
+事件查询支持：`page`、`page_size`、`event_type`、`package_name`、`device_id`、`date_from`、`date_to`、`log_level`。`page_size` 范围为 1～100。
+
+查询 SDK 日志示例：
+
+```http
+GET /api/admin/events?event_type=log&package_name=com.example.app&log_level=error&page=1&page_size=20
+Authorization: Bearer <ADMIN_TOKEN>
+```
+
+`log_level` 为可选枚举，只允许 `debug`、`info`、`warn`、`error`，且仅在 `event_type=log` 时生效；非法值返回 HTTP 422。响应事件项包含 `sdk_version`，并在 `payload` 中保留完整的 `level`、`tag`、`message` 和原始 `extra` 字符串。分页从第 1 页开始，`page_size` 允许 1～100，响应中的 `total` 是符合筛选条件的总条数。
 
 ## 12. 对接验收清单
 

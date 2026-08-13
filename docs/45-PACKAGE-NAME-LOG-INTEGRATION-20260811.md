@@ -72,11 +72,15 @@ Content-Type: application/json
 ## 4. Admin 事件查询
 
 ```http
-GET /api/admin/events?package_name=com.example.app
+GET /api/admin/events?event_type=log&package_name=com.example.app&log_level=info&page=1&page_size=20
 Authorization: Bearer <ADMIN_TOKEN>
 ```
 
-响应事件项返回 `package_name`，不再返回 `app_id`。前端事件明细筛选也传 `package_name`。
+响应事件项返回 `package_name` 和 `sdk_version`，不再返回 `app_id`。前端独立“日志查看”页固定传 `event_type=log`，并支持按包名、设备、日期和日志级别筛选。
+
+`log_level` 可省略；传值时只能是 `debug`、`info`、`warn`、`error`，非法值返回 HTTP 422。分页参数 `page` 从 1 开始，`page_size` 范围为 1～100。Admin Token 必须放在 `Authorization: Bearer <ADMIN_TOKEN>` 请求头中，不得放在 URL。
+
+单条日志的完整 `extra` 位于响应项的 `payload.extra`。后台详情区原样展示该字符串，并提供复制操作，不会将其解析成键值对象或截断后再复制。
 
 ## 5. 数据库升级
 
