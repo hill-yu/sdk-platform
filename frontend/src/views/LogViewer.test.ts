@@ -209,6 +209,37 @@ describe("LogViewer", () => {
     expect(wrapper.get("[data-testid='error-feedback']").text()).toContain("page three unavailable");
   });
 
+  it("never requests beyond the last page during rapid next-page clicks", async () => {
+    respond([makeItem()], 61);
+    const wrapper = await mountViewer();
+    getEvents.mockImplementation(() => new Promise(() => {}));
+
+    for (let index = 0; index < 8; index += 1) {
+      await wrapper.get("[data-testid='next-page']").trigger("click");
+    }
+
+    const requestedPages = getEvents.mock.calls.slice(1).map(([query]) => query.page);
+    expect(requestedPages).toEqual([2, 3, 4]);
+    expect(wrapper.get("[data-testid='next-page']").attributes("disabled")).toBeDefined();
+  });
+
+  it("never requests below the first page during rapid previous-page clicks", async () => {
+    respond([makeItem()], 61);
+    const wrapper = await mountViewer();
+    getEvents.mockResolvedValueOnce({ data: { total: 61, items: [makeItem()] } });
+    await wrapper.get("[data-testid='next-page']").trigger("click");
+    await flushPromises();
+    getEvents.mockImplementation(() => new Promise(() => {}));
+
+    for (let index = 0; index < 8; index += 1) {
+      await wrapper.get("[data-testid='previous-page']").trigger("click");
+    }
+
+    const requestedPages = getEvents.mock.calls.slice(2).map(([query]) => query.page);
+    expect(requestedPages).toEqual([1]);
+    expect(wrapper.get("[data-testid='previous-page']").attributes("disabled")).toBeDefined();
+  });
+
   it("updates feedback after copy success and failure", async () => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,

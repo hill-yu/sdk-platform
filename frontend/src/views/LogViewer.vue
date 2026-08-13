@@ -76,7 +76,7 @@
             data-testid="previous-page"
             class="ghost"
             type="button"
-            :disabled="page <= 1"
+            :disabled="requestedPage <= 1"
             @click="changePage(requestedPage - 1)"
           >
             上一页
@@ -86,7 +86,7 @@
             data-testid="next-page"
             class="ghost"
             type="button"
-            :disabled="page >= totalPages"
+            :disabled="requestedPage >= totalPages"
             @click="changePage(requestedPage + 1)"
           >
             下一页
@@ -164,7 +164,9 @@ async function loadLogs(options: { resetPage?: boolean; targetPage?: number } = 
 }
 
 async function changePage(nextPage: number): Promise<void> {
-  await loadLogs({ targetPage: nextPage });
+  const boundedPage = Math.min(totalPages.value, Math.max(1, nextPage));
+  if (boundedPage === requestedPage.value) return;
+  await loadLogs({ targetPage: boundedPage });
 }
 
 function showCopySuccess(): void {
