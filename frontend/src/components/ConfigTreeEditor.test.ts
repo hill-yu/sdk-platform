@@ -179,4 +179,95 @@ describe("ConfigTreeEditor array operations and confirmations", () => {
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
     expect(nodeAt(wrapper, ["section"]).get<HTMLSelectElement>("[data-testid='type-select']").element.value).toBe("object");
   });
+
+  it("keeps collapsed state with the moved array value", async () => {
+    const wrapper = mount(ConfigTreeEditor, {
+      props: { modelValue: { list: [{ label: "first" }, { label: "second" }] } },
+    });
+
+    await nodeAt(wrapper, ["list", 0]).get("[data-testid='collapse-toggle']").trigger("click");
+    await nodeAt(wrapper, ["list", 0]).get("[data-testid='move-down']").trigger("click");
+    await adoptLastUpdate(wrapper);
+
+    expect(nodeAt(wrapper, ["list", 0]).find("[data-testid='container-children']").exists()).toBe(true);
+    expect(nodeAt(wrapper, ["list", 1]).find("[data-testid='container-children']").exists()).toBe(false);
+  });
+
+  it("does not leave an invalid-number draft on another value after moving", async () => {
+    const wrapper = mount(ConfigTreeEditor, {
+      props: { modelValue: { list: [1, 2] } },
+    });
+
+    await nodeAt(wrapper, ["list", 0]).get("[data-testid='number-input']").setValue("invalid");
+    await nodeAt(wrapper, ["list", 0]).get("[data-testid='move-down']").trigger("click");
+    await adoptLastUpdate(wrapper);
+
+    expect(nodeAt(wrapper, ["list", 0]).find("[data-testid='node-error']").exists()).toBe(false);
+    const movedError = nodeAt(wrapper, ["list", 1]).find("[data-testid='node-error']");
+    if (movedError.exists()) expect(movedError.text()).toContain("有限数字");
+  });
+
+  it("does not transfer a local operation error to another array value after moving", async () => {
+    const wrapper = mount(ConfigTreeEditor, {
+      props: {
+        modelValue: {
+          list: [
+            { marker: "first", field: 1, existing: 2 },
+            { marker: "second", field: 3, existing: 4 },
+          ],
+        },
+      },
+    });
+
+    await nodeAt(wrapper, ["list", 0, "field"]).get("[data-testid='rename-input']").setValue("existing");
+    await nodeAt(wrapper, ["list", 0, "field"]).get("[data-testid='rename-button']").trigger("click");
+    expect(nodeAt(wrapper, ["list", 0, "field"]).get("[data-testid='node-error']").text()).toContain("已存在");
+
+    await nodeAt(wrapper, ["list", 0]).get("[data-testid='move-down']").trigger("click");
+    await adoptLastUpdate(wrapper);
+
+    expect(nodeAt(wrapper, ["list", 0, "field"]).find("[data-testid='node-error']").exists()).toBe(false);
+    const movedError = nodeAt(wrapper, ["list", 1, "field"]).find("[data-testid='node-error']");
+    if (movedError.exists()) expect(movedError.text()).toContain("已存在");
+  });
+
+  it("does not transfer the next item's collapsed state to a duplicated item", async () => {
+    const wrapper = mount(ConfigTreeEditor, {
+      props: { modelValue: { list: [{ label: "first" }, { label: "second" }] } },
+    });
+
+    await nodeAt(wrapper, ["list", 1]).get("[data-testid='collapse-toggle']").trigger("click");
+    await nodeAt(wrapper, ["list", 0]).get("[data-testid='duplicate-node']").trigger("click");
+    await adoptLastUpdate(wrapper);
+
+    expect(nodeAt(wrapper, ["list", 1]).find("[data-testid='container-children']").exists()).toBe(true);
+    expect(nodeAt(wrapper, ["list", 2]).find("[data-testid='container-children']").exists()).toBe(false);
+  });
+
+  it("does not transfer a removed item's invalid-number draft to its successor", async () => {
+    const wrapper = mount(ConfigTreeEditor, {
+      props: { modelValue: { list: [1, 2] } },
+    });
+
+    await nodeAt(wrapper, ["list", 0]).get("[data-testid='number-input']").setValue("invalid");
+    await nodeAt(wrapper, ["list", 0]).get("[data-testid='remove-node']").trigger("click");
+    await adoptLastUpdate(wrapper);
+
+    expect(nodeAt(wrapper, ["list", 0]).find("[data-testid='node-error']").exists()).toBe(false);
+    expect(nodeAt(wrapper, ["list", 0]).get<HTMLInputElement>("[data-testid='number-input']").element.value).toBe("2");
+  });
+
+  it("gives an appended item fresh state without disturbing existing item state", async () => {
+    const wrapper = mount(ConfigTreeEditor, {
+      props: { modelValue: { list: [{ label: "first" }] } },
+    });
+
+    await nodeAt(wrapper, ["list", 0]).get("[data-testid='collapse-toggle']").trigger("click");
+    await nodeAt(wrapper, ["list"]).get("[data-testid='add-type']").setValue("object");
+    await nodeAt(wrapper, ["list"]).get("[data-testid='add-child']").trigger("click");
+    await adoptLastUpdate(wrapper);
+
+    expect(nodeAt(wrapper, ["list", 0]).find("[data-testid='container-children']").exists()).toBe(false);
+    expect(nodeAt(wrapper, ["list", 1]).find("[data-testid='container-children']").exists()).toBe(true);
+  });
 });

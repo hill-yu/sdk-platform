@@ -125,9 +125,10 @@
 
       <ConfigTreeNode
         v-for="child in children"
-        :key="child.key"
+        :key="child.identity.id"
         :node-key="child.key"
         :value="child.value"
+        :identity="child.identity"
         :path="[...path, child.key]"
         :parent-kind="containerKind"
         :disabled="disabled"
@@ -176,10 +177,15 @@ type AddPayload = PathPayload & { key?: string; value: JsonValue };
 type RenamePayload = PathPayload & { key: string };
 type ReplacePayload = PathPayload & { value: JsonValue };
 type MovePayload = PathPayload & { direction: -1 | 1 };
+interface NodeIdentity {
+  id: number;
+  children: Record<string, NodeIdentity> | NodeIdentity[] | null;
+}
 
 const props = withDefaults(defineProps<{
   nodeKey: string | number;
   value: JsonValue;
+  identity: NodeIdentity;
   path: TreePath;
   parentKind: "root" | "object" | "array";
   disabled?: boolean;
@@ -223,9 +229,13 @@ const isContainer = computed(() => nodeType.value === "object" || nodeType.value
 const containerKind = computed<"object" | "array">(() => Array.isArray(props.value) ? "array" : "object");
 const displayKey = computed(() => props.parentKind === "root" ? "根节点" : `[${props.nodeKey}]`);
 const children = computed(() => {
-  if (Array.isArray(props.value)) return props.value.map((value, key) => ({ key, value }));
+  if (Array.isArray(props.value)) {
+    const identities = props.identity.children as NodeIdentity[];
+    return props.value.map((value, key) => ({ key, value, identity: identities[key] }));
+  }
   if (props.value !== null && typeof props.value === "object") {
-    return Object.entries(props.value).map(([key, value]) => ({ key, value }));
+    const identities = props.identity.children as Record<string, NodeIdentity>;
+    return Object.entries(props.value).map(([key, value]) => ({ key, value, identity: identities[key] }));
   }
   return [];
 });
