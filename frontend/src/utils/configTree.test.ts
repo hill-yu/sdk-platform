@@ -200,6 +200,17 @@ describe("config tree JSON types and validation", () => {
     expect(() => validateConfigData(value)).toThrow(/config_data.*\$\["extra"\]/);
   });
 
+  it("rejects an empty root key at its exact path", () => {
+    const value = {
+      mainConfig: {},
+      newTouchConfig: {},
+      newTextRuleConfig: {},
+      "": true,
+    };
+
+    expect(() => validateConfigData(value)).toThrow(/config_data.*\$\[""\].*字段名不能为空/);
+  });
+
   it("rejects sparse arrays at the missing index", () => {
     const sparse = new Array(2);
     sparse[1] = "present";

@@ -269,6 +269,7 @@ export function validateConfigData(value: unknown): asserts value is JsonObject 
   }
 
   for (const [key, child] of Object.entries(value)) {
+    if (key.length === 0) throw validationError("config_data", [key], "字段名不能为空");
     if ((REQUIRED_CONFIG_FILES as readonly string[]).includes(key)) {
       validateJsonValue(child, key, []);
     } else {
