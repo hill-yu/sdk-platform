@@ -38,8 +38,12 @@ function respond(items: EventItem[] = [makeItem()], total = items.length) {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
-  return { promise, resolve };
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
 
 async function mountViewer() {
@@ -163,6 +167,46 @@ describe("LogViewer", () => {
 
     expect(wrapper.text()).toContain("第 1 / 3 页");
     expect(wrapper.get("[data-testid='log-row']").text()).toContain("com.example.app");
+  });
+
+  it("keeps the last successful page when rapid pagination resolves out of order and the latest request fails", async () => {
+    respond([makeItem({ package_name: "page.one" })], 61);
+    const wrapper = await mountViewer();
+    const pageTwo = deferred<{ data: { total: number; items: EventItem[] } }>();
+    const pageThree = deferred<{ data: { total: number; items: EventItem[] } }>();
+    getEvents.mockReturnValueOnce(pageTwo.promise).mockReturnValueOnce(pageThree.promise);
+
+    await wrapper.get("[data-testid='next-page']").trigger("click");
+    await wrapper.get("[data-testid='next-page']").trigger("click");
+    expect(getEvents).toHaveBeenNthCalledWith(2, expect.objectContaining({ page: 2 }));
+    expect(getEvents).toHaveBeenNthCalledWith(3, expect.objectContaining({ page: 3 }));
+
+    pageTwo.resolve({ data: { total: 61, items: [makeItem({ package_name: "page.two" })] } });
+    await flushPromises();
+    pageThree.reject(new Error("page three unavailable"));
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("第 1 / 4 页");
+    expect(wrapper.get("[data-testid='log-row']").text()).toContain("page.one");
+  });
+
+  it("keeps the last successful page when consecutive pagination requests fail", async () => {
+    respond([makeItem({ package_name: "page.one" })], 61);
+    const wrapper = await mountViewer();
+    const pageTwo = deferred<{ data: { total: number; items: EventItem[] } }>();
+    const pageThree = deferred<{ data: { total: number; items: EventItem[] } }>();
+    getEvents.mockReturnValueOnce(pageTwo.promise).mockReturnValueOnce(pageThree.promise);
+
+    await wrapper.get("[data-testid='next-page']").trigger("click");
+    await wrapper.get("[data-testid='next-page']").trigger("click");
+    pageTwo.reject(new Error("page two unavailable"));
+    await flushPromises();
+    pageThree.reject(new Error("page three unavailable"));
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("第 1 / 4 页");
+    expect(wrapper.get("[data-testid='log-row']").text()).toContain("page.one");
+    expect(wrapper.get("[data-testid='error-feedback']").text()).toContain("page three unavailable");
   });
 
   it("updates feedback after copy success and failure", async () => {

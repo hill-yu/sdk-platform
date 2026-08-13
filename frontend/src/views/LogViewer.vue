@@ -77,7 +77,7 @@
             class="ghost"
             type="button"
             :disabled="page <= 1"
-            @click="changePage(page - 1)"
+            @click="changePage(requestedPage - 1)"
           >
             上一页
           </button>
@@ -87,7 +87,7 @@
             class="ghost"
             type="button"
             :disabled="page >= totalPages"
-            @click="changePage(page + 1)"
+            @click="changePage(requestedPage + 1)"
           >
             下一页
           </button>
@@ -113,6 +113,7 @@ import { beginFeedback, setFeedbackError, setFeedbackSuccess } from "@/utils/fee
 const filters = reactive({ package_name: "", device_id: "", log_level: "", date_from: "", date_to: "" });
 const result = reactive({ total: 0, items: [] as EventItem[] });
 const page = ref(1);
+const requestedPage = ref(1);
 const pageSize = 20;
 const selected = ref<EventItem | null>(null);
 const feedback = reactive({ error: "", success: "" });
@@ -127,9 +128,9 @@ function levelClass(value: unknown): string {
   return typeof value === "string" ? `level-${value}` : "level-unknown";
 }
 
-function queryParams(): EventQuery {
+function queryParams(targetPage: number): EventQuery {
   return {
-    page: page.value,
+    page: targetPage,
     page_size: pageSize,
     event_type: "log",
     package_name: filters.package_name || undefined,
@@ -140,29 +141,30 @@ function queryParams(): EventQuery {
   };
 }
 
-async function loadLogs(options: { resetPage?: boolean } = {}): Promise<void> {
-  if (options.resetPage) page.value = 1;
+async function loadLogs(options: { resetPage?: boolean; targetPage?: number } = {}): Promise<void> {
+  const targetPage = options.resetPage ? 1 : (options.targetPage ?? page.value);
+  requestedPage.value = targetPage;
   const requestId = ++latestRequest;
   beginFeedback(feedback);
   try {
-    const response = await getEvents(queryParams());
+    const response = await getEvents(queryParams(targetPage));
     if (requestId !== latestRequest) return;
     result.total = response.data.total;
     result.items = response.data.items;
+    page.value = targetPage;
+    requestedPage.value = targetPage;
     if (selected.value) {
       selected.value = result.items.find((item) => item.id === selected.value?.id) ?? null;
     }
   } catch (error) {
     if (requestId !== latestRequest) return;
+    requestedPage.value = page.value;
     setFeedbackError(feedback, error instanceof Error ? error.message : "日志查询失败");
   }
 }
 
 async function changePage(nextPage: number): Promise<void> {
-  const previousPage = page.value;
-  page.value = nextPage;
-  await loadLogs();
-  if (feedback.error) page.value = previousPage;
+  await loadLogs({ targetPage: nextPage });
 }
 
 function showCopySuccess(): void {
