@@ -9,6 +9,7 @@
 
       <nav class="nav">
         <RouterLink to="/" class="nav-link">数据大盘</RouterLink>
+        <RouterLink to="/logs" class="nav-link">日志查看</RouterLink>
         <RouterLink to="/config" class="nav-link">配置管理</RouterLink>
         <RouterLink to="/version" class="nav-link">版本管理</RouterLink>
       </nav>
@@ -38,6 +39,7 @@ import { RouterLink, RouterView, useRoute } from "vue-router";
 const route = useRoute();
 
 const routeTitle = computed(() => {
+  if (route.name === "logs") return "日志查看";
   if (route.name === "config") return "配置管理";
   if (route.name === "version") return "版本管理";
   return "数据大盘";
