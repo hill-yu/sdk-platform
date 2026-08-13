@@ -58,6 +58,7 @@ const changeLog = ref("");
 const feedback = reactive({ error: "", success: "" });
 const saving = ref(false);
 const publishing = ref(false);
+let detailRequestSequence = 0;
 const allConfigs = computed(() => [...configs.published, ...configs.drafts, ...configs.history]);
 const selectedConfig = computed(() => allConfigs.value.find((item) => item.id === selectedId.value) || null);
 const editable = computed(() => selectedConfig.value?.status === "draft");
@@ -113,10 +114,12 @@ async function loadConfigs() {
   } catch (error) { setFeedbackError(feedback, message(error)); }
 }
 async function selectConfig(id: number) {
+  const requestSequence = ++detailRequestSequence;
   try {
     beginFeedback(feedback);
     const response = await getConfig(id);
     validateConfigData(response.data.config_data);
+    if (requestSequence !== detailRequestSequence) return;
     selectedId.value = id;
     configData.value = response.data.config_data;
     jsonText.value = JSON.stringify(configData.value, null, 2);
@@ -124,7 +127,9 @@ async function selectConfig(id: number) {
     treeValid.value = true;
     changeLog.value = response.data.change_log || "";
   }
-  catch (error) { setFeedbackError(feedback, message(error)); }
+  catch (error) {
+    if (requestSequence === detailRequestSequence) setFeedbackError(feedback, message(error));
+  }
 }
 async function createDraft() {
   try {
@@ -163,7 +168,9 @@ async function publishCurrent() {
   const configId = selectedId.value;
   const before = { ...selectedConfig.value };
   try {
-    beginFeedback(feedback); publishing.value = true;
+    beginFeedback(feedback);
+    currentData();
+    publishing.value = true;
     await publishConfig(configId); await loadConfigs(); setFeedbackSuccess(feedback, "配置已发布");
   } catch (error) {
     if (isRequestTimeout(error)) {

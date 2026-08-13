@@ -72,6 +72,18 @@ function treeValue(wrapper: Awaited<ReturnType<typeof mountManager>>) {
   return JSON.parse(wrapper.get("[data-testid='tree-value']").text());
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
+  return { promise, resolve };
+}
+
+function publishButton(wrapper: Awaited<ReturnType<typeof mountManager>>) {
+  const button = wrapper.findAll(".actions button").find((candidate) => candidate.text() === "发布");
+  if (!button) throw new Error("missing publish button");
+  return button;
+}
+
 describe("ConfigManager tree editing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -110,6 +122,36 @@ describe("ConfigManager tree editing", () => {
 
     expect(wrapper.get("[data-testid='config-file-tab'].active").text()).toBe("mainConfig");
     expect(treeValue(wrapper)).toEqual(secondData.mainConfig);
+  });
+
+  it("keeps the latest selected config when an older detail request resolves last", async () => {
+    const first = deferred<{ data: ReturnType<typeof detail> }>();
+    const second = deferred<{ data: ReturnType<typeof detail> }>();
+    api.getConfig.mockReset();
+    api.getConfig.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const wrapper = mount(ConfigManager, {
+      global: { stubs: { ConfigTreeEditor: TreeEditorStub } },
+    });
+    await flushPromises();
+
+    await wrapper.findAll(".list-item")[1].trigger("click");
+    second.resolve({ data: detail(2, secondData, "draft", { change_log: "latest change" }) });
+    await flushPromises();
+    await wrapper.get("[data-testid='json-mode']").trigger("click");
+    expect(JSON.parse(wrapper.get<HTMLTextAreaElement>("[data-testid='json-editor']").element.value)).toEqual(secondData);
+    await wrapper.get("[data-testid='tree-mode']").trigger("click");
+    await wrapper.findAll("[data-testid='config-file-tab']")[1].trigger("click");
+    await wrapper.get("[data-testid='invalidate-tree']").trigger("click");
+    first.resolve({ data: detail(1, firstData, "draft", { change_log: "stale change" }) });
+    await flushPromises();
+
+    expect(wrapper.findAll(".list-item")[1].classes()).toContain("active");
+    expect(treeValue(wrapper)).toEqual(secondData.newTouchConfig);
+    expect(wrapper.get<HTMLInputElement>("input[placeholder='变更说明']").element.value).toBe("latest change");
+    expect(wrapper.get("[data-testid='config-file-tab'].active").text()).toBe("newTouchConfig");
+    await wrapper.get("[data-testid='json-mode']").trigger("click");
+    expect(wrapper.find("[data-testid='json-editor']").exists()).toBe(false);
+    expect(wrapper.get("[data-testid='error-feedback']").text()).toContain("树形配置");
   });
 
   it.each(["published", "archived"])("makes the tree editor and save action read-only for %s configs", async (status) => {
@@ -236,5 +278,33 @@ describe("ConfigManager tree and JSON modes", () => {
 
     expect(api.publishConfig).toHaveBeenCalledWith(1);
     expect(wrapper.get("[data-testid='success-feedback']").text()).toContain("已确认配置发布成功");
+  });
+
+  it.each([
+    ["invalid JSON syntax", "{ invalid", "配置 JSON 格式错误"],
+    ["a missing required root", JSON.stringify({ mainConfig: {}, newTouchConfig: {} }), "newTextRuleConfig"],
+  ])("blocks publishing %s and preserves the JSON input", async (_case, value, expectedMessage) => {
+    const wrapper = await mountManager();
+    await wrapper.get("[data-testid='json-mode']").trigger("click");
+    await wrapper.get("[data-testid='json-editor']").setValue(value);
+
+    await publishButton(wrapper).trigger("click");
+    await flushPromises();
+
+    expect(api.publishConfig).not.toHaveBeenCalled();
+    expect(wrapper.get<HTMLTextAreaElement>("[data-testid='json-editor']").element.value).toBe(value);
+    expect(wrapper.get("[data-testid='error-feedback']").text()).toContain(expectedMessage);
+  });
+
+  it("publishes after validating a complete JSON draft", async () => {
+    const wrapper = await mountManager();
+    const edited = { ...specialData, mainConfig: { edited: true } };
+    await wrapper.get("[data-testid='json-mode']").trigger("click");
+    await wrapper.get("[data-testid='json-editor']").setValue(JSON.stringify(edited));
+
+    await publishButton(wrapper).trigger("click");
+    await flushPromises();
+
+    expect(api.publishConfig).toHaveBeenCalledWith(1);
   });
 });
