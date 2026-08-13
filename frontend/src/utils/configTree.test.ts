@@ -167,6 +167,51 @@ describe("config tree JSON types and validation", () => {
     );
   });
 
+  it("accepts a null-prototype root but rejects custom root prototypes", () => {
+    const nullPrototypeRoot = Object.assign(Object.create(null), {
+      mainConfig: {},
+      newTouchConfig: {},
+      newTextRuleConfig: {},
+    });
+    const customPrototypeRoot = Object.assign(Object.create({ inherited: true }), {
+      mainConfig: {},
+      newTouchConfig: {},
+      newTextRuleConfig: {},
+    });
+
+    expect(() => validateConfigData(nullPrototypeRoot)).not.toThrow();
+    expect(() => validateConfigData(customPrototypeRoot)).toThrow(/config_data.*\$/);
+  });
+
+  it.each([
+    ["undefined", undefined],
+    ["function", () => true],
+    ["symbol", Symbol("invalid")],
+    ["non-finite number", Number.NEGATIVE_INFINITY],
+    ["custom-prototype object", Object.create({ inherited: true })],
+  ])("rejects an extra root field containing %s", (_description, extra) => {
+    const value = {
+      mainConfig: {},
+      newTouchConfig: {},
+      newTextRuleConfig: {},
+      extra,
+    };
+
+    expect(() => validateConfigData(value)).toThrow(/config_data.*\$\["extra"\]/);
+  });
+
+  it("rejects sparse arrays at the missing index", () => {
+    const sparse = new Array(2);
+    sparse[1] = "present";
+    const value = {
+      mainConfig: { sparse },
+      newTouchConfig: {},
+      newTextRuleConfig: {},
+    };
+
+    expect(() => validateConfigData(value)).toThrow(/mainConfig.*\$\["sparse"\]\[0\]/);
+  });
+
   it("rejects non-JSON values and empty object keys with file and tree paths", () => {
     const invalidValue = {
       mainConfig: { nested: [undefined] },

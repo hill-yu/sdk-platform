@@ -233,7 +233,11 @@ function validateJsonValue(value: unknown, configFile: string, path: TreePath): 
     return;
   }
   if (Array.isArray(value)) {
-    value.forEach((child, index) => validateJsonValue(child, configFile, [...path, index]));
+    for (let index = 0; index < value.length; index += 1) {
+      const childPath = [...path, index];
+      if (!(index in value)) throw validationError(configFile, childPath, "不能是稀疏数组空槽");
+      validateJsonValue(value[index], configFile, childPath);
+    }
     return;
   }
   if (typeof value === "object") {
@@ -255,9 +259,20 @@ export function validateConfigData(value: unknown): asserts value is JsonObject 
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw validationError("config_data", [], "必须是对象");
   }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw validationError("config_data", [], "不是普通对象");
+  }
 
   for (const configFile of REQUIRED_CONFIG_FILES) {
     if (!hasOwn(value, configFile)) throw validationError(configFile, [], "缺失");
-    validateJsonValue((value as Record<string, unknown>)[configFile], configFile, []);
+  }
+
+  for (const [key, child] of Object.entries(value)) {
+    if ((REQUIRED_CONFIG_FILES as readonly string[]).includes(key)) {
+      validateJsonValue(child, key, []);
+    } else {
+      validateJsonValue(child, "config_data", [key]);
+    }
   }
 }
