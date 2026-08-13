@@ -140,8 +140,9 @@
         @rename="emit('rename', $event)"
         @replace="emit('replace', $event)"
         @remove="emit('remove', $event)"
-        @duplicate="emit('duplicate', $event)"
-        @move="emit('move', $event)"
+      @duplicate="emit('duplicate', $event)"
+      @move="emit('move', $event)"
+      @validation-change="emit('validation-change', $event)"
       />
     </div>
 
@@ -207,6 +208,7 @@ const emit = defineEmits<{
   remove: [payload: PathPayload];
   duplicate: [payload: PathPayload];
   move: [payload: MovePayload];
+  "validation-change": [payload: { path: TreePath; valid: boolean }];
 }>();
 
 const jsonTypes: JsonType[] = ["string", "number", "boolean", "null", "object", "array"];
@@ -252,9 +254,11 @@ function replaceNumber(event: Event): void {
   const parsed = Number(numberText.value);
   if (numberText.value.trim() === "" || !Number.isFinite(parsed)) {
     numberError.value = "数值必须是有限数字";
+    emit("validation-change", { path: props.path, valid: false });
     return;
   }
   numberError.value = "";
+  emit("validation-change", { path: props.path, valid: true });
   emit("replace", { path: props.path, value: parsed });
 }
 

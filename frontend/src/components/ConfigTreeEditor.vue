@@ -16,12 +16,13 @@
       @remove="removeNode"
       @duplicate="duplicateNode"
       @move="moveNode"
+      @validation-change="updateDraftValidity"
     />
   </section>
 </template>
 
 <script setup lang="ts">
-import { ref, toRaw, watch } from "vue";
+import { computed, ref, toRaw, watch } from "vue";
 
 import ConfigTreeNode from "@/components/ConfigTreeNode.vue";
 import {
@@ -51,8 +52,12 @@ interface NodeIdentity {
 const props = withDefaults(defineProps<{ modelValue: JsonValue; disabled?: boolean }>(), {
   disabled: false,
 });
-const emit = defineEmits<{ "update:modelValue": [value: JsonValue] }>();
+const emit = defineEmits<{
+  "update:modelValue": [value: JsonValue];
+  "validation-change": [valid: boolean];
+}>();
 const errors = ref<Record<number, string>>({});
+const invalidDrafts = ref<Set<number>>(new Set());
 let nextIdentity = 0;
 
 function createIdentity(value: JsonValue): NodeIdentity {
@@ -70,6 +75,13 @@ function createIdentity(value: JsonValue): NodeIdentity {
 }
 
 const identity = ref<NodeIdentity>(createIdentity(props.modelValue));
+const currentIdentityIds = computed(() => collectIdentityIds(identity.value));
+const valid = computed(() => {
+  const ids = currentIdentityIds.value;
+  return !Object.keys(errors.value).some((id) => ids.has(Number(id)))
+    && ![...invalidDrafts.value].some((id) => ids.has(id));
+});
+watch(valid, (value) => emit("validation-change", value), { immediate: true });
 let pendingUpdate: { value: JsonValue; identity: NodeIdentity } | null = null;
 
 watch(() => props.modelValue, (value) => {
@@ -92,6 +104,23 @@ function identityAtPath(root: NodeIdentity, path: TreePath): NodeIdentity {
       ? current.children[segment as number]
       : current.children[segment as string];
   }, root);
+}
+
+function collectIdentityIds(root: NodeIdentity): Set<number> {
+  const ids = new Set([root.id]);
+  if (root.children !== null) {
+    const children = Array.isArray(root.children) ? root.children : Object.values(root.children);
+    for (const child of children) for (const id of collectIdentityIds(child)) ids.add(id);
+  }
+  return ids;
+}
+
+function updateDraftValidity(payload: { path: TreePath; valid: boolean }): void {
+  const id = identityAtPath(identity.value, payload.path).id;
+  const next = new Set(invalidDrafts.value);
+  if (payload.valid) next.delete(id);
+  else next.add(id);
+  invalidDrafts.value = next;
 }
 
 function replaceIdentityAtPath(root: NodeIdentity, path: TreePath, replacement: NodeIdentity): NodeIdentity {

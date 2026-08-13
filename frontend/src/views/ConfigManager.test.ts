@@ -16,11 +16,13 @@ import ConfigManager from "@/views/ConfigManager.vue";
 
 const TreeEditorStub = defineComponent({
   props: { modelValue: { required: true }, disabled: Boolean },
-  emits: ["update:modelValue"],
+  emits: ["update:modelValue", "validation-change"],
   template: `
     <div data-testid="tree-editor" :data-disabled="String(disabled)">
       <pre data-testid="tree-value">{{ JSON.stringify(modelValue) }}</pre>
       <button data-testid="replace-tree-value" @click="$emit('update:modelValue', { updated: true })">replace</button>
+      <button data-testid="invalidate-tree" @click="$emit('validation-change', false)">invalid</button>
+      <button data-testid="validate-tree" @click="$emit('validation-change', true)">valid</button>
     </div>
   `,
 });
@@ -119,6 +121,33 @@ describe("ConfigManager tree editing", () => {
 
     expect(wrapper.get("[data-testid='tree-editor']").attributes("data-disabled")).toBe("true");
     expect(wrapper.get("[data-testid='save-config']").attributes("disabled")).toBeDefined();
+  });
+
+  it("blocks leaving an invalid tree, save, and publish until the draft is corrected", async () => {
+    const wrapper = await mountManager();
+    await wrapper.get("[data-testid='invalidate-tree']").trigger("click");
+
+    await wrapper.findAll("[data-testid='config-file-tab']")[1].trigger("click");
+    expect(wrapper.get("[data-testid='config-file-tab'].active").text()).toBe("mainConfig");
+    expect(wrapper.find("[data-testid='tree-editor']").exists()).toBe(true);
+
+    await wrapper.get("[data-testid='json-mode']").trigger("click");
+    expect(wrapper.find("[data-testid='tree-editor']").exists()).toBe(true);
+
+    await wrapper.get("[data-testid='save-config']").trigger("click");
+    const publishButton = wrapper.findAll(".actions button").find((button) => button.text() === "发布");
+    await publishButton!.trigger("click");
+    await flushPromises();
+    expect(api.updateConfig).not.toHaveBeenCalled();
+    expect(api.publishConfig).not.toHaveBeenCalled();
+    expect(wrapper.get("[data-testid='error-feedback']").text()).toContain("树形配置");
+
+    await wrapper.get("[data-testid='validate-tree']").trigger("click");
+    await wrapper.findAll("[data-testid='config-file-tab']")[1].trigger("click");
+    expect(wrapper.get("[data-testid='config-file-tab'].active").text()).toBe("newTouchConfig");
+    await wrapper.get("[data-testid='save-config']").trigger("click");
+    await flushPromises();
+    expect(api.updateConfig).toHaveBeenCalledOnce();
   });
 });
 

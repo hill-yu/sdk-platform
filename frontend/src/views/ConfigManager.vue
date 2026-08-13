@@ -22,8 +22,8 @@
         <input v-model="changeLog" class="input" placeholder="变更说明" />
         <textarea v-if="mode === 'json'" v-model="jsonText" data-testid="json-editor" class="editor" :disabled="!editable" />
         <template v-else>
-          <ConfigFileTabs v-model="activeFile" />
-          <ConfigTreeEditor :model-value="configData[activeFile]" :disabled="!editable" @update:model-value="updateActiveFile" />
+          <ConfigFileTabs :model-value="activeFile" @update:model-value="selectActiveFile" />
+          <ConfigTreeEditor :model-value="configData[activeFile]" :disabled="!editable" @update:model-value="updateActiveFile" @validation-change="treeValid = $event" />
         </template>
         <div class="actions">
           <button data-testid="save-config" class="ghost" :disabled="!editable || operationBusy" @click="saveDraft">{{ saving ? "正在加密保存…" : "保存草稿" }}</button>
@@ -53,6 +53,7 @@ const configData = ref<JsonObject>(emptyConfigData());
 const jsonText = ref(JSON.stringify(configData.value, null, 2));
 const mode = ref<"tree" | "json">("tree");
 const activeFile = ref<ConfigFileName>("mainConfig");
+const treeValid = ref(true);
 const changeLog = ref("");
 const feedback = reactive({ error: "", success: "" });
 const saving = ref(false);
@@ -76,9 +77,23 @@ function currentData(): JsonObject {
 function updateActiveFile(value: JsonValue) {
   configData.value = { ...configData.value, [activeFile.value]: value };
 }
+function requireValidTree(): boolean {
+  if (mode.value === "tree" && !treeValid.value) {
+    setFeedbackError(feedback, "请先修正当前配置文件中的树形配置错误");
+    return false;
+  }
+  return true;
+}
+function selectActiveFile(next: ConfigFileName): void {
+  if (next === activeFile.value || !requireValidTree()) return;
+  activeFile.value = next;
+  treeValid.value = true;
+  beginFeedback(feedback);
+}
 async function switchMode(next: "tree" | "json") {
   try {
     if (next === mode.value) return;
+    if (next === "json" && !requireValidTree()) return;
     if (next === "tree") configData.value = parseJsonData();
     else {
       validateConfigData(configData.value);
@@ -106,6 +121,7 @@ async function selectConfig(id: number) {
     configData.value = response.data.config_data;
     jsonText.value = JSON.stringify(configData.value, null, 2);
     activeFile.value = "mainConfig";
+    treeValid.value = true;
     changeLog.value = response.data.change_log || "";
   }
   catch (error) { setFeedbackError(feedback, message(error)); }
@@ -120,6 +136,7 @@ async function createDraft() {
 }
 async function saveDraft() {
   if (!selectedId.value || !editable.value) return;
+  if (!requireValidTree()) return;
   const configId = selectedId.value;
   const before = { ...selectedConfig.value };
   try {
@@ -142,6 +159,7 @@ async function saveDraft() {
 }
 async function publishCurrent() {
   if (!selectedId.value || !editable.value) return;
+  if (!requireValidTree()) return;
   const configId = selectedId.value;
   const before = { ...selectedConfig.value };
   try {

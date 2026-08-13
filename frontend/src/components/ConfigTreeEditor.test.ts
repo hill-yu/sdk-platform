@@ -58,6 +58,10 @@ describe("ConfigTreeEditor scalar controls and readonly behavior", () => {
 
     expect(nodeAt(wrapper, ["count"]).get("[data-testid='node-error']").text()).toContain("有限数字");
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+    expect(wrapper.emitted("validation-change")?.at(-1)).toEqual([false]);
+
+    await nodeAt(wrapper, ["count"]).get("[data-testid='number-input']").setValue("3");
+    expect(wrapper.emitted("validation-change")?.at(-1)).toEqual([true]);
   });
 
   it("keeps folding and copying available while all mutations are disabled", async () => {
@@ -119,6 +123,20 @@ describe("ConfigTreeEditor object operations", () => {
     expect(nodeAt(wrapper, ["section", "first"]).get("[data-testid='node-error']").text()).toContain("已存在");
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
     expect(wrapper.props("modelValue")).toEqual(model);
+    expect(wrapper.emitted("validation-change")?.at(-1)).toEqual([false]);
+
+    await first.get("[data-testid='rename-input']").setValue("renamed");
+    await first.get("[data-testid='rename-button']").trigger("click");
+    expect(wrapper.emitted("validation-change")?.at(-1)).toEqual([true]);
+  });
+
+  it("reports an empty-key operation as invalid", async () => {
+    const wrapper = mount(ConfigTreeEditor, { props: { modelValue: { section: {} } } });
+
+    await nodeAt(wrapper, ["section"]).get("[data-testid='add-child']").trigger("click");
+
+    expect(wrapper.emitted("validation-change")?.at(-1)).toEqual([false]);
+    expect(nodeAt(wrapper, ["section"]).get("[data-testid='node-error']").text()).toContain("不能为空");
   });
 });
 
