@@ -7,6 +7,7 @@ import pytest
 from types import SimpleNamespace
 
 from app.services.analysis_service import get_events, get_trend
+from sqlalchemy.dialects import postgresql
 
 
 class _Rows:
@@ -75,6 +76,7 @@ async def test_events_filter_and_response_use_package_name() -> None:
         event_type="log",
         package_name="com.example.app",
         device_id="device-1",
+        sdk_version=None,
         payload={"extra": "raw"},
         client_ts=None,
         server_ts=None,
@@ -86,6 +88,7 @@ async def test_events_filter_and_response_use_package_name() -> None:
         page=1,
         page_size=20,
         event_type=None,
+        log_level=None,
         package_name="com.example.app",
         device_id=None,
         date_from=None,
@@ -94,3 +97,36 @@ async def test_events_filter_and_response_use_package_name() -> None:
 
     assert result["items"][0]["package_name"] == "com.example.app"
     assert "app_id" not in result["items"][0]
+
+
+@pytest.mark.asyncio
+async def test_events_filter_by_log_level_and_include_sdk_version() -> None:
+    event = SimpleNamespace(
+        id=2,
+        event_type="log",
+        package_name="com.example.app",
+        device_id="device-2",
+        sdk_version="1.4.0",
+        payload={"level": "error", "message": "boom"},
+        client_ts=None,
+        server_ts=None,
+    )
+    db = _EventSession(event)
+
+    result = await get_events(
+        db,  # type: ignore[arg-type]
+        page=1,
+        page_size=20,
+        event_type=None,
+        log_level="error",
+        package_name=None,
+        device_id=None,
+        date_from=None,
+        date_to=None,
+    )
+
+    compiled = db.statements[1].compile(dialect=postgresql.dialect())
+    assert "sdk_events.event_type" in str(compiled)
+    assert "sdk_events.payload ->>" in str(compiled)
+    assert {"log", "level", "error"} <= set(compiled.params.values())
+    assert result["items"][0]["sdk_version"] == "1.4.0"

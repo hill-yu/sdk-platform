@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +42,7 @@ async def get_events(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     event_type: str | None = Query(None),
+    log_level: Literal["debug", "info", "warn", "error"] | None = Query(None),
     package_name: str | None = Query(None),
     device_id: str | None = Query(None),
     date_from: date | None = Query(None),
@@ -52,6 +54,7 @@ async def get_events(
         page=page,
         page_size=page_size,
         event_type=event_type,
+        log_level=log_level,
         package_name=package_name,
         device_id=device_id,
         date_from=date_from,

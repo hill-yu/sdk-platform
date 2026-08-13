@@ -45,6 +45,31 @@ def test_admin_summary_returns_dashboard_payload(monkeypatch):
     assert response.json()["data"]["yesterday_pv"] == 10
 
 
+def test_admin_events_passes_valid_log_level_to_service(monkeypatch):
+    from app.admin_main import app
+    from app.api.admin import dashboard
+
+    async def fake_get_events(_db: Any, **filters: Any) -> dict[str, Any]:
+        assert filters["log_level"] == "info"
+        return {"total": 0, "page": 1, "page_size": 20, "items": []}
+
+    monkeypatch.setattr(dashboard.analysis_service, "get_events", fake_get_events)
+
+    with TestClient(app) as client:
+        response = client.get("/api/admin/events?log_level=info", headers=_auth_headers())
+
+    assert response.status_code == 200
+
+
+def test_admin_events_rejects_invalid_log_level():
+    from app.admin_main import app
+
+    with TestClient(app) as client:
+        response = client.get("/api/admin/events?log_level=fatal", headers=_auth_headers())
+
+    assert response.status_code == 422
+
+
 def test_get_configs_returns_grouped_payload(monkeypatch):
     from app.admin_main import app
     from app.api.admin import config_mgr
