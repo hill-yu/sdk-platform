@@ -5,8 +5,8 @@
       <button class="ghost" @click="loadConfigs">筛选</button>
       <button class="primary" @click="createDraft">新建草稿</button>
     </section>
-    <p v-if="feedback.error" class="feedback error">{{ feedback.error }}</p>
-    <p v-if="feedback.success" class="feedback success">{{ feedback.success }}</p>
+    <p v-if="feedback.error" data-testid="error-feedback" class="feedback error">{{ feedback.error }}</p>
+    <p v-if="feedback.success" data-testid="success-feedback" class="feedback success">{{ feedback.success }}</p>
     <div class="content-grid">
       <section class="panel list-panel">
         <h3>配置版本</h3>
@@ -17,13 +17,16 @@
       <section class="panel editor-panel">
         <div class="panel-header">
           <div><h3>配置编辑器</h3><small>{{ selectedConfig?.package_name || "尚未选择配置" }}</small></div>
-          <div class="mode"><button :class="{ primary: mode === 'json' }" @click="switchMode('json')">JSON</button><button :class="{ primary: mode === 'table' }" @click="switchMode('table')">表格</button></div>
+          <div class="mode"><button data-testid="json-mode" :class="{ primary: mode === 'json' }" @click="switchMode('json')">JSON</button><button data-testid="tree-mode" :class="{ primary: mode === 'tree' }" @click="switchMode('tree')">树形</button></div>
         </div>
         <input v-model="changeLog" class="input" placeholder="变更说明" />
-        <textarea v-if="mode === 'json'" v-model="editorValue" class="editor" :disabled="!editable" />
-        <ConfigTableEditor v-else v-model="tableRows" :disabled="!editable" />
+        <textarea v-if="mode === 'json'" v-model="jsonText" data-testid="json-editor" class="editor" :disabled="!editable" />
+        <template v-else>
+          <ConfigFileTabs v-model="activeFile" />
+          <ConfigTreeEditor :model-value="configData[activeFile]" :disabled="!editable" @update:model-value="updateActiveFile" />
+        </template>
         <div class="actions">
-          <button class="ghost" :disabled="!editable || operationBusy" @click="saveDraft">{{ saving ? "正在加密保存…" : "保存草稿" }}</button>
+          <button data-testid="save-config" class="ghost" :disabled="!editable || operationBusy" @click="saveDraft">{{ saving ? "正在加密保存…" : "保存草稿" }}</button>
           <button class="primary" :disabled="!editable || operationBusy" @click="publishCurrent">{{ publishing ? "正在发布…" : "发布" }}</button>
           <button v-if="selectedConfig?.status === 'archived'" class="ghost" @click="rollbackCurrent">回滚到此版本</button>
         </div>
@@ -34,9 +37,10 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
-import ConfigTableEditor from "@/components/ConfigTableEditor.vue";
+import ConfigFileTabs, { type ConfigFileName } from "@/components/ConfigFileTabs.vue";
+import ConfigTreeEditor from "@/components/ConfigTreeEditor.vue";
 import { createConfig, getConfig, getConfigs, publishConfig, rollbackConfig, updateConfig } from "@/api/config";
-import { flattenConfig, rowsToConfig, type ConfigRow } from "@/utils/configTable";
+import { validateConfigData, type JsonObject, type JsonValue } from "@/utils/configTree";
 import { isPublishConfirmed, isRequestTimeout, isSaveConfirmed } from "@/utils/configOperation";
 import { beginFeedback, setFeedbackError, setFeedbackSuccess } from "@/utils/feedback";
 
@@ -44,9 +48,11 @@ type ConfigItem = Record<string, any>;
 const configs = reactive<{ published: ConfigItem[]; drafts: ConfigItem[]; history: ConfigItem[] }>({ published: [], drafts: [], history: [] });
 const selectedId = ref<number | null>(null);
 const packageFilter = ref("");
-const editorValue = ref("{\n  \"mainConfig\": {},\n  \"newTouchConfig\": {},\n  \"newTextRuleConfig\": {}\n}");
-const tableRows = ref<ConfigRow[]>([]);
-const mode = ref<"json" | "table">("json");
+function emptyConfigData(): JsonObject { return { mainConfig: {}, newTouchConfig: {}, newTextRuleConfig: {} }; }
+const configData = ref<JsonObject>(emptyConfigData());
+const jsonText = ref(JSON.stringify(configData.value, null, 2));
+const mode = ref<"tree" | "json">("tree");
+const activeFile = ref<ConfigFileName>("mainConfig");
 const changeLog = ref("");
 const feedback = reactive({ error: "", success: "" });
 const saving = ref(false);
@@ -57,12 +63,27 @@ const editable = computed(() => selectedConfig.value?.status === "draft");
 const operationBusy = computed(() => saving.value || publishing.value);
 
 function message(error: unknown) { return error instanceof SyntaxError ? "配置 JSON 格式错误" : (error as Error).message; }
-function currentData() { return mode.value === "json" ? JSON.parse(editorValue.value) : rowsToConfig(tableRows.value); }
-async function switchMode(next: "json" | "table") {
+function parseJsonData(): JsonObject {
+  const value: unknown = JSON.parse(jsonText.value);
+  validateConfigData(value);
+  return value;
+}
+function currentData(): JsonObject {
+  if (mode.value === "json") configData.value = parseJsonData();
+  validateConfigData(configData.value);
+  return configData.value;
+}
+function updateActiveFile(value: JsonValue) {
+  configData.value = { ...configData.value, [activeFile.value]: value };
+}
+async function switchMode(next: "tree" | "json") {
   try {
     if (next === mode.value) return;
-    if (next === "table") tableRows.value = flattenConfig(JSON.parse(editorValue.value));
-    else editorValue.value = JSON.stringify(rowsToConfig(tableRows.value), null, 2);
+    if (next === "tree") configData.value = parseJsonData();
+    else {
+      validateConfigData(configData.value);
+      jsonText.value = JSON.stringify(configData.value, null, 2);
+    }
     mode.value = next; beginFeedback(feedback);
   } catch (error) { setFeedbackError(feedback, message(error)); }
 }
@@ -77,7 +98,16 @@ async function loadConfigs() {
   } catch (error) { setFeedbackError(feedback, message(error)); }
 }
 async function selectConfig(id: number) {
-  try { beginFeedback(feedback); const response = await getConfig(id); selectedId.value = id; editorValue.value = JSON.stringify(response.data.config_data, null, 2); tableRows.value = flattenConfig(response.data.config_data); changeLog.value = response.data.change_log || ""; }
+  try {
+    beginFeedback(feedback);
+    const response = await getConfig(id);
+    validateConfigData(response.data.config_data);
+    selectedId.value = id;
+    configData.value = response.data.config_data;
+    jsonText.value = JSON.stringify(configData.value, null, 2);
+    activeFile.value = "mainConfig";
+    changeLog.value = response.data.change_log || "";
+  }
   catch (error) { setFeedbackError(feedback, message(error)); }
 }
 async function createDraft() {
@@ -93,8 +123,10 @@ async function saveDraft() {
   const configId = selectedId.value;
   const before = { ...selectedConfig.value };
   try {
-    beginFeedback(feedback); saving.value = true;
-    await updateConfig(configId, { config_data: currentData(), change_log: changeLog.value });
+    beginFeedback(feedback);
+    const data = currentData();
+    saving.value = true;
+    await updateConfig(configId, { config_data: data, change_log: changeLog.value });
     await loadConfigs(); setFeedbackSuccess(feedback, "配置已加密保存");
   } catch (error) {
     if (isRequestTimeout(error)) {
