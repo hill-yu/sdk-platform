@@ -23,7 +23,12 @@
 
 - 修改 `frontend/src/api/dashboard.ts`：增加事件查询参数类型，供 Dashboard 和日志页复用。
 - 修改 `frontend/src/api/dashboard.test.ts`：验证日志筛选参数原样发送。
+- 修改 `frontend/package.json`：加入 Vue 组件测试依赖。
+- 修改 `frontend/package-lock.json`：锁定组件测试依赖。
+- 修改 `frontend/vite.config.ts`：配置 Vitest DOM 测试环境。
+- 创建 `frontend/src/components/TestMount.test.ts`：验证 Vue 组件挂载基础设施。
 - 创建 `frontend/src/components/LogDetail.vue`：只负责日志详情、长文本和复制事件。
+- 创建 `frontend/src/components/LogDetail.test.ts`：验证详情、空值和复制行为。
 - 创建 `frontend/src/views/LogViewer.vue`：负责筛选、分页、查询状态和选中日志。
 - 创建 `frontend/src/views/LogViewer.test.ts`：验证查询参数、分页重置、详情选择和错误保留。
 - 修改 `frontend/src/router/index.ts`：注册 `/logs` 路由。
@@ -37,6 +42,8 @@
 - 创建 `frontend/src/components/ConfigTreeNode.vue`：递归渲染单节点并派发语义化操作。
 - 创建 `frontend/src/components/ConfigTreeEditor.vue`：持有当前配置文件根节点的编辑上下文和确认流程。
 - 创建 `frontend/src/components/ConfigTreeEditor.test.ts`：覆盖节点操作、只读态和确认行为。
+- 创建 `frontend/src/components/ConfigFileTabs.vue`：三个固定配置文件标签切换。
+- 创建 `frontend/src/components/ConfigFileTabs.test.ts`：覆盖标签选择与只读展示。
 - 修改 `frontend/src/views/ConfigManager.vue`：改用完整 JSON 状态、三个文件标签、树形/JSON 模式和现有保存发布流程。
 - 修改或替换 `frontend/src/utils/configTable.test.ts`：保留旧转换回归证据后删除不再使用的路径表格测试。
 - 删除 `frontend/src/components/ConfigTableEditor.vue` 和 `frontend/src/utils/configTable.ts`：确认无引用后移除旧实现。
@@ -75,7 +82,7 @@ await analysis_service.get_events(
 )
 ```
 
-断言生成查询包含 `sdk_events.payload ->> 'level' = 'error'`，并断言响应事件包含 `sdk_version`。更新所有旧调用显式传 `log_level=None`。
+使用 SQLAlchemy 编译结果及绑定参数验证存在 `payload.level` 条件和 `error` 参数，避免依赖精确空白格式；并断言响应事件包含 `sdk_version`。更新所有旧调用显式传 `log_level=None`。
 
 - [ ] **步骤 2：运行定点测试确认失败**
 
@@ -127,6 +134,8 @@ GET /api/admin/events?event_type=log&log_level=info  -> 200
 GET /api/admin/events?event_type=log&log_level=fatal -> 422
 ```
 
+合法值测试 monkeypatch `analysis_service.get_events`，断言 `log_level="info"` 被透传，避免依赖真实数据库。
+
 - [ ] **步骤 5：实现受约束查询参数**
 
 在路由使用：
@@ -161,13 +170,56 @@ git commit -m "feat(logs): filter admin events by log level"
 **文件：**
 - 修改：`frontend/src/api/dashboard.ts`
 - 修改：`frontend/src/api/dashboard.test.ts`
+- 修改：`frontend/package.json`
+- 修改：`frontend/package-lock.json`
+- 修改：`frontend/vite.config.ts`
+- 创建：`frontend/src/components/TestMount.test.ts`
 - 创建：`frontend/src/components/LogDetail.vue`
+- 创建：`frontend/src/components/LogDetail.test.ts`
 - 创建：`frontend/src/views/LogViewer.vue`
 - 创建：`frontend/src/views/LogViewer.test.ts`
 - 修改：`frontend/src/router/index.ts`
 - 修改：`frontend/src/components/AppLayout.vue`
 
-- [ ] **步骤 1：定义事件类型和 API 参数类型**
+- [ ] **步骤 1：安装并验证组件测试环境**
+
+运行：
+
+```bash
+npm --prefix frontend install --save-dev @vue/test-utils happy-dom
+```
+
+在 `vite.config.ts` 增加：
+
+```ts
+test: { environment: "happy-dom" }
+```
+
+先创建一个导入不存在测试组件的最小测试并运行确认 RED；再改为挂载一个内联 Vue 组件，断言文本可见：
+
+```ts
+import { mount } from "@vue/test-utils";
+import { defineComponent } from "vue";
+
+it("mounts a Vue component", () => {
+  const wrapper = mount(defineComponent({ template: "<p>ready</p>" }));
+  expect(wrapper.text()).toContain("ready");
+});
+```
+
+运行：`npm --prefix frontend test -- --run src/components/TestMount.test.ts`
+
+预期：PASS，证明后续组件测试可执行。
+
+- [ ] **步骤 2：先编写 API 参数失败测试**
+
+测试使用尚不存在的 `EventQuery.log_level` 和 `getEvents` 类型约束。
+
+运行：`npm --prefix frontend test -- --run src/api/dashboard.test.ts`
+
+预期：FAIL（类型或参数契约尚未实现）。
+
+- [ ] **步骤 3：定义事件类型和 API 参数类型**
 
 在 `dashboard.ts` 导出：
 
@@ -199,15 +251,15 @@ export interface EventQuery {
 
 将 `getEvents` 参数从无约束字典改为 `EventQuery`。
 
-- [ ] **步骤 2：编写 API 参数测试并运行**
+- [ ] **步骤 4：运行 API 参数测试**
 
 测试 `getEvents` 将 `event_type=log`、`log_level=error`、包名、设备和日期完整传给 Axios。
 
-运行：`npm test -- --run src/api/dashboard.test.ts`
+运行：`npm --prefix frontend test -- --run src/api/dashboard.test.ts`
 
 预期：先因类型/断言缺失失败，实现后 PASS。
 
-- [ ] **步骤 3：编写日志详情组件测试**
+- [ ] **步骤 5：编写并运行日志详情失败测试**
 
 测试以下行为：
 
@@ -216,7 +268,11 @@ export interface EventQuery {
 - 点击“复制 extra”调用 `navigator.clipboard.writeText(String(extra ?? ""))`；
 - 发出 `copy-success` 或 `copy-error`。
 
-- [ ] **步骤 4：实现 `LogDetail.vue`**
+运行：`npm --prefix frontend test -- --run src/components/LogDetail.test.ts`
+
+预期：FAIL，组件尚不存在。
+
+- [ ] **步骤 6：实现 `LogDetail.vue` 并复测**
 
 组件只接收：
 
@@ -227,7 +283,11 @@ defineEmits<{ "copy-success": []; "copy-error": [message: string] }>();
 
 长文本放入可滚动 `<pre>`，不解析 `extra` 字符串内部内容。
 
-- [ ] **步骤 5：编写日志页面失败测试**
+运行：`npm --prefix frontend test -- --run src/components/LogDetail.test.ts`
+
+预期：PASS。
+
+- [ ] **步骤 7：编写并运行日志页面失败测试**
 
 使用 mock API 验证：
 
@@ -237,8 +297,17 @@ defineEmits<{ "copy-success": []; "copy-error": [message: string] }>();
 - 点击列表项显示详情；
 - 查询失败时已有 `items` 不被清空；
 - 复制事件更新反馈文案。
+- 刷新保留筛选条件和当前页；
+- 列表展示 tag/message 摘要但不展开完整 extra；
+- level 使用状态标签；
+- null 字段、空结果正确展示；
+- 第一页禁用上一页、末页禁用下一页。
 
-- [ ] **步骤 6：实现 `LogViewer.vue`**
+运行：`npm --prefix frontend test -- --run src/views/LogViewer.test.ts`
+
+预期：FAIL，页面尚不存在。
+
+- [ ] **步骤 8：实现 `LogViewer.vue` 并复测**
 
 状态分离为：
 
@@ -252,7 +321,11 @@ const selected = ref<EventItem | null>(null);
 
 `loadLogs({ resetPage: true })` 才重置页码；翻页调用不重置。请求失败不覆盖 `result.items`。
 
-- [ ] **步骤 7：接入路由和导航**
+运行：`npm --prefix frontend test -- --run src/views/LogViewer.test.ts`
+
+预期：PASS。
+
+- [ ] **步骤 9：接入路由和导航**
 
 增加：
 
@@ -262,19 +335,19 @@ const selected = ref<EventItem | null>(null);
 
 侧边栏增加“日志查看”，`routeTitle` 对 `logs` 返回同名标题。
 
-- [ ] **步骤 8：运行日志页面测试和构建**
+- [ ] **步骤 10：运行日志页面测试和构建**
 
 ```bash
-npm test -- --run src/api/dashboard.test.ts src/views/LogViewer.test.ts
-npm run build
+npm --prefix frontend test -- --run src/api/dashboard.test.ts src/components/LogDetail.test.ts src/views/LogViewer.test.ts
+npm --prefix frontend run build
 ```
 
 预期：测试与类型检查全部 PASS。
 
-- [ ] **步骤 9：提交**
+- [ ] **步骤 11：提交**
 
 ```bash
-git add frontend/src/api/dashboard.ts frontend/src/api/dashboard.test.ts frontend/src/components/LogDetail.vue frontend/src/views/LogViewer.vue frontend/src/views/LogViewer.test.ts frontend/src/router/index.ts frontend/src/components/AppLayout.vue
+git add frontend/package.json frontend/package-lock.json frontend/vite.config.ts frontend/src/api/dashboard.ts frontend/src/api/dashboard.test.ts frontend/src/components/TestMount.test.ts frontend/src/components/LogDetail.vue frontend/src/components/LogDetail.test.ts frontend/src/views/LogViewer.vue frontend/src/views/LogViewer.test.ts frontend/src/router/index.ts frontend/src/components/AppLayout.vue frontend/src/styles/variables.css
 git commit -m "feat(logs): add admin log viewer"
 ```
 
@@ -301,7 +374,7 @@ export type TreePath = Array<string | number>;
 
 - [ ] **步骤 2：运行测试确认失败**
 
-运行：`npm test -- --run src/utils/configTree.test.ts`
+运行：`npm --prefix frontend test -- --run src/utils/configTree.test.ts`
 
 预期：FAIL，模块不存在。
 
@@ -354,7 +427,7 @@ validateConfigData(value: unknown): asserts value is JsonObject
 
 - [ ] **步骤 7：运行纯函数测试**
 
-运行：`npm test -- --run src/utils/configTree.test.ts`
+运行：`npm --prefix frontend test -- --run src/utils/configTree.test.ts`
 
 预期：特殊键、不可变更新、对象操作、数组操作、类型转换和错误路径全部 PASS。
 
@@ -382,13 +455,21 @@ git commit -m "feat(config): add immutable config tree operations"
 - number 非法时显示错误且不发出更新；
 - `disabled=true` 时增删改移控件禁用，但折叠和复制文本仍可用。
 
+运行：`npm --prefix frontend test -- --run src/components/ConfigTreeEditor.test.ts`
+
+预期：FAIL，组件尚不存在。
+
 - [ ] **步骤 2：编写对象操作失败测试**
 
 验证新增子字段、同级字段、改名、删除标量；重复字段名显示局部错误，不覆盖有效模型值。
 
+再次运行同一测试，预期仍 FAIL，且失败点对应尚未实现的对象操作。
+
 - [ ] **步骤 3：编写数组操作和确认失败测试**
 
 验证新增、复制、删除、上移、下移；删除非空容器和非空容器改类型时调用注入的确认函数，取消后不发出更新。
+
+再次运行同一测试，预期仍 FAIL，且失败点对应尚未实现的数组/确认操作。
 
 - [ ] **步骤 4：实现递归节点组件**
 
@@ -418,7 +499,7 @@ const confirmDestructive = (message: string) => window.confirm(message);
 
 - [ ] **步骤 6：运行组件测试**
 
-运行：`npm test -- --run src/components/ConfigTreeEditor.test.ts`
+运行：`npm --prefix frontend test -- --run src/components/ConfigTreeEditor.test.ts`
 
 预期：全部 PASS，Vue 控制台无 key 或递归警告。
 
@@ -436,11 +517,25 @@ git commit -m "feat(config): add recursive tree editor"
 **文件：**
 - 修改：`frontend/src/views/ConfigManager.vue`
 - 创建：`frontend/src/views/ConfigManager.test.ts`
+- 创建：`frontend/src/components/ConfigFileTabs.vue`
+- 创建：`frontend/src/components/ConfigFileTabs.test.ts`
 - 删除：`frontend/src/components/ConfigTableEditor.vue`
 - 删除：`frontend/src/utils/configTable.ts`
 - 删除或替换：`frontend/src/utils/configTable.test.ts`
 
-- [ ] **步骤 1：编写配置管理模式测试**
+- [ ] **步骤 1：编写并运行配置文件标签失败测试**
+
+验证恰好展示三个固定标签、点击发出选择值、当前标签有 active 状态。运行：
+
+`npm --prefix frontend test -- --run src/components/ConfigFileTabs.test.ts`
+
+预期：FAIL，组件尚不存在。
+
+- [ ] **步骤 2：实现 `ConfigFileTabs.vue` 并复测**
+
+组件只接收 `modelValue` 并发出 `update:modelValue`，不接触完整配置内容。复测预期 PASS。
+
+- [ ] **步骤 3：编写并运行配置管理模式失败测试**
 
 mock 配置详情包含三份不同嵌套数据，验证：
 
@@ -450,7 +545,11 @@ mock 配置详情包含三份不同嵌套数据，验证：
 - 选择另一个配置后重置到 `mainConfig`；
 - published/archived 将树编辑器设为 disabled。
 
-- [ ] **步骤 2：编写双模式无损测试**
+运行：`npm --prefix frontend test -- --run src/views/ConfigManager.test.ts`
+
+预期：FAIL，页面尚未接入树形组件。
+
+- [ ] **步骤 4：编写双模式无损测试**
 
 使用包含特殊键和嵌套数组的数据：
 
@@ -464,7 +563,9 @@ mock 配置详情包含三份不同嵌套数据，验证：
 
 验证树形 → JSON → 树形后 `toEqual` 原数据。JSON 缺根字段或语法错误时模式不切换且反馈可见。
 
-- [ ] **步骤 3：重构唯一状态**
+再次运行页面测试，预期仍 FAIL，失败点对应尚未实现的模式切换。
+
+- [ ] **步骤 5：重构唯一状态**
 
 将 `editorValue/tableRows` 替换为：
 
@@ -483,13 +584,17 @@ function updateActiveFile(value: JsonValue) {
 }
 ```
 
-- [ ] **步骤 4：实现模式切换校验**
+- [ ] **步骤 6：实现模式切换校验**
 
 JSON → 树形先 `JSON.parse` 再 `validateConfigData`；树形 → JSON 先校验 `configData` 再序列化。失败时不得改变 `mode`。
 
 `currentData()` 始终返回校验后的完整三个根配置；现有保存、发布、超时重查函数不改变调用协议。
 
-- [ ] **步骤 5：移除旧路径表格实现**
+- [ ] **步骤 7：运行页面测试并移除旧路径表格实现**
+
+先运行：`npm --prefix frontend test -- --run src/components/ConfigFileTabs.test.ts src/views/ConfigManager.test.ts`
+
+预期：PASS。
 
 运行：
 
@@ -499,20 +604,20 @@ rg -n "ConfigTableEditor|flattenConfig|rowsToConfig|configTable" frontend/src
 
 确认仅剩待删除文件后删除它们。不得保留双套可编辑状态。
 
-- [ ] **步骤 6：运行配置页面和全量前端测试**
+- [ ] **步骤 8：运行配置页面和全量前端测试**
 
 ```bash
-npm test -- --run src/utils/configTree.test.ts src/components/ConfigTreeEditor.test.ts src/views/ConfigManager.test.ts
-npm test -- --run
-npm run build
+npm --prefix frontend test -- --run src/utils/configTree.test.ts src/components/ConfigTreeEditor.test.ts src/components/ConfigFileTabs.test.ts src/views/ConfigManager.test.ts
+npm --prefix frontend test -- --run
+npm --prefix frontend run build
 ```
 
 预期：全部 PASS；生产构建只有既有 chunk size 警告，不新增 TypeScript 错误。
 
-- [ ] **步骤 7：提交**
+- [ ] **步骤 9：提交**
 
 ```bash
-git add frontend/src/views/ConfigManager.vue frontend/src/views/ConfigManager.test.ts frontend/src/components/ConfigTableEditor.vue frontend/src/utils/configTable.ts frontend/src/utils/configTable.test.ts
+git add frontend/src/views/ConfigManager.vue frontend/src/views/ConfigManager.test.ts frontend/src/components/ConfigFileTabs.vue frontend/src/components/ConfigFileTabs.test.ts frontend/src/components/ConfigTableEditor.vue frontend/src/utils/configTable.ts frontend/src/utils/configTable.test.ts
 git commit -m "feat(config): edit three config files as trees"
 ```
 
@@ -553,9 +658,8 @@ git diff --check
 
 ```bash
 python -m pytest backend/tests -q
-cd frontend
-npm test -- --run
-npm run build
+npm --prefix frontend test -- --run
+npm --prefix frontend run build
 ```
 
 预期：后端、前端测试全部通过，构建退出码为 0。
