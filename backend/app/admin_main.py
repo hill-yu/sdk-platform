@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from app.api.admin import config_mgr, dashboard, version_mgr
+from app.api.admin import config_mgr, dashboard, log_exports, version_mgr
 from app.core.config import get_settings
 from app.core.database import async_session_factory
 from app.core.middleware import RequestSizeLimitMiddleware
@@ -91,6 +91,7 @@ app.add_middleware(
 app.include_router(dashboard.router, prefix="/api/admin")
 app.include_router(config_mgr.router, prefix="/api/admin")
 app.include_router(version_mgr.router, prefix="/api/admin")
+app.include_router(log_exports.router, prefix="/api/admin")
 
 
 @app.get("/api/admin/health")

@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     CONFIG_META_LOCAL_BASE_URL: str = "https://sdk.deeppopgame.xyz"
 
     LOG_LEVEL: str = "INFO"
+    LOG_EXPORT_DIR: str = "exports"
 
     @property
     def resolved_database_url(self) -> str:
