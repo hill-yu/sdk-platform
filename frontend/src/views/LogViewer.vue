@@ -21,6 +21,12 @@
         </button>
         <button data-testid="refresh-button" class="ghost" type="button" @click="loadLogs()">刷新</button>
       </div>
+      <LogExportPanel
+        :device-id="filters.device_id"
+        :log-level="filters.log_level as '' | LogLevel"
+        :date-from="filters.date_from"
+        :date-to="filters.date_to"
+      />
     </section>
 
     <div class="viewer-grid">
@@ -108,6 +114,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { getEvents } from "@/api/dashboard";
 import type { EventItem, EventQuery, LogLevel } from "@/api/dashboard";
 import LogDetail from "@/components/LogDetail.vue";
+import LogExportPanel from "@/components/LogExportPanel.vue";
 import { beginFeedback, setFeedbackError, setFeedbackSuccess } from "@/utils/feedback";
 
 const filters = reactive({ package_name: "", device_id: "", log_level: "", date_from: "", date_to: "" });
