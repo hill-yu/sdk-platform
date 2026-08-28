@@ -17,6 +17,6 @@ describe("log export api", () => {
 
   it("downloads csv as a blob", async () => {
     await downloadLogExport("job-id");
-    expect(request.get).toHaveBeenCalledWith("/log-exports/job-id/download", { responseType: "blob" });
+    expect(request.get).toHaveBeenCalledWith("/log-exports/job-id/download", { responseType: "blob", timeout: 60000 });
   });
 });

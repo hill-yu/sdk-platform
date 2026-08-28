@@ -33,7 +33,10 @@ async function pollJob() {
     currentJob.value = response.data;
     if (response.data.status === "pending" || response.data.status === "running") timer = setTimeout(pollJob, 2000);
     else if (response.data.status === "failed") error.value = response.data.error_message || "导出失败";
-  } catch (caught) { error.value = caught instanceof Error ? caught.message : "查询导出状态失败"; }
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : "查询导出状态失败";
+    if (currentJob.value?.status === "pending" || currentJob.value?.status === "running") timer = setTimeout(pollJob, 2000);
+  }
 }
 async function startExport() {
   submitting.value = true; error.value = "";
@@ -52,11 +55,16 @@ async function startExport() {
 }
 async function download() {
   if (!currentJob.value) return;
-  const response = await downloadLogExport(currentJob.value.id);
-  const url = URL.createObjectURL(response as unknown as Blob);
-  const anchor = document.createElement("a");
-  anchor.href = url; anchor.download = `sdk-logs-${currentJob.value.id}.csv`; anchor.click();
-  URL.revokeObjectURL(url);
+  try {
+    error.value = "";
+    const response = await downloadLogExport(currentJob.value.id);
+    const url = URL.createObjectURL(response as unknown as Blob);
+    const anchor = document.createElement("a");
+    anchor.href = url; anchor.download = `sdk-logs-${currentJob.value.id}.csv`; anchor.click();
+    URL.revokeObjectURL(url);
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : "下载导出文件失败";
+  }
 }
 onBeforeUnmount(() => { if (timer) clearTimeout(timer); });
 </script>

@@ -21,4 +21,4 @@ export const searchLogPackages = (keyword: string) =>
 export const createLogExport = (body: LogExportFilters) => request.post("/log-exports", body);
 export const getLogExport = (id: string) => request.get(`/log-exports/${id}`);
 export const downloadLogExport = (id: string) =>
-  request.get(`/log-exports/${id}/download`, { responseType: "blob" });
+  request.get(`/log-exports/${id}/download`, { responseType: "blob", timeout: 60000 });

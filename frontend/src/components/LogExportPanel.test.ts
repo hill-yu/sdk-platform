@@ -33,4 +33,20 @@ describe("LogExportPanel", () => {
     expect(wrapper.text()).toContain("12 条");
     expect(wrapper.find("[data-testid='download-button']").exists()).toBe(true);
   });
+
+  it("continues polling after a transient status error", async () => {
+    api.getLogExport.mockRejectedValueOnce(new Error("temporary")).mockResolvedValueOnce({
+      data: { id: "job-1", status: "success", row_count: 5 },
+    });
+    const wrapper = mount(LogExportPanel, { props: { deviceId: "", logLevel: "", dateFrom: "", dateTo: "" } });
+    await wrapper.get("[data-testid='choose']").trigger("click");
+    await wrapper.get("[data-testid='export-button']").trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(2000);
+    await flushPromises();
+    expect(wrapper.text()).toContain("temporary");
+    await vi.advanceTimersByTimeAsync(2000);
+    await flushPromises();
+    expect(wrapper.text()).toContain("5 条");
+  });
 });

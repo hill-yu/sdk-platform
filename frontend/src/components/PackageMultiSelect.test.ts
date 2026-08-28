@@ -23,4 +23,20 @@ describe("PackageMultiSelect", () => {
     await wrapper.get("[data-testid='remove-package']").trigger("click");
     expect(wrapper.emitted("update:modelValue")?.[1]).toEqual([[]]);
   });
+
+  it("ignores an older search response", async () => {
+    let resolveOld!: (value: unknown) => void;
+    const oldRequest = new Promise((resolve) => { resolveOld = resolve; });
+    searchLogPackages.mockReturnValueOnce(oldRequest).mockResolvedValueOnce({ data: { items: ["new.package"] } });
+    const wrapper = mount(PackageMultiSelect, { props: { modelValue: [] } });
+    await wrapper.get("[data-testid='package-search']").setValue("old");
+    await vi.advanceTimersByTimeAsync(300);
+    await wrapper.get("[data-testid='package-search']").setValue("new");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    resolveOld({ data: { items: ["old.package"] } });
+    await flushPromises();
+    expect(wrapper.text()).toContain("new.package");
+    expect(wrapper.text()).not.toContain("old.package");
+  });
 });

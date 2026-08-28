@@ -36,11 +36,14 @@ const keyword = ref("");
 const options = ref<string[]>([]);
 const open = ref(false);
 let timer: ReturnType<typeof setTimeout> | undefined;
+let latestSearch = 0;
 
 watch(keyword, (value) => {
   if (timer) clearTimeout(timer);
+  const searchId = ++latestSearch;
   timer = setTimeout(async () => {
     const response = await searchLogPackages(value);
+    if (searchId !== latestSearch) return;
     options.value = response.data.items;
     open.value = true;
   }, 300);
