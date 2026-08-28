@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -72,3 +74,60 @@ def test_csv_row_escapes_formula_prefix_and_serializes_legacy_extra():
     row = csv_row_for_event(event)
     assert row[6] == "'=cmd()"
     assert row[7] == '["raw",1]'
+
+
+class _ScalarResult:
+    def __init__(self, value):
+        self.value = value
+
+    def scalar_one_or_none(self):
+        return self.value
+
+
+class _ClaimSession:
+    def __init__(self, job):
+        self.job = job
+        self.statement = None
+        self.committed = False
+
+    async def execute(self, statement):
+        self.statement = statement
+        return _ScalarResult(self.job)
+
+    async def commit(self):
+        self.committed = True
+
+
+@pytest.mark.asyncio
+async def test_claim_pending_job_uses_skip_locked_and_marks_running():
+    from app.services.log_export_service import claim_next_job
+
+    job = SimpleNamespace(status="pending", started_at=None)
+    session = _ClaimSession(job)
+    claimed = await claim_next_job(session)
+    assert claimed is job
+    assert job.status == "running"
+    assert job.started_at is not None
+    assert session.committed is True
+    from sqlalchemy.dialects import postgresql
+    compiled = str(session.statement.compile(dialect=postgresql.dialect())).upper()
+    assert "SKIP LOCKED" in compiled
+
+
+def test_apply_job_filters_uses_log_packages_and_selected_filters():
+    from sqlalchemy import select
+    from sqlalchemy.dialects import postgresql
+    from app.models.event import SdkEvent
+    from app.services.log_export_service import apply_job_filters
+
+    job = SimpleNamespace(
+        package_names=["com.a", "com.b"], device_id="d1", log_level="error",
+        date_from=None, date_to=None,
+    )
+    sql = str(apply_job_filters(select(SdkEvent), job).compile(
+        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True},
+    ))
+    assert "sdk_events.event_type = 'log'" in sql
+    assert "sdk_events.package_name IN ('com.a', 'com.b')" in sql
+    assert "sdk_events.device_id = 'd1'" in sql
+    assert "error" in sql
