@@ -66,7 +66,7 @@ async def get_trend(db: AsyncSession, range_value: str = "24h", event_type: str 
         start_time = datetime.now(timezone.utc) - timedelta(hours=24)
         params = {"start_time": start_time, "event_type": event_type}
     else:
-        start_date = date.today() - timedelta(days=6 if range_value == "7d" else 29)
+        start_date = business_today() - timedelta(days=6 if range_value == "7d" else 29)
         sql = text(
             """
             SELECT stat_date::text AS time, SUM(event_count) AS count, SUM(unique_devices) AS uv
@@ -79,8 +79,11 @@ async def get_trend(db: AsyncSession, range_value: str = "24h", event_type: str 
         )
         params = {"start_date": start_date, "event_type": event_type}
 
-    rows = (await db.execute(sql, params)).mappings().all()
-    return {"points": [dict(row) for row in rows]}
+    points = [dict(row) for row in (await db.execute(sql, params)).mappings().all()]
+    if range_value == "24h":
+        for point in points:
+            point["time"] = serialize_business_time(point["time"])
+    return {"points": points}
 
 
 async def get_breakdown(db: AsyncSession, target_date: date, dimension: str = "event_type") -> list[dict[str, Any]]:

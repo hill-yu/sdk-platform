@@ -67,6 +67,53 @@ async def test_trend_sql_binds_the_complete_event_type_parameter(range_value: st
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("range_value", "expected_start_date"),
+    [("7d", date(2026, 8, 11)), ("30d", date(2026, 7, 19))],
+)
+async def test_trend_binds_start_date_from_utc_plus_8_business_today(
+    monkeypatch, range_value: str, expected_start_date: date
+) -> None:
+    db = _CapturingSession()
+    monkeypatch.setattr(analysis_service, "business_today", lambda: date(2026, 8, 17))
+
+    await get_trend(db, range_value=range_value)  # type: ignore[arg-type]
+
+    assert db.params["start_date"] == expected_start_date
+
+
+class _TrendRows:
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self.rows = rows
+
+    def mappings(self) -> "_TrendRows":
+        return self
+
+    def all(self) -> list[dict[str, Any]]:
+        return self.rows
+
+
+class _TrendSession:
+    async def execute(self, _statement: Any, _params: dict[str, Any]) -> _TrendRows:
+        return _TrendRows(
+            [
+                {
+                    "time": datetime(2026, 8, 17, 10, tzinfo=timezone.utc),
+                    "count": 4,
+                    "uv": 3,
+                }
+            ]
+        )
+
+
+@pytest.mark.asyncio
+async def test_24_hour_trend_serializes_times_as_utc_plus_8_business_time() -> None:
+    result = await get_trend(_TrendSession(), range_value="24h")  # type: ignore[arg-type]
+
+    assert result["points"][0]["time"] == "2026-08-17T18:00:00+08:00"
+
+
+@pytest.mark.asyncio
 async def test_summary_binds_utc_boundaries_for_utc_plus_8_business_days(monkeypatch) -> None:
     db = _SummarySession()
     monkeypatch.setattr(analysis_service, "business_today", lambda: date(2026, 8, 17))
