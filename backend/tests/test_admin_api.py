@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime, timezone
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -68,6 +69,26 @@ def test_admin_events_rejects_invalid_log_level():
         response = client.get("/api/admin/events?log_level=fatal", headers=_auth_headers())
 
     assert response.status_code == 422
+
+
+def test_admin_breakdown_defaults_to_utc_plus_8_business_date(monkeypatch):
+    from app.admin_main import app
+    from app.api.admin import dashboard
+    from app.core import timezone as business_timezone
+
+    async def fake_breakdown(_db: Any, target_date: date, dimension: str) -> list[dict[str, Any]]:
+        assert target_date == date(2026, 8, 17)
+        assert dimension == "event_type"
+        return []
+
+    fixed_utc_now = datetime(2026, 8, 16, 18, tzinfo=timezone.utc)
+    monkeypatch.setattr(dashboard, "business_today", lambda: business_timezone.business_today(fixed_utc_now))
+    monkeypatch.setattr(dashboard.analysis_service, "get_breakdown", fake_breakdown)
+
+    with TestClient(app) as client:
+        response = client.get("/api/admin/dashboard/breakdown", headers=_auth_headers())
+
+    assert response.status_code == 200
 
 
 def test_get_configs_returns_grouped_payload(monkeypatch):

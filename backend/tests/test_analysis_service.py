@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime, timezone
 from typing import Any
 
 import pytest
@@ -130,3 +131,34 @@ async def test_events_filter_by_log_level_and_include_sdk_version() -> None:
     assert "sdk_events.payload ->>" in str(compiled)
     assert {"log", "level", "error"} <= set(compiled.params.values())
     assert result["items"][0]["sdk_version"] == "1.4.0"
+
+
+@pytest.mark.asyncio
+async def test_events_filter_dates_use_utc_plus_8_day_boundaries() -> None:
+    event = SimpleNamespace(
+        id=3,
+        event_type="click",
+        package_name="com.example.app",
+        device_id="device-3",
+        sdk_version=None,
+        payload={},
+        client_ts=None,
+        server_ts=None,
+    )
+    db = _EventSession(event)
+
+    await get_events(
+        db,  # type: ignore[arg-type]
+        page=1,
+        page_size=20,
+        event_type=None,
+        log_level=None,
+        package_name=None,
+        device_id=None,
+        date_from=date(2026, 8, 17),
+        date_to=date(2026, 8, 17),
+    )
+
+    compiled = db.statements[1].compile(dialect=postgresql.dialect())
+    assert datetime(2026, 8, 16, 16, tzinfo=timezone.utc) in compiled.params.values()
+    assert datetime(2026, 8, 17, 16, tzinfo=timezone.utc) in compiled.params.values()

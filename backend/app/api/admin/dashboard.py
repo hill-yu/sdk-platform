@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin.deps import require_admin_token
 from app.core.database import get_db, get_db_no_commit
+from app.core.timezone import business_today
 from app.services import analysis_service
 
 
@@ -30,11 +31,12 @@ async def get_trend(
 
 @router.get("/dashboard/breakdown")
 async def get_breakdown(
-    date_value: date = Query(default_factory=date.today, alias="date"),
+    date_value: date | None = Query(None, alias="date"),
     dimension: str = Query("event_type"),
     db: AsyncSession = Depends(get_db_no_commit),
 ):
-    return {"code": 0, "data": await analysis_service.get_breakdown(db, date_value, dimension)}
+    target_date = date_value or business_today()
+    return {"code": 0, "data": await analysis_service.get_breakdown(db, target_date, dimension)}
 
 
 @router.get("/events")

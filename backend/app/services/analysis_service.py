@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.timezone import business_day_utc_range
 from app.models.event import SdkEvent
 
 
@@ -134,9 +135,11 @@ async def get_events(
     if device_id:
         stmt = stmt.where(SdkEvent.device_id == device_id)
     if date_from:
-        stmt = stmt.where(SdkEvent.server_ts >= datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc))
+        start_time, _ = business_day_utc_range(date_from)
+        stmt = stmt.where(SdkEvent.server_ts >= start_time)
     if date_to:
-        stmt = stmt.where(SdkEvent.server_ts < datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc))
+        _, end_time = business_day_utc_range(date_to)
+        stmt = stmt.where(SdkEvent.server_ts < end_time)
 
     # Count total
     count_stmt = select(func.count()).select_from(stmt.subquery())
