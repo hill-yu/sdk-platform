@@ -256,3 +256,12 @@ async def test_update_config_reports_validation_encryption_and_flush_timings(mon
     assert set(timings) == {"validation_ms", "encryption_ms", "flush_ms"}
     assert all(value >= 0 for value in timings.values())
     get_settings.cache_clear()
+
+
+def test_config_summary_serializes_updated_at_as_utc_plus_8_business_time():
+    config = FakeConfig(config_id=9, version="draft_v1", status="draft")
+    config.updated_at = datetime(2026, 8, 17, 10, tzinfo=timezone.utc)
+
+    result = config_service._serialize_summary(config)
+
+    assert result["updated_at"] == "2026-08-17T18:00:00+08:00"

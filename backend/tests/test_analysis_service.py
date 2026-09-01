@@ -7,7 +7,8 @@ import pytest
 
 from types import SimpleNamespace
 
-from app.services.analysis_service import get_events, get_trend
+from app.services import analysis_service
+from app.services.analysis_service import get_breakdown, get_events, get_summary, get_trend
 from sqlalchemy.dialects import postgresql
 
 
@@ -24,10 +25,33 @@ class _CapturingSession:
         self.statement: Any = None
         self.params: dict[str, Any] = {}
 
-    async def execute(self, statement: Any, params: dict[str, Any]) -> _Rows:
+    async def execute(self, statement: Any, params: dict[str, Any] | None = None) -> _Rows:
+        self.statement = statement
+        self.params = params or {}
+        return _Rows()
+
+
+class _SummaryRows:
+    def mappings(self) -> "_SummaryRows":
+        return self
+
+    def one(self) -> dict[str, int]:
+        return {
+            "today_pv": 0,
+            "today_events": 0,
+            "today_uv": 0,
+            "yesterday_pv": 0,
+            "yesterday_events": 0,
+            "yesterday_uv": 0,
+            "error_count": 0,
+        }
+
+
+class _SummarySession(_CapturingSession):
+    async def execute(self, statement: Any, params: dict[str, Any]) -> _SummaryRows:
         self.statement = statement
         self.params = params
-        return _Rows()
+        return _SummaryRows()
 
 
 @pytest.mark.asyncio
@@ -40,6 +64,17 @@ async def test_trend_sql_binds_the_complete_event_type_parameter(range_value: st
     assert "event_type" in db.statement._bindparams
     assert "event_typ" not in db.statement._bindparams
     assert ":event_type::varchar" not in str(db.statement)
+
+
+@pytest.mark.asyncio
+async def test_summary_binds_utc_boundaries_for_utc_plus_8_business_days(monkeypatch) -> None:
+    db = _SummarySession()
+    monkeypatch.setattr(analysis_service, "business_today", lambda: date(2026, 8, 17))
+
+    await get_summary(db)  # type: ignore[arg-type]
+
+    assert db.params["today"] == datetime(2026, 8, 16, 16, tzinfo=timezone.utc)
+    assert db.params["yesterday"] == datetime(2026, 8, 15, 16, tzinfo=timezone.utc)
 
 
 class _EventResults:
@@ -162,3 +197,44 @@ async def test_events_filter_dates_use_utc_plus_8_day_boundaries() -> None:
     compiled = db.statements[1].compile(dialect=postgresql.dialect())
     assert datetime(2026, 8, 16, 16, tzinfo=timezone.utc) in compiled.params.values()
     assert datetime(2026, 8, 17, 16, tzinfo=timezone.utc) in compiled.params.values()
+
+
+@pytest.mark.asyncio
+async def test_breakdown_binds_utc_plus_8_business_day_boundaries() -> None:
+    db = _CapturingSession()
+
+    await get_breakdown(db, date(2026, 8, 17))  # type: ignore[arg-type]
+
+    compiled = db.statement.compile(dialect=postgresql.dialect())
+    assert datetime(2026, 8, 16, 16, tzinfo=timezone.utc) in compiled.params.values()
+    assert datetime(2026, 8, 17, 16, tzinfo=timezone.utc) in compiled.params.values()
+
+
+@pytest.mark.asyncio
+async def test_events_serialize_timestamps_as_utc_plus_8_business_time() -> None:
+    event = SimpleNamespace(
+        id=4,
+        event_type="click",
+        package_name="com.example.app",
+        device_id="device-4",
+        sdk_version=None,
+        payload={},
+        client_ts=datetime(2026, 8, 17, 9, 59, tzinfo=timezone.utc),
+        server_ts=datetime(2026, 8, 17, 10, tzinfo=timezone.utc),
+    )
+    db = _EventSession(event)
+
+    result = await get_events(
+        db,  # type: ignore[arg-type]
+        page=1,
+        page_size=20,
+        event_type=None,
+        log_level=None,
+        package_name=None,
+        device_id=None,
+        date_from=None,
+        date_to=None,
+    )
+
+    assert result["items"][0]["server_ts"] == "2026-08-17T18:00:00+08:00"
+    assert result["items"][0]["client_ts"] == "2026-08-17T17:59:00+08:00"

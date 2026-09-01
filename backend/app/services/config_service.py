@@ -13,6 +13,7 @@ from sqlalchemy import desc, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.timezone import serialize_business_time
 from app.models.config import SdkConfig
 from app.services.config_crypto import decrypt_payload, encrypt_payload, normalize_package_name
 from app.services.config_version import max_version, next_version
@@ -231,7 +232,7 @@ def _publish_result(config: SdkConfig) -> dict[str, Any]:
     return {
         "package_name": config.package_name,
         "version": config.version,
-        "publish_at": config.publish_at.isoformat(),
+        "publish_at": serialize_business_time(config.publish_at),
         "cdn_url": config.cdn_url,
         "cdn_url2": _delivery_url(config.package_name, config.version, "new_touch"),
         "cdn_url3": _delivery_url(config.package_name, config.version, "new_text_rule"),
@@ -284,12 +285,12 @@ def _serialize_summary(config: SdkConfig) -> dict[str, Any]:
         "package_name": config.package_name,
         "version": config.version,
         "status": config.status,
-        "publish_at": config.publish_at.isoformat() if config.publish_at else None,
+        "publish_at": serialize_business_time(config.publish_at),
         "published_by": config.published_by,
         "cos_key": config.cos_key,
         "cdn_url": config.cdn_url,
         "cos_upload_status": config.cos_upload_status,
         "change_log": config.change_log,
-        "created_at": config.created_at.isoformat() if config.created_at else None,
-        "updated_at": config.updated_at.isoformat() if config.updated_at else None,
+        "created_at": serialize_business_time(config.created_at),
+        "updated_at": serialize_business_time(config.updated_at),
     }

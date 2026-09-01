@@ -60,6 +60,7 @@ def test_meta_returns_package_version_and_dedicated_urls(client, monkeypatch):
     data = response.json()["data"]
     assert data["package_name"] == "com.example.app"
     assert data["version"] == "1.0.11"
+    assert data["updated_at"].endswith("+08:00")
     assert data["cdn_url"].endswith("/com.example.app/versions/1.0.11/main")
     assert data["cdn_url2"].endswith("/com.example.app/versions/1.0.11/new-touch")
     assert data["cdn_url3"].endswith("/com.example.app/versions/1.0.11/new-text-rule")

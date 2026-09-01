@@ -5,6 +5,7 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.timezone import serialize_business_time
 from app.models.version import SdkVersion
 
 
@@ -47,6 +48,6 @@ def _serialize_version(version: SdkVersion) -> dict[str, Any]:
         "file_size": version.file_size,
         "file_hash": version.file_hash,
         "status": version.status,
-        "created_at": version.created_at.isoformat() if version.created_at else None,
-        "updated_at": version.updated_at.isoformat() if version.updated_at else None,
+        "created_at": serialize_business_time(version.created_at),
+        "updated_at": serialize_business_time(version.updated_at),
     }

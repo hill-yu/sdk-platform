@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_db_no_commit
+from app.core.timezone import serialize_business_time
 from app.schemas.config_schemas import ConfigMetaRequest
 from app.services import config_service
 
@@ -32,7 +33,7 @@ async def get_config_meta(body: ConfigMetaRequest, db: AsyncSession = Depends(ge
         "data": {
             "package_name": published.package_name,
             "version": published.version,
-            "updated_at": published.publish_at.isoformat() if published.publish_at else None,
+            "updated_at": serialize_business_time(published.publish_at),
             "isOpen": settings.CONFIG_META_IS_OPEN,
             "isNewsTouch": settings.CONFIG_META_IS_NEWS_TOUCH,
             "isNewTextRule": settings.CONFIG_META_IS_NEW_TEXT_RULE,

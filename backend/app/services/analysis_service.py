@@ -6,14 +6,16 @@ from typing import Any
 from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.timezone import business_day_utc_range
+from app.core.timezone import business_day_utc_range, business_today, serialize_business_time
 from app.models.event import SdkEvent
 
 
 async def get_summary(db: AsyncSession) -> dict[str, int]:
     """获取今日/昨日汇总数据（PV/UV/事件数/错误数）"""
-    today = date.today()
+    today = business_today()
     yesterday = today - timedelta(days=1)
+    today_start, _ = business_day_utc_range(today)
+    yesterday_start, _ = business_day_utc_range(yesterday)
 
     summary_sql = text(
         """
@@ -28,7 +30,7 @@ async def get_summary(db: AsyncSession) -> dict[str, int]:
         FROM sdk_events
         """
     )
-    result = await db.execute(summary_sql, {"today": today, "yesterday": yesterday})
+    result = await db.execute(summary_sql, {"today": today_start, "yesterday": yesterday_start})
     row = result.mappings().one()
 
     today_events = int(row["today_events"] or 0)
@@ -90,8 +92,7 @@ async def get_breakdown(db: AsyncSession, target_date: date, dimension: str = "e
     else:
         name_col = SdkEvent.event_type
 
-    start_time = datetime.combine(target_date, datetime.min.time(), tzinfo=timezone.utc)
-    end_time = start_time + timedelta(days=1)
+    start_time, end_time = business_day_utc_range(target_date)
 
     stmt = (
         select(
@@ -157,8 +158,8 @@ async def get_events(
             "device_id": e.device_id,
             "sdk_version": e.sdk_version,
             "payload": e.payload,
-            "client_ts": e.client_ts,
-            "server_ts": e.server_ts,
+            "client_ts": serialize_business_time(e.client_ts),
+            "server_ts": serialize_business_time(e.server_ts),
         }
         for e in rows
     ]

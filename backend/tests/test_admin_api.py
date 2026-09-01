@@ -234,3 +234,31 @@ def test_version_update_passes_db_session_to_service(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["data"]["version_name"] == "1.2.1"
+
+
+def test_version_serializes_created_at_as_utc_plus_8_business_time():
+    from app.services import version_service
+
+    version = type(
+        "Version",
+        (),
+        {
+            "id": 1,
+            "platform": "ios",
+            "version_code": 1,
+            "version_name": "1.0.0",
+            "update_policy": "optional",
+            "download_url": None,
+            "release_notes": None,
+            "min_sdk_version": None,
+            "file_size": None,
+            "file_hash": None,
+            "status": "active",
+            "created_at": datetime(2026, 8, 17, 10, tzinfo=timezone.utc),
+            "updated_at": datetime(2026, 8, 17, 10, tzinfo=timezone.utc),
+        },
+    )()
+
+    result = version_service._serialize_version(version)
+
+    assert result["created_at"] == "2026-08-17T18:00:00+08:00"
