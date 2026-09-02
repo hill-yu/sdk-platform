@@ -959,10 +959,10 @@ def decode_text(text: str) -> List[DecodedFlowSummary]:
 def decode_extra(extra: str) -> list[dict[str, object]]:
     """Decode one log payload without performing any external I/O."""
     if not isinstance(extra, str):
-        raise TypeError("extra must be a string")
+        raise TypeError("extra 必须是字符串")
     if len(extra) > MAX_EXTRA_LENGTH:
-        raise ValueError(f"extra exceeds {MAX_EXTRA_LENGTH} characters")
+        raise ValueError("extra 超过解析长度限制")
     decoded = decode_text(extra)
     if len(decoded) > MAX_RECORDS_PER_EXTRA:
-        raise ValueError(f"extra exceeds {MAX_RECORDS_PER_EXTRA} decoded records")
+        raise ValueError("extra 中记录数超过限制")
     return [asdict(item) for item in decoded]

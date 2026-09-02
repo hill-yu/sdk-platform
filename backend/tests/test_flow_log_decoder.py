@@ -77,12 +77,12 @@ def test_decode_extra_preserves_utf8_and_chinese_display_values(vectors: dict[st
 
 @pytest.mark.parametrize("value", [None, 42, b"H1|i=GC", ["H1|i=GC"]])
 def test_decode_extra_rejects_non_string_input(value: object) -> None:
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="^extra 必须是字符串$"):
         decode_extra(value)  # type: ignore[arg-type]
 
 
 def test_decode_extra_rejects_more_than_maximum_characters() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="^extra 超过解析长度限制$"):
         decode_extra("x" * 1_000_001)
 
 
@@ -93,5 +93,5 @@ def test_decode_extra_accepts_exactly_500_records() -> None:
 
 
 def test_decode_extra_rejects_more_than_500_decoded_records() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="^extra 中记录数超过限制$"):
         decode_extra("\n".join(["H1|i=GC"] * 501))
