@@ -70,6 +70,7 @@ def test_decode_extra_preserves_utf8_and_chinese_display_values(vectors: dict[st
     attempt = decoded[0]["planned_click_attempts"][0]
 
     assert attempt["page_context_result"] == vector["expected"]["page_context_result"]
+    assert attempt["completion_status"] == "finish"
     assert attempt["navigation_result"] == vector["expected"]["navigation_result"]
     assert attempt["popup_redirect_result"] == vector["expected"]["popup_redirect_result"]
     assert decoded[0]["interaction_failure_detail"] == vector["expected"]["interaction_failure_detail"]

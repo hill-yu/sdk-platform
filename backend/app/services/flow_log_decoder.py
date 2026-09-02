@@ -106,7 +106,7 @@ CLICK_NAVIGATION_CODE_MAP = {
 }
 
 PAGE_CONTEXT_MAP = {"h": "home", "s": "secondary", "n": ""}
-ATTEMPT_COMPLETION_STATUS_MAP = {"f": "finsh", "p": "pending"}
+ATTEMPT_COMPLETION_STATUS_MAP = {"f": "finish", "p": "pending"}
 POPUP_REDIRECT_SOURCE_MAP = {
     "n": "none",
     "c": "createWebViewWith",
