@@ -119,11 +119,83 @@ CREATE INDEX IF NOT EXISTS idx_versions_platform ON sdk_versions (platform, vers
 COMMENT ON TABLE sdk_versions IS 'SDK版本记录';
 
 -- ============================================================
--- 5. 分析物化视图
+-- 5. 日志解析、资料和全局配置
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sdk_log_decodes (
+    event_id         BIGINT       NOT NULL,
+    event_server_ts  TIMESTAMPTZ  NOT NULL,
+    record_index     INTEGER      NOT NULL,
+    package_name     VARCHAR(255) NOT NULL,
+    decoder_name     VARCHAR(64)  NOT NULL,
+    decoder_version  VARCHAR(32)  NOT NULL,
+    trace_id         VARCHAR(128),
+    decoded_payload  JSONB        NOT NULL,
+    decode_status    VARCHAR(20)  NOT NULL DEFAULT 'pending',
+    error_summary    TEXT,
+    created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT pk_sdk_log_decodes PRIMARY KEY (event_id, event_server_ts, record_index),
+    CONSTRAINT chk_log_decodes_status CHECK (decode_status IN ('pending', 'success', 'failed'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_log_decodes_package_ts ON sdk_log_decodes (package_name, event_server_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_log_decodes_trace_id ON sdk_log_decodes (trace_id);
+
+CREATE TABLE IF NOT EXISTS sdk_package_profiles (
+    package_name      VARCHAR(255) PRIMARY KEY,
+    display_name      VARCHAR(255),
+    owner             VARCHAR(128),
+    profile           JSONB        NOT NULL DEFAULT '{}'::jsonb,
+    created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_package_profiles_updated ON sdk_package_profiles (updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS sdk_admin_preferences (
+    preference_key    VARCHAR(128) PRIMARY KEY,
+    preference_value  JSONB        NOT NULL,
+    description       TEXT,
+    created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_preferences_updated ON sdk_admin_preferences (updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS sdk_log_reparse_jobs (
+    id                BIGSERIAL PRIMARY KEY,
+    package_name      VARCHAR(255),
+    range_start       TIMESTAMPTZ  NOT NULL,
+    range_end         TIMESTAMPTZ  NOT NULL,
+    cursor_event_id   BIGINT,
+    cursor_server_ts  TIMESTAMPTZ,
+    processed_count   BIGINT       NOT NULL DEFAULT 0,
+    decoded_count     BIGINT       NOT NULL DEFAULT 0,
+    failed_count      BIGINT       NOT NULL DEFAULT 0,
+    status            VARCHAR(20)  NOT NULL DEFAULT 'pending',
+    error_summary     TEXT,
+    created_by        VARCHAR(64),
+    created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT chk_log_reparse_jobs_status CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'cancelled'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_log_reparse_jobs_status ON sdk_log_reparse_jobs (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_log_reparse_jobs_range ON sdk_log_reparse_jobs (range_start, range_end);
+
+COMMENT ON TABLE sdk_log_decodes IS 'SDK日志extra解析结果，record_index=-1用于唯一pending占位';
+COMMENT ON TABLE sdk_package_profiles IS 'SDK包资料';
+COMMENT ON TABLE sdk_admin_preferences IS '日志分析全局管理偏好';
+COMMENT ON TABLE sdk_log_reparse_jobs IS '日志重新解析作业，不保存原始extra';
+
+-- ============================================================
+-- 6. 分析物化视图
 -- ============================================================
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_daily_event_stats AS
 SELECT
-    date_trunc('day', server_ts)::DATE AS stat_date,
+    (server_ts AT TIME ZONE 'Asia/Shanghai')::date AS stat_date,
     event_type,
     package_name,
     payload->>'page'     AS page,
@@ -137,7 +209,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_daily ON mv_daily_event_stats (stat_dat
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_hourly_trend AS
 SELECT
-    date_trunc('hour', server_ts) AS hour,
+    date_trunc('hour', server_ts AT TIME ZONE 'Asia/Shanghai') AS hour,
     event_type,
     COUNT(*)                      AS event_count,
     COUNT(DISTINCT device_id)     AS unique_devices
@@ -147,7 +219,7 @@ GROUP BY 1, 2;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_hourly ON mv_hourly_trend (hour, event_type);
 
 -- ============================================================
--- 6. 刷新物化视图函数
+-- 7. 刷新物化视图函数
 -- ============================================================
 CREATE OR REPLACE FUNCTION refresh_materialized_views()
 RETURNS void AS $$
@@ -160,7 +232,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ============================================================
--- 7. 分区维护函数
+-- 8. 分区维护函数
 -- ============================================================
 CREATE OR REPLACE FUNCTION create_next_partition()
 RETURNS TEXT AS $$
@@ -204,7 +276,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ============================================================
--- 8. 初始数据
+-- 9. 初始数据
 -- ============================================================
 -- 加密配置必须由管理后台创建；初始化脚本不写入明文配置或默认包名。
 
