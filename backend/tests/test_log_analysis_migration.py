@@ -3,6 +3,17 @@ import asyncio
 import pytest
 from sqlalchemy import inspect
 
+REQUIRED_LOG_ANALYSIS_INDEXES = {
+    "idx_log_decodes_package_ts",
+    "idx_log_decodes_status_ts",
+    "idx_log_decodes_decoder_status",
+    "idx_log_decodes_event_ts",
+    "idx_package_profiles_updated",
+    "idx_admin_preferences_updated",
+    "idx_log_reparse_jobs_status",
+    "idx_log_reparse_jobs_range",
+}
+
 
 def test_log_analysis_models_define_required_keys_and_no_raw_extra_storage():
     from app.models.log_analysis import (
@@ -15,14 +26,97 @@ def test_log_analysis_models_define_required_keys_and_no_raw_extra_storage():
     decode_pk = [column.name for column in inspect(LogDecode).primary_key]
     assert decode_pk == ["event_id", "event_server_ts", "record_index"]
     assert LogDecode.__table__.c.record_index.nullable is False
+    assert set(inspect(LogDecode).columns.keys()) == {
+        "event_id",
+        "event_server_ts",
+        "record_index",
+        "package_name",
+        "device_id",
+        "status",
+        "decoder_version",
+        "decoded_timestamp",
+        "url",
+        "config_id",
+        "window",
+        "expected_click_count",
+        "actual_click_count",
+        "ad_click_count",
+        "interstitial_presentation_count",
+        "interstitial_click_count",
+        "interstitial_close_count",
+        "duration_ms",
+        "final_reason",
+        "is_success",
+        "decoded_payload",
+        "parse_error",
+        "parsed_at",
+    }
+    assert not {
+        "decoder_name",
+        "trace_id",
+        "decode_status",
+        "error_summary",
+        "created_at",
+        "updated_at",
+    } & set(inspect(LogDecode).columns.keys())
+    assert LogDecode.status.default.arg == "pending"
+    constraints = " ".join(
+        str(constraint.sqltext)
+        for constraint in LogDecode.__table__.constraints
+        if hasattr(constraint, "sqltext")
+    )
+    assert "pending" in constraints
+    assert "success" in constraints
+    assert "unsupported" in constraints
+    assert "failed" in constraints
 
     assert [column.name for column in inspect(PackageProfile).primary_key] == ["package_name"]
+    assert set(inspect(PackageProfile).columns.keys()) == {
+        "package_name",
+        "alias",
+        "company",
+        "account",
+        "created_at",
+        "updated_at",
+    }
     assert [column.name for column in inspect(AdminPreference).primary_key] == ["preference_key"]
+    assert set(inspect(AdminPreference).columns.keys()) == {
+        "preference_key",
+        "value",
+        "updated_at",
+    }
 
     reparse_columns = set(LogReparseJob.__table__.c.keys())
     assert {"range_start", "range_end", "cursor_event_id", "cursor_server_ts", "processed_count", "failed_count", "status", "error_summary"} <= reparse_columns
     assert "extra" not in reparse_columns
     assert "raw_extra" not in reparse_columns
+
+
+def test_log_decode_pending_contract_uses_status_and_composite_key():
+    from app.models.log_analysis import LogDecode
+
+    assert [column.name for column in LogDecode.__table__.primary_key.columns] == [
+        "event_id",
+        "event_server_ts",
+        "record_index",
+    ]
+    assert LogDecode.__table__.c.record_index.nullable is False
+    assert LogDecode.__table__.c.status.type.length == 32
+    assert LogDecode.__table__.c.parsed_at.nullable is False
+
+    from sqlalchemy.dialects.postgresql import insert
+
+    statement = insert(LogDecode).values(
+        event_id=1,
+        event_server_ts="2026-08-17T00:00:00+00:00",
+        record_index=-1,
+        package_name="com.example",
+        status="pending",
+        decoder_version="1.0.0",
+        parsed_at="2026-08-17T00:00:00+00:00",
+    )
+    assert statement.compile().params["record_index"] == -1
+    assert statement.compile().params["status"] == "pending"
 
 
 def test_init_db_contains_log_analysis_tables_indexes_and_beijing_views():
@@ -38,7 +132,9 @@ def test_init_db_contains_log_analysis_tables_indexes_and_beijing_views():
 
     for index in (
         "idx_log_decodes_package_ts",
-        "idx_log_decodes_trace_id",
+        "idx_log_decodes_status_ts",
+        "idx_log_decodes_decoder_status",
+        "idx_log_decodes_event_ts",
         "idx_package_profiles_updated",
         "idx_admin_preferences_updated",
         "idx_log_reparse_jobs_status",
@@ -58,11 +154,28 @@ def test_migration_plan_builds_tables_indexes_and_beijing_views():
 
     assert "CREATE TABLE IF NOT EXISTS sdk_log_decodes" in sql
     assert "PRIMARY KEY (event_id, event_server_ts, record_index)" in sql
-    assert "record_index      INTEGER      NOT NULL" in sql
+    assert "record_index" in sql and "INTEGER" in sql and "NOT NULL" in sql
+    assert "status" in sql and "VARCHAR(32)" in sql
+    assert "CHECK (status IN ('pending', 'success', 'unsupported', 'failed'))" in sql
+    assert "parse_error" in sql and "VARCHAR(512)" in sql
+    decode_sql = sql.split("CREATE TABLE IF NOT EXISTS sdk_package_profiles", 1)[0]
+    assert "decoder_name" not in decode_sql
+    assert "trace_id" not in decode_sql
+    assert "decode_status" not in decode_sql
+    assert "error_summary" not in decode_sql
     assert "CREATE TABLE IF NOT EXISTS sdk_package_profiles" in sql
     assert "package_name      VARCHAR(255) PRIMARY KEY" in sql
+    assert "alias             VARCHAR(255)" in sql
+    assert "company           VARCHAR(255)" in sql
+    assert "account           VARCHAR(255)" in sql
+    assert "display_name" not in sql
+    assert "owner" not in sql
+    assert "profile           JSONB" not in sql
     assert "CREATE TABLE IF NOT EXISTS sdk_admin_preferences" in sql
     assert "preference_key    VARCHAR(128) PRIMARY KEY" in sql
+    assert "value             JSONB" in sql
+    assert "preference_value" not in sql
+    assert "description" not in sql
     assert "CREATE TABLE IF NOT EXISTS sdk_log_reparse_jobs" in sql
     assert "raw_extra" not in sql
     assert "extra JSONB" not in sql
@@ -79,6 +192,7 @@ def test_migrated_schema_requires_no_destructive_statements():
 
     statements = build_migration_statements(
         existing_tables=set(REQUIRED_TABLES),
+        existing_indexes=set(REQUIRED_LOG_ANALYSIS_INDEXES),
         view_summaries=EXPECTED_VIEW_SUMMARIES,
     )
     sql = "\n".join(statements)
@@ -89,10 +203,15 @@ def test_migrated_schema_requires_no_destructive_statements():
 
 
 def test_migrated_schema_with_legacy_utc_views_rebuilds_only_views():
-    from scripts.migrate_log_analysis import REQUIRED_TABLES, build_migration_statements
+    from scripts.migrate_log_analysis import (
+        EXPECTED_VIEW_SUMMARIES,
+        REQUIRED_TABLES,
+        build_migration_statements,
+    )
 
     statements = build_migration_statements(
         existing_tables=set(REQUIRED_TABLES),
+        existing_indexes=set(REQUIRED_LOG_ANALYSIS_INDEXES),
         view_summaries={
             "mv_daily_event_stats": "sha256:legacy-utc-daily",
             "mv_hourly_trend": "sha256:legacy-utc-hourly",
@@ -107,6 +226,28 @@ def test_migrated_schema_with_legacy_utc_views_rebuilds_only_views():
     assert "DROP MATERIALIZED VIEW IF EXISTS mv_hourly_trend" in sql
     assert "(server_ts AT TIME ZONE 'Asia/Shanghai')::date" in sql
     assert "date_trunc('hour', server_ts AT TIME ZONE 'Asia/Shanghai')" in sql
+
+
+def test_existing_tables_with_missing_indexes_plan_only_safe_index_creation():
+    from scripts.migrate_log_analysis import (
+        EXPECTED_VIEW_SUMMARIES,
+        REQUIRED_TABLES,
+        build_migration_statements,
+    )
+
+    missing = "idx_log_decodes_status_ts"
+    statements = build_migration_statements(
+        existing_tables=set(REQUIRED_TABLES),
+        existing_indexes=set(REQUIRED_LOG_ANALYSIS_INDEXES) - {missing},
+        view_summaries=EXPECTED_VIEW_SUMMARIES,
+    )
+    sql = "\n".join(statements)
+
+    assert f"CREATE INDEX IF NOT EXISTS {missing}" in sql
+    assert "CREATE TABLE" not in sql
+    assert "DROP TABLE" not in sql
+    assert "DROP MATERIALIZED VIEW" not in sql
+    assert all("CREATE INDEX" in statement for statement in statements)
 
 
 def test_snapshot_includes_counts_partitions_and_view_summaries():
@@ -132,7 +273,7 @@ def test_snapshot_includes_counts_partitions_and_view_summaries():
         async def execute(self, statement, params=None):
             sql = str(statement)
             self.queries.append(sql)
-            if "COUNT(*) FROM sdk_events WHERE payload ? 'extra'" in sql:
+            if "payload->>'extra' IS NOT NULL" in sql:
                 return Result([(2,)])
             if "COUNT(*) FROM sdk_events" in sql:
                 return Result([(3,)])
@@ -144,6 +285,8 @@ def test_snapshot_includes_counts_partitions_and_view_summaries():
                 return Result([(2,)])
             if "pg_matviews" in sql:
                 return Result([("mv_daily_event_stats", "SELECT old daily"), ("mv_hourly_trend", "SELECT old hourly")])
+            if "FROM pg_indexes" in sql:
+                return Result([(name,) for name in REQUIRED_LOG_ANALYSIS_INDEXES])
             if "to_regclass" in sql:
                 return Result([(None,)])
             raise AssertionError(sql)
@@ -152,6 +295,7 @@ def test_snapshot_includes_counts_partitions_and_view_summaries():
 
     assert snapshot.total_count == 3
     assert snapshot.non_null_extra_count == 2
+    assert snapshot.existing_indexes == REQUIRED_LOG_ANALYSIS_INDEXES
     assert snapshot.partition_counts == {"sdk_events_202609": 1, "sdk_events_202610": 2}
     assert set(snapshot.view_summaries) == {"mv_daily_event_stats", "mv_hourly_trend"}
     assert all(summary.startswith("sha256:") for summary in snapshot.view_summaries.values())
@@ -167,13 +311,15 @@ def test_dry_run_reads_snapshot_but_executes_no_ddl(monkeypatch):
         async def execute(self, statement, params=None):
             sql = str(statement)
             self.executed.append(sql)
-            if "COUNT(*) FROM sdk_events WHERE payload ? 'extra'" in sql:
+            if "payload->>'extra' IS NOT NULL" in sql:
                 return _Result([(1,)])
             if "COUNT(*) FROM sdk_events" in sql:
                 return _Result([(1,)])
             if "pg_inherits" in sql:
                 return _Result([])
             if "pg_matviews" in sql:
+                return _Result([])
+            if "FROM pg_indexes" in sql:
                 return _Result([])
             if "to_regclass" in sql:
                 return _Result([(None,)])
@@ -203,7 +349,11 @@ def test_dry_run_reads_snapshot_but_executes_no_ddl(monkeypatch):
 def test_apply_executes_plan_in_transaction_and_verifies_lossless(monkeypatch):
     from scripts import migrate_log_analysis
 
-    engine = _ApplyEngine(existing_tables_before=set(), existing_tables_after=set(migrate_log_analysis.REQUIRED_TABLES))
+    engine = _ApplyEngine(
+        existing_tables_before=set(),
+        existing_tables_after=set(migrate_log_analysis.REQUIRED_TABLES),
+        existing_indexes_after=set(REQUIRED_LOG_ANALYSIS_INDEXES),
+    )
     monkeypatch.setattr(migrate_log_analysis, "create_async_engine", lambda _url: engine)
 
     report = asyncio.run(migrate_log_analysis.migrate("postgresql+asyncpg://test", apply=True))
@@ -214,6 +364,91 @@ def test_apply_executes_plan_in_transaction_and_verifies_lossless(monkeypatch):
     assert "CREATE TABLE IF NOT EXISTS sdk_log_decodes" in ddl
     assert "DROP MATERIALIZED VIEW IF EXISTS mv_daily_event_stats" in ddl
     assert "sdk_events" not in [sql.split()[2] for sql in engine.connection.ddl if sql.startswith("UPDATE ")]
+
+
+def test_apply_rolls_back_when_lossless_verification_fails(monkeypatch):
+    from scripts import migrate_log_analysis
+
+    engine = _ApplyEngine(
+        existing_tables_before=set(),
+        existing_tables_after=set(migrate_log_analysis.REQUIRED_TABLES),
+        existing_indexes_after=set(REQUIRED_LOG_ANALYSIS_INDEXES),
+        after_total=4,
+    )
+    monkeypatch.setattr(migrate_log_analysis, "create_async_engine", lambda _url: engine)
+
+    with pytest.raises(RuntimeError, match="事件总数"):
+        asyncio.run(migrate_log_analysis.migrate("postgresql+asyncpg://test", apply=True))
+
+    assert engine.connection.rolled_back
+    assert not engine.connection.committed
+
+
+def test_snapshot_uses_non_empty_extra_predicate_for_null_blank_and_whitespace():
+    from scripts import migrate_log_analysis
+
+    class Connection:
+        def __init__(self):
+            self.queries = []
+
+        async def execute(self, statement, params=None):
+            sql = str(statement)
+            self.queries.append(sql)
+            if "payload->>'extra' IS NOT NULL" in sql:
+                return _Result([(3,)])
+            if "COUNT(*) FROM sdk_events" in sql:
+                return _Result([(5,)])
+            if "pg_inherits" in sql:
+                return _Result([])
+            if "pg_matviews" in sql:
+                return _Result([])
+            if "FROM pg_indexes" in sql:
+                return _Result([])
+            if "to_regclass" in sql:
+                return _Result([(None,)])
+            raise AssertionError(sql)
+
+    connection = Connection()
+    snapshot = asyncio.run(migrate_log_analysis.read_snapshot(connection))
+    assert snapshot.non_null_extra_count == 3
+    predicate = next(query for query in connection.queries if "extra" in query)
+    assert "payload->>'extra' IS NOT NULL" in predicate
+    assert "BTRIM(payload->>'extra') <> ''" in predicate
+
+
+def _snapshot(*, total=3, non_null=3, partitions=None, indexes=None):
+    from scripts.migrate_log_analysis import REQUIRED_TABLES, SchemaSnapshot
+
+    values = dict(
+        total_count=total,
+        non_null_extra_count=non_null,
+        partition_counts=partitions or {"sdk_events_202608": 3},
+        existing_tables=set(REQUIRED_TABLES),
+        view_summaries={},
+    )
+    try:
+        return SchemaSnapshot(
+            **values,
+            existing_indexes=set(REQUIRED_LOG_ANALYSIS_INDEXES if indexes is None else indexes),
+        )
+    except TypeError:
+        return SchemaSnapshot(**values)
+
+
+@pytest.mark.parametrize(
+    "after,error",
+    [
+        (_snapshot(total=2), "事件总数"),
+        (_snapshot(non_null=2), "非空extra"),
+        (_snapshot(partitions={"sdk_events_202608": 2}), "分区行数"),
+        (_snapshot(indexes=set()), "索引"),
+    ],
+)
+def test_verify_lossless_rejects_any_changed_snapshot(after, error):
+    from scripts.migrate_log_analysis import verify_lossless
+
+    with pytest.raises(RuntimeError, match=error):
+        verify_lossless(_snapshot(), after)
 
 
 class _Result:
@@ -247,26 +482,35 @@ class _Begin:
         return self.connection
 
     async def __aexit__(self, exc_type, exc, tb):
+        if exc_type is None:
+            self.connection.committed = True
+        else:
+            self.connection.rolled_back = True
         return False
 
 
 class _ApplyConnection:
-    def __init__(self, existing_tables_before, existing_tables_after):
+    def __init__(self, existing_tables_before, existing_tables_after, existing_indexes_after=None, after_total=3):
         self.existing_tables_before = existing_tables_before
         self.existing_tables_after = existing_tables_after
+        self.existing_indexes_before = set()
+        self.existing_indexes_after = existing_indexes_after or set()
+        self.after_total = after_total
         self.snapshot_reads = 0
         self.ddl = []
         self.entered_transaction = False
+        self.committed = False
+        self.rolled_back = False
 
     async def execute(self, statement, params=None):
         sql = str(statement)
         if sql.lstrip().upper().startswith(("CREATE ", "DROP ", "ALTER ")):
             self.ddl.append(sql)
             return _Result([])
-        if "COUNT(*) FROM sdk_events WHERE payload ? 'extra'" in sql:
+        if "payload->>'extra' IS NOT NULL" in sql:
             return _Result([(2,)])
         if "COUNT(*) FROM sdk_events" in sql:
-            return _Result([(3,)])
+            return _Result([(self.after_total if self.ddl else 3,)])
         if "pg_inherits" in sql:
             return _Result([("sdk_events_202609",)])
         if "FROM \"sdk_events_202609\"" in sql:
@@ -274,6 +518,9 @@ class _ApplyConnection:
         if "pg_matviews" in sql:
             self.snapshot_reads += 1
             return _Result([("mv_daily_event_stats", "SELECT old daily"), ("mv_hourly_trend", "SELECT old hourly")])
+        if "FROM pg_indexes" in sql:
+            indexes = self.existing_indexes_after if self.ddl else self.existing_indexes_before
+            return _Result([(name,) for name in indexes])
         if "to_regclass" in sql:
             table = params["relation"].split(".")[-1]
             existing = self.existing_tables_after if self.ddl else self.existing_tables_before
@@ -282,8 +529,13 @@ class _ApplyConnection:
 
 
 class _ApplyEngine:
-    def __init__(self, existing_tables_before, existing_tables_after):
-        self.connection = _ApplyConnection(existing_tables_before, existing_tables_after)
+    def __init__(self, existing_tables_before, existing_tables_after, existing_indexes_after=None, after_total=3):
+        self.connection = _ApplyConnection(
+            existing_tables_before,
+            existing_tables_after,
+            existing_indexes_after=existing_indexes_after,
+            after_total=after_total,
+        )
 
     def begin(self):
         return _Begin(self.connection)

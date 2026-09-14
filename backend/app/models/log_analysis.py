@@ -1,5 +1,5 @@
 """Decoded SDK log analysis persistence models."""
-from sqlalchemy import BigInteger, Column, DateTime, Index, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, DateTime, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 
@@ -8,23 +8,40 @@ from app.core.database import Base
 
 class LogDecode(Base):
     __tablename__ = "sdk_log_decodes"
-    __table_args__ = (
-        Index("idx_log_decodes_package_ts", "package_name", "event_server_ts"),
-        Index("idx_log_decodes_trace_id", "trace_id"),
-    )
-
     event_id = Column(BigInteger, primary_key=True)
     event_server_ts = Column(DateTime(timezone=True), primary_key=True)
     record_index = Column(Integer, primary_key=True)
     package_name = Column(String(255), nullable=False)
-    decoder_name = Column(String(64), nullable=False)
+    device_id = Column(String(64))
+    status = Column(String(32), nullable=False, default="pending")
     decoder_version = Column(String(32), nullable=False)
-    trace_id = Column(String(128))
-    decoded_payload = Column(JSONB, nullable=False)
-    decode_status = Column(String(20), nullable=False, default="pending")
-    error_summary = Column(Text)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    decoded_timestamp = Column(DateTime(timezone=True))
+    url = Column(Text)
+    config_id = Column(Integer)
+    window = Column(String(32))
+    expected_click_count = Column(Integer)
+    actual_click_count = Column(Integer)
+    ad_click_count = Column(Integer)
+    interstitial_presentation_count = Column(Integer)
+    interstitial_click_count = Column(Integer)
+    interstitial_close_count = Column(Integer)
+    duration_ms = Column(BigInteger)
+    final_reason = Column(String(128))
+    is_success = Column(Boolean)
+    decoded_payload = Column(JSONB)
+    parse_error = Column(String(512))
+    parsed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'success', 'unsupported', 'failed')",
+            name="chk_log_decodes_status",
+        ),
+        Index("idx_log_decodes_package_ts", package_name, event_server_ts.desc()),
+        Index("idx_log_decodes_status_ts", status, event_server_ts.desc()),
+        Index("idx_log_decodes_decoder_status", decoder_version, status),
+        Index("idx_log_decodes_event_ts", event_id, event_server_ts),
+    )
 
 
 class PackageProfile(Base):
@@ -32,11 +49,11 @@ class PackageProfile(Base):
     __table_args__ = (Index("idx_package_profiles_updated", "updated_at"),)
 
     package_name = Column(String(255), primary_key=True)
-    display_name = Column(String(255))
-    owner = Column(String(128))
-    profile = Column(JSONB, nullable=False, default=dict)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    alias = Column(String(255))
+    company = Column(String(255))
+    account = Column(String(255))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
 class AdminPreference(Base):
@@ -44,10 +61,8 @@ class AdminPreference(Base):
     __table_args__ = (Index("idx_admin_preferences_updated", "updated_at"),)
 
     preference_key = Column(String(128), primary_key=True)
-    preference_value = Column(JSONB, nullable=False)
-    description = Column(Text)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    value = Column(JSONB, nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
 class LogReparseJob(Base):

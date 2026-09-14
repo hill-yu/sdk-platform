@@ -126,27 +126,40 @@ CREATE TABLE IF NOT EXISTS sdk_log_decodes (
     event_server_ts  TIMESTAMPTZ  NOT NULL,
     record_index     INTEGER      NOT NULL,
     package_name     VARCHAR(255) NOT NULL,
-    decoder_name     VARCHAR(64)  NOT NULL,
+    device_id        VARCHAR(64),
+    status           VARCHAR(32)  NOT NULL DEFAULT 'pending',
     decoder_version  VARCHAR(32)  NOT NULL,
-    trace_id         VARCHAR(128),
-    decoded_payload  JSONB        NOT NULL,
-    decode_status    VARCHAR(20)  NOT NULL DEFAULT 'pending',
-    error_summary    TEXT,
-    created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    updated_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    decoded_timestamp TIMESTAMPTZ,
+    url              TEXT,
+    config_id        INTEGER,
+    window           VARCHAR(32),
+    expected_click_count INTEGER,
+    actual_click_count INTEGER,
+    ad_click_count   INTEGER,
+    interstitial_presentation_count INTEGER,
+    interstitial_click_count INTEGER,
+    interstitial_close_count INTEGER,
+    duration_ms      BIGINT,
+    final_reason     VARCHAR(128),
+    is_success       BOOLEAN,
+    decoded_payload  JSONB,
+    parse_error      VARCHAR(512),
+    parsed_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     CONSTRAINT pk_sdk_log_decodes PRIMARY KEY (event_id, event_server_ts, record_index),
-    CONSTRAINT chk_log_decodes_status CHECK (decode_status IN ('pending', 'success', 'failed'))
+    CONSTRAINT chk_log_decodes_status CHECK (status IN ('pending', 'success', 'unsupported', 'failed'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_log_decodes_package_ts ON sdk_log_decodes (package_name, event_server_ts DESC);
-CREATE INDEX IF NOT EXISTS idx_log_decodes_trace_id ON sdk_log_decodes (trace_id);
+CREATE INDEX IF NOT EXISTS idx_log_decodes_status_ts ON sdk_log_decodes (status, event_server_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_log_decodes_decoder_status ON sdk_log_decodes (decoder_version, status);
+CREATE INDEX IF NOT EXISTS idx_log_decodes_event_ts ON sdk_log_decodes (event_id, event_server_ts);
 
 CREATE TABLE IF NOT EXISTS sdk_package_profiles (
     package_name      VARCHAR(255) PRIMARY KEY,
-    display_name      VARCHAR(255),
-    owner             VARCHAR(128),
-    profile           JSONB        NOT NULL DEFAULT '{}'::jsonb,
+    alias             VARCHAR(255),
+    company           VARCHAR(255),
+    account           VARCHAR(255),
     created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
@@ -155,9 +168,7 @@ CREATE INDEX IF NOT EXISTS idx_package_profiles_updated ON sdk_package_profiles 
 
 CREATE TABLE IF NOT EXISTS sdk_admin_preferences (
     preference_key    VARCHAR(128) PRIMARY KEY,
-    preference_value  JSONB        NOT NULL,
-    description       TEXT,
-    created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    value             JSONB        NOT NULL,
     updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 

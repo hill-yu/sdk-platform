@@ -18,6 +18,19 @@ REQUIRED_TABLES = (
     "sdk_log_reparse_jobs",
 )
 
+REQUIRED_INDEXES = frozenset(
+    {
+        "idx_log_decodes_package_ts",
+        "idx_log_decodes_status_ts",
+        "idx_log_decodes_decoder_status",
+        "idx_log_decodes_event_ts",
+        "idx_package_profiles_updated",
+        "idx_admin_preferences_updated",
+        "idx_log_reparse_jobs_status",
+        "idx_log_reparse_jobs_range",
+    }
+)
+
 
 @dataclass(frozen=True)
 class SchemaSnapshot:
@@ -25,6 +38,7 @@ class SchemaSnapshot:
     non_null_extra_count: int
     partition_counts: dict[str, int]
     existing_tables: set[str]
+    existing_indexes: set[str]
     view_summaries: dict[str, str]
 
 
@@ -76,38 +90,43 @@ CREATE_TABLE_STATEMENTS = [
     """CREATE TABLE IF NOT EXISTS sdk_log_decodes (
     event_id         BIGINT       NOT NULL,
     event_server_ts  TIMESTAMPTZ  NOT NULL,
-    record_index      INTEGER      NOT NULL,
+    record_index     INTEGER      NOT NULL,
     package_name     VARCHAR(255) NOT NULL,
-    decoder_name     VARCHAR(64)  NOT NULL,
+    device_id        VARCHAR(64),
+    status           VARCHAR(32)  NOT NULL DEFAULT 'pending',
     decoder_version  VARCHAR(32)  NOT NULL,
-    trace_id         VARCHAR(128),
-    decoded_payload  JSONB        NOT NULL,
-    decode_status    VARCHAR(20)  NOT NULL DEFAULT 'pending',
-    error_summary    TEXT,
-    created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    updated_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    decoded_timestamp TIMESTAMPTZ,
+    url              TEXT,
+    config_id        INTEGER,
+    window           VARCHAR(32),
+    expected_click_count INTEGER,
+    actual_click_count INTEGER,
+    ad_click_count   INTEGER,
+    interstitial_presentation_count INTEGER,
+    interstitial_click_count INTEGER,
+    interstitial_close_count INTEGER,
+    duration_ms      BIGINT,
+    final_reason     VARCHAR(128),
+    is_success       BOOLEAN,
+    decoded_payload  JSONB,
+    parse_error      VARCHAR(512),
+    parsed_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT pk_sdk_log_decodes PRIMARY KEY (event_id, event_server_ts, record_index),
-    CONSTRAINT chk_log_decodes_status CHECK (decode_status IN ('pending', 'success', 'failed'))
+    CONSTRAINT chk_log_decodes_status CHECK (status IN ('pending', 'success', 'unsupported', 'failed'))
 )""",
-    "CREATE INDEX IF NOT EXISTS idx_log_decodes_package_ts ON sdk_log_decodes (package_name, event_server_ts DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_log_decodes_trace_id ON sdk_log_decodes (trace_id)",
     """CREATE TABLE IF NOT EXISTS sdk_package_profiles (
     package_name      VARCHAR(255) PRIMARY KEY,
-    display_name      VARCHAR(255),
-    owner             VARCHAR(128),
-    profile           JSONB        NOT NULL DEFAULT '{}'::jsonb,
+    alias             VARCHAR(255),
+    company           VARCHAR(255),
+    account           VARCHAR(255),
     created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 )""",
-    "CREATE INDEX IF NOT EXISTS idx_package_profiles_updated ON sdk_package_profiles (updated_at DESC)",
     """CREATE TABLE IF NOT EXISTS sdk_admin_preferences (
     preference_key    VARCHAR(128) PRIMARY KEY,
-    preference_value  JSONB        NOT NULL,
-    description       TEXT,
-    created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    value             JSONB        NOT NULL,
     updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 )""",
-    "CREATE INDEX IF NOT EXISTS idx_admin_preferences_updated ON sdk_admin_preferences (updated_at DESC)",
     """CREATE TABLE IF NOT EXISTS sdk_log_reparse_jobs (
     id                BIGSERIAL PRIMARY KEY,
     package_name      VARCHAR(255),
@@ -125,13 +144,29 @@ CREATE_TABLE_STATEMENTS = [
     updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     CONSTRAINT chk_log_reparse_jobs_status CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'cancelled'))
 )""",
+]
+
+REQUIRED_INDEX_STATEMENTS = (
+    "CREATE INDEX IF NOT EXISTS idx_log_decodes_package_ts ON sdk_log_decodes (package_name, event_server_ts DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_log_decodes_status_ts ON sdk_log_decodes (status, event_server_ts DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_log_decodes_decoder_status ON sdk_log_decodes (decoder_version, status)",
+    "CREATE INDEX IF NOT EXISTS idx_log_decodes_event_ts ON sdk_log_decodes (event_id, event_server_ts)",
+    "CREATE INDEX IF NOT EXISTS idx_package_profiles_updated ON sdk_package_profiles (updated_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_admin_preferences_updated ON sdk_admin_preferences (updated_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_log_reparse_jobs_status ON sdk_log_reparse_jobs (status, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_log_reparse_jobs_range ON sdk_log_reparse_jobs (range_start, range_end)",
-]
+)
+
+
+def _index_name(statement: str) -> str:
+    return statement.split(" IF NOT EXISTS ", 1)[1].split(" ", 1)[0]
 
 
 def build_migration_statements(
-    *, existing_tables: set[str], view_summaries: dict[str, str]
+    *,
+    existing_tables: set[str],
+    view_summaries: dict[str, str],
+    existing_indexes: set[str] | None = None,
 ) -> list[str]:
     statements: list[str] = []
     missing_tables = not set(REQUIRED_TABLES).issubset(existing_tables)
@@ -141,6 +176,13 @@ def build_migration_statements(
     )
     if missing_tables:
         statements.extend(CREATE_TABLE_STATEMENTS)
+        statements.extend(REQUIRED_INDEX_STATEMENTS)
+    elif existing_indexes is not None:
+        statements.extend(
+            statement
+            for statement in REQUIRED_INDEX_STATEMENTS
+            if _index_name(statement) not in existing_indexes
+        )
     if missing_tables or stale_views:
         statements.extend(
             [
@@ -170,7 +212,11 @@ async def read_snapshot(connection) -> SchemaSnapshot:
     non_null_extra_count = int(
         (
             await connection.execute(
-                text("SELECT COUNT(*) FROM sdk_events WHERE payload ? 'extra'")
+                text(
+                    "SELECT COUNT(*) FROM sdk_events "
+                    "WHERE payload->>'extra' IS NOT NULL "
+                    "AND BTRIM(payload->>'extra') <> ''"
+                )
             )
         ).scalar_one()
     )
@@ -205,6 +251,17 @@ async def read_snapshot(connection) -> SchemaSnapshot:
             )
         )
     ).all()
+    index_rows = (
+        await connection.execute(
+            text(
+                "SELECT indexname FROM pg_indexes "
+                "WHERE schemaname=current_schema() "
+                "AND tablename IN ("
+                + ", ".join(f"'{table_name}'" for table_name in REQUIRED_TABLES)
+                + ")"
+            )
+        )
+    ).scalars().all()
     return SchemaSnapshot(
         total_count=total_count,
         non_null_extra_count=non_null_extra_count,
@@ -214,6 +271,7 @@ async def read_snapshot(connection) -> SchemaSnapshot:
             for table_name in REQUIRED_TABLES
             if await _table_exists(connection, table_name)
         },
+        existing_indexes={str(name) for name in index_rows},
         view_summaries={str(name): _summary(str(definition)) for name, definition in view_rows},
     )
 
@@ -228,6 +286,9 @@ def verify_lossless(before: SchemaSnapshot, after: SchemaSnapshot) -> None:
     missing = set(REQUIRED_TABLES) - after.existing_tables
     if missing:
         raise RuntimeError("迁移后缺少表: " + ", ".join(sorted(missing)))
+    missing_indexes = REQUIRED_INDEXES - after.existing_indexes
+    if missing_indexes:
+        raise RuntimeError("迁移后缺少索引: " + ", ".join(sorted(missing_indexes)))
 
 
 async def migrate(database_url: str, *, apply: bool) -> MigrationReport:
@@ -238,6 +299,7 @@ async def migrate(database_url: str, *, apply: bool) -> MigrationReport:
             statements = build_migration_statements(
                 existing_tables=before.existing_tables,
                 view_summaries=before.view_summaries,
+                existing_indexes=before.existing_indexes,
             )
             if not apply:
                 return MigrationReport(statements=statements, before=before)
