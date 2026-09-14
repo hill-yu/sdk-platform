@@ -167,7 +167,11 @@ def _business_date_expression():
 
 def _summary_columns():
     business_date = _business_date_expression().label("date")
-    success_samples = func.count(LogDecode.is_success).label("success_sample_count")
+    success_count = func.count(LogDecode.is_success).filter(LogDecode.is_success.is_(True))
+    success_samples = func.count(LogDecode.is_success)
+    success_rate = (
+        success_count / func.nullif(success_samples, 0)
+    ).label("success_rate")
     return (
         business_date,
         SdkEvent.package_name.label("package_name"),
@@ -187,8 +191,9 @@ def _summary_columns():
         func.coalesce(func.sum(LogDecode.interstitial_click_count), 0).label("interstitial_click_count"),
         func.avg(LogDecode.duration_ms).label("average_duration_ms"),
         func.count(LogDecode.duration_ms).label("duration_sample_count"),
-        func.count(LogDecode.is_success).filter(LogDecode.is_success.is_(True)).label("success_count"),
-        success_samples,
+        success_count.label("success_count"),
+        success_samples.label("success_sample_count"),
+        success_rate,
         func.count(LogDecode.event_id).filter(LogDecode.status == "failed").label("failed_count"),
         func.count(LogDecode.event_id).filter(LogDecode.status == "unsupported").label("unsupported_count"),
         (

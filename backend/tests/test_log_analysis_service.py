@@ -307,6 +307,7 @@ def test_summary_uses_database_aggregates_and_preserves_metric_sample_rules():
     assert "GROUP BY" in sql
     assert "count(distinct" in sql.lower()
     assert "avg(" in sql.lower()
+    assert "AS success_rate" in sql
     assert "decoded_payload" not in sql
 
 
