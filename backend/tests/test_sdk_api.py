@@ -12,6 +12,43 @@ from tests.conftest import StubReadSession, StubWriteSession, override_read_db, 
 TOKEN = "sdk-config-test-token-1234567890"
 
 
+class _Rows:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def all(self):
+        return self.rows
+
+
+class _ReturningWriteSession(StubWriteSession):
+    def __init__(self):
+        super().__init__()
+        self.event_statement = None
+        self.pending_statement = None
+
+    async def execute(self, statement, *args, **kwargs):
+        from sqlalchemy.sql import Insert
+
+        if isinstance(statement, Insert):
+            table_name = statement.table.name
+            self.executed.append(statement)
+            if table_name == "sdk_events":
+                self.event_statement = statement
+                return _Rows([(501, datetime(2026, 8, 17, 1, 2, 3, tzinfo=timezone.utc))])
+            if table_name == "sdk_log_decodes":
+                self.pending_statement = statement
+                return _Rows([])
+        values = getattr(statement, "values_payload", None)
+        if values is not None:
+            self.executed.append(statement)
+            if values and values[0].get("event_type") == "log":
+                self.event_statement = statement
+                return _Rows([(501, datetime(2026, 8, 17, 1, 2, 3, tzinfo=timezone.utc))])
+            self.pending_statement = statement
+            return _Rows([])
+        return await super().execute(statement, *args, **kwargs)
+
+
 @pytest.fixture(autouse=True)
 def reset_write_limiter():
     write_limiter._store.clear()
@@ -151,11 +188,16 @@ def test_log_accepts_empty_message_and_preserves_raw_extra(client, monkeypatch, 
 
     class Insert:
         def values(self, values):
-            captured["values"] = values
+            self.values_payload = values
+            if values and values[0].get("event_type") == "log":
+                captured["values"] = values
+            return self
+
+        def returning(self, *_columns):
             return self
 
     monkeypatch.setattr(log_api, "pg_insert", lambda _model: Insert())
-    client.app.dependency_overrides[get_db] = override_write_db(StubWriteSession())
+    client.app.dependency_overrides[get_db] = override_write_db(_ReturningWriteSession())
     log_entry = {"level": "INFO", "extra": "{ouoghaougoagahdgjalglauoi|dlaugouojlJ}", **log_fields}
     response = client.post("/api/v1/log", json={"package_name": " COM.Example.App ", "device_id": "device-1", "logs": [log_entry]})
     assert response.status_code == 200
@@ -172,11 +214,16 @@ def test_log_accepts_target_payload_without_device_id(client, monkeypatch):
 
     class Insert:
         def values(self, values):
-            captured["values"] = values
+            self.values_payload = values
+            if values and values[0].get("event_type") == "log":
+                captured["values"] = values
+            return self
+
+        def returning(self, *_columns):
             return self
 
     monkeypatch.setattr(log_api, "pg_insert", lambda _model: Insert())
-    client.app.dependency_overrides[get_db] = override_write_db(StubWriteSession())
+    client.app.dependency_overrides[get_db] = override_write_db(_ReturningWriteSession())
     response = client.post(
         "/api/v1/log",
         json={
@@ -199,3 +246,43 @@ def test_log_requires_level_and_extra(client, missing_field):
 def test_log_rejects_legacy_app_id(client):
     response = client.post("/api/v1/log", json={"app_id": "demo", "device_id": "device-1", "logs": [{"level": "info", "extra": "raw"}]})
     assert response.status_code == 422
+
+
+def test_log_returns_quickly_after_returning_insert_and_creates_pending(client, monkeypatch):
+    from app.api.sdk import log as log_api
+    from sqlalchemy.dialects import postgresql
+
+    def fail_if_decoded(_extra):
+        raise AssertionError("decode_extra must not run in the request")
+
+    monkeypatch.setattr(log_api, "decode_extra", fail_if_decoded, raising=False)
+    session = _ReturningWriteSession()
+    client.app.dependency_overrides[get_db] = override_write_db(session)
+
+    response = client.post(
+        "/api/v1/log",
+        json={
+            "package_name": "com.example.app",
+            "device_id": "device-1",
+            "logs": [{"level": "info", "extra": "H1|i=GC"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {"accepted": 1, "rejected": 0}
+    assert session.event_statement is not None
+    returning = [column.name for column in session.event_statement._returning]
+    assert returning == ["id", "server_ts"]
+    assert session.pending_statement is not None
+    params = session.pending_statement.compile(dialect=postgresql.dialect()).params
+    pending = {
+        key.removesuffix("_m0"): value
+        for key, value in params.items()
+        if key.endswith("_m0")
+    }
+    assert pending["event_id"] == 501
+    assert pending["record_index"] == -1
+    assert pending["status"] == "pending"
+    assert pending["package_name"] == "com.example.app"
+    assert pending["device_id"] == "device-1"
+    assert pending["decoder_version"] == "1.0.0"

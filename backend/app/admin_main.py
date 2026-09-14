@@ -14,8 +14,10 @@ from app.api.admin import config_mgr, dashboard, version_mgr
 from app.core.config import get_settings
 from app.core.database import async_session_factory
 from app.core.middleware import RequestSizeLimitMiddleware
+from app.services.log_parse_service import process_pending_batch
 
 logger = logging.getLogger(__name__)
+PARSE_LOOP_INTERVAL_SECONDS = 1.0
 
 
 async def etl_refresh_loop() -> None:
@@ -42,6 +44,26 @@ async def etl_refresh_loop() -> None:
                 logger.exception("ETL 刷新失败")
 
 
+async def pending_log_parse_loop() -> None:
+    """Continuously parse pending logs using one fresh transaction per batch."""
+    while True:
+        try:
+            async with async_session_factory() as session:
+                try:
+                    await process_pending_batch(session)
+                    await session.commit()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    await session.rollback()
+                    logger.exception("日志解析批次失败")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("日志解析会话失败")
+        await asyncio.sleep(PARSE_LOOP_INTERVAL_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动：校验 ADMIN_TOKEN
@@ -64,6 +86,8 @@ async def lifespan(app: FastAPI):
     # 启动 ETL 定时刷新
     etl_task = asyncio.create_task(etl_refresh_loop())
     logger.info("ETL 定时刷新已启动")
+    parse_task = asyncio.create_task(pending_log_parse_loop())
+    logger.info("日志解析循环已启动")
 
     yield  # 应用运行中
 
@@ -71,6 +95,11 @@ async def lifespan(app: FastAPI):
     etl_task.cancel()
     try:
         await etl_task
+    except asyncio.CancelledError:
+        pass
+    parse_task.cancel()
+    try:
+        await parse_task
     except asyncio.CancelledError:
         pass
 

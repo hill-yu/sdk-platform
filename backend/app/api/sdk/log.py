@@ -12,7 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.rate_limit import write_limiter
 from app.models.event import SdkEvent
+from app.models.log_analysis import LogDecode
 from app.schemas.sdk_schemas import LogReportRequest
+from app.services.flow_log_decoder import DECODER_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +62,30 @@ async def report_log(
         })
 
     try:
-        stmt = pg_insert(SdkEvent).values(values)
-        await db.execute(stmt)
-        accepted = len(values)
+        stmt = pg_insert(SdkEvent).values(values).returning(SdkEvent.id, SdkEvent.server_ts)
+        result = await db.execute(stmt)
+        returned_events = result.all()
+        if len(returned_events) != len(values):
+            raise RuntimeError("数据库未返回完整事件键")
+
+        pending_values = []
+        for row in returned_events:
+            event_id = row._mapping["id"] if hasattr(row, "_mapping") else row[0]
+            server_ts = row._mapping["server_ts"] if hasattr(row, "_mapping") else row[1]
+            pending_values.append(
+                {
+                    "event_id": event_id,
+                    "event_server_ts": server_ts,
+                    "record_index": -1,
+                    "package_name": body.package_name,
+                    "device_id": body.device_id,
+                    "status": "pending",
+                    "decoder_version": DECODER_VERSION,
+                }
+            )
+
+        await db.execute(pg_insert(LogDecode).values(pending_values))
+        accepted = len(returned_events)
     except Exception:
         logger.exception("批量写入失败，package_name=%s", body.package_name)
         await db.rollback()
