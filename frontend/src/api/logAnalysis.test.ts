@@ -16,6 +16,33 @@ import {
   putLogAnalysisColumns,
   putPackageProfile,
 } from "@/api/logAnalysis";
+import type {
+  LogDecodeItem,
+  PackageProfilePayload,
+  ReparseJob,
+  ReparseJobStatus,
+} from "@/api/logAnalysis";
+
+const partialProfile = { alias: "Alias" } satisfies PackageProfilePayload;
+const runningStatus: ReparseJobStatus = "running";
+const runningJob: ReparseJob = {
+  id: 1,
+  package_name: null,
+  range_start: "2026-08-01T00:00:00Z",
+  range_end: "2026-08-08T00:00:00Z",
+  cursor_event_id: null,
+  cursor_server_ts: null,
+  processed_count: 0,
+  decoded_count: 0,
+  failed_count: 0,
+  status: runningStatus,
+};
+// @ts-expect-error LogDecodeItem.extra only accepts string or null.
+const invalidExtra: LogDecodeItem["extra"] = 123;
+
+void partialProfile;
+void runningJob;
+void invalidExtra;
 
 describe("log analysis API", () => {
   beforeEach(() => vi.clearAllMocks());

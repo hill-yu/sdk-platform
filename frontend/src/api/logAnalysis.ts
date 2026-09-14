@@ -2,6 +2,7 @@ import request from "@/api/request";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type DecodeStatus = "pending" | "success" | "unsupported" | "failed";
+export type ReparseJobStatus = "pending" | "running" | "success" | "failed" | "cancelled";
 export type LogColumnDefinition = string;
 
 export interface ApiEnvelope<T> {
@@ -64,7 +65,7 @@ export interface LogDecodeItem {
   decoded_payload: unknown;
   parse_error: string | null;
   parsed_at: string | null;
-  extra?: unknown | null;
+  extra?: string | null;
 }
 
 export interface PackageProfile {
@@ -74,7 +75,7 @@ export interface PackageProfile {
   account: string;
 }
 
-export type PackageProfilePayload = Omit<PackageProfile, "package_name">;
+export type PackageProfilePayload = Partial<Omit<PackageProfile, "package_name">>;
 
 export interface LogAnalysisColumns {
   available_columns: LogColumnDefinition[];
@@ -129,7 +130,7 @@ export interface ReparseJob {
   processed_count: number;
   decoded_count: number;
   failed_count: number;
-  status: DecodeStatus;
+  status: ReparseJobStatus;
 }
 
 export const getLogAnalysisSummary = (params: SummaryQuery) =>
