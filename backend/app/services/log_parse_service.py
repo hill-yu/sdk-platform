@@ -17,6 +17,16 @@ from app.services.flow_log_decoder import decode_extra
 
 MAX_BATCH_SIZE = 50
 PARSE_TIMEOUT_SECONDS = 5.0
+SUCCESS_FINAL_REASONS = {
+    "planned-click-count-exhausted",
+    "landing-page-flow-completed",
+    "macro-actual-click-limit-reached",
+}
+FAILED_FINAL_REASONS = {
+    "load-timeout",
+    "home-page-load-failed",
+    "total-time-timeout",
+}
 
 
 @dataclass(frozen=True)
@@ -54,6 +64,34 @@ def _decoded_timestamp(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
+def _derived_click_metrics(record: dict[str, Any]) -> tuple[int | None, int | None, bool | None]:
+    attempts = record.get("planned_click_attempts")
+    if isinstance(attempts, list) and all(isinstance(attempt, dict) for attempt in attempts):
+        actual_click_count = sum(attempt.get("did_click") is True for attempt in attempts)
+        ad_click_count = sum(
+            attempt.get("did_click") is True
+            and attempt.get("target_kind") in {"banner", "anchored"}
+            for attempt in attempts
+        )
+    else:
+        actual_click_count = ad_click_count = None
+
+    if "is_success" in record:
+        is_success = record["is_success"]
+    else:
+        final_reason = record.get("final_reason")
+        if final_reason in SUCCESS_FINAL_REASONS:
+            is_success = True
+        elif final_reason in FAILED_FINAL_REASONS or (
+            isinstance(final_reason, str)
+            and final_reason.startswith("interaction-execution-failed")
+        ):
+            is_success = False
+        else:
+            is_success = None
+    return actual_click_count, ad_click_count, is_success
+
+
 def _project_decoded_record(
     record: dict[str, Any],
     *,
@@ -61,6 +99,7 @@ def _project_decoded_record(
     record_index: int,
     decoder_version: str,
 ) -> dict[str, Any]:
+    derived_actual_click_count, derived_ad_click_count, derived_is_success = _derived_click_metrics(record)
     return {
         "event_id": event.id,
         "event_server_ts": event.server_ts,
@@ -76,14 +115,18 @@ def _project_decoded_record(
         "config_id": record.get("config_id"),
         "window": record.get("window"),
         "expected_click_count": record.get("expected_click_count"),
-        "actual_click_count": record.get("actual_click_count"),
-        "ad_click_count": record.get("ad_click_count"),
+        "actual_click_count": record["actual_click_count"]
+        if "actual_click_count" in record
+        else derived_actual_click_count,
+        "ad_click_count": record["ad_click_count"]
+        if "ad_click_count" in record
+        else derived_ad_click_count,
         "interstitial_presentation_count": record.get("interstitial_presentation_count"),
         "interstitial_click_count": record.get("interstitial_click_count"),
         "interstitial_close_count": record.get("interstitial_close_count"),
         "duration_ms": record.get("duration_ms"),
         "final_reason": record.get("final_reason"),
-        "is_success": record.get("is_success"),
+        "is_success": derived_is_success,
         "decoded_payload": record,
         "parse_error": None,
         "parsed_at": datetime.now(timezone.utc),
@@ -167,36 +210,37 @@ async def process_pending_batch(
         last_event_server_ts = event.server_ts
         extra = event.payload.get("extra") if isinstance(event.payload, dict) else None
         try:
-            decoded_records = await _decode_with_timeout(extra)
-            if not decoded_records:
+            async with db.begin_nested():
+                decoded_records = await _decode_with_timeout(extra)
+                if not decoded_records:
+                    values = [
+                        {
+                            "event_id": event.id,
+                            "event_server_ts": event.server_ts,
+                            "record_index": 0,
+                            "package_name": event.package_name,
+                            "device_id": event.device_id,
+                            "status": "unsupported",
+                            "decoder_version": decode.decoder_version,
+                            "decoded_payload": {},
+                            "parsed_at": datetime.now(timezone.utc),
+                        }
+                    ]
+                    await _replace_placeholder(db, decode, values)
+                    unsupported += 1
+                    continue
+
                 values = [
-                    {
-                        "event_id": event.id,
-                        "event_server_ts": event.server_ts,
-                        "record_index": 0,
-                        "package_name": event.package_name,
-                        "device_id": event.device_id,
-                        "status": "unsupported",
-                        "decoder_version": decode.decoder_version,
-                        "decoded_payload": {},
-                        "parsed_at": datetime.now(timezone.utc),
-                    }
+                    _project_decoded_record(
+                        record,
+                        event=event,
+                        record_index=index,
+                        decoder_version=decode.decoder_version,
+                    )
+                    for index, record in enumerate(decoded_records)
                 ]
                 await _replace_placeholder(db, decode, values)
-                unsupported += 1
-                continue
-
-            values = [
-                _project_decoded_record(
-                    record,
-                    event=event,
-                    record_index=index,
-                    decoder_version=decode.decoder_version,
-                )
-                for index, record in enumerate(decoded_records)
-            ]
-            await _replace_placeholder(db, decode, values)
-            successful += 1
+                successful += 1
         except Exception as error:
             values = [
                 {
@@ -212,7 +256,8 @@ async def process_pending_batch(
                     "parsed_at": datetime.now(timezone.utc),
                 }
             ]
-            await _replace_placeholder(db, decode, values)
+            async with db.begin_nested():
+                await _replace_placeholder(db, decode, values)
             failed += 1
 
     return ParseBatchResult(

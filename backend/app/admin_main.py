@@ -89,19 +89,18 @@ async def lifespan(app: FastAPI):
     parse_task = asyncio.create_task(pending_log_parse_loop())
     logger.info("日志解析循环已启动")
 
-    yield  # 应用运行中
-
-    # 关闭：取消 ETL 任务
-    etl_task.cancel()
     try:
-        await etl_task
-    except asyncio.CancelledError:
-        pass
-    parse_task.cancel()
-    try:
-        await parse_task
-    except asyncio.CancelledError:
-        pass
+        yield  # 应用运行中
+    finally:
+        for task in (etl_task, parse_task):
+            task.cancel()
+        for task in (etl_task, parse_task):
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("后台任务关闭时失败")
 
 
 cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")

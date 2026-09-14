@@ -23,11 +23,32 @@ class Result:
 
 
 class FakeDb:
-    def __init__(self, pending_rows=()):
+    def __init__(self, pending_rows=(), *, fail_success_insert=False):
         self.pending_rows = list(pending_rows)
         self.statements = []
         self.deleted = []
         self.inserted = []
+        self.fail_success_insert = fail_success_insert
+        self.failed_success_insert = False
+        self.savepoint_commits = 0
+        self.savepoint_rollbacks = 0
+
+    class _Nested:
+        def __init__(self, db):
+            self.db = db
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            if exc_type is None:
+                self.db.savepoint_commits += 1
+            else:
+                self.db.savepoint_rollbacks += 1
+            return False
+
+    def begin_nested(self):
+        return self._Nested(self)
 
     async def execute(self, statement, *args, **kwargs):
         self.statements.append(statement)
@@ -42,14 +63,19 @@ class FakeDb:
             self.deleted.append(statement)
             return Result()
         if isinstance(statement, Insert):
+            if self.fail_success_insert and not self.failed_success_insert:
+                params = compiled_params(statement)
+                if "success" in params.values():
+                    self.failed_success_insert = True
+                    raise RuntimeError("simulated structured insert failure")
             self.inserted.append(statement)
             return Result()
         raise AssertionError(f"unexpected statement: {statement}")
 
 
-def pending_pair(*, extra: str = "H1|i=GC"):
+def pending_pair(*, extra: str = "H1|i=GC", event_id: int = 1001):
     event = SdkEvent(
-        id=1001,
+        id=event_id,
         event_type="log",
         package_name="com.example.app",
         device_id="device-1",
@@ -139,6 +165,21 @@ def test_success_deletes_pending_and_inserts_stable_projected_records(monkeypatc
     assert first["is_success"] is True
 
 
+def test_real_decoder_projects_click_ad_and_success_metrics():
+    from app.services import log_parse_service
+
+    extra = "H1|t=268H0A000|w=main|i=GC|p=2|pa=b11hfn1|a=b|s=b|r=p|u=FEm"
+    db = FakeDb([pending_pair(extra=extra)])
+
+    result = asyncio.run(log_parse_service.process_pending_batch(db))
+
+    assert result.success == 1
+    row = params_for_row(db.inserted[-1], 0)
+    assert row["actual_click_count"] == 1
+    assert row["ad_click_count"] == 1
+    assert row["is_success"] is True
+
+
 def test_unsupported_replaces_pending_with_record_zero(monkeypatch):
     from app.services import log_parse_service
 
@@ -203,6 +244,30 @@ def test_decode_timeout_becomes_failed_without_stopping_batch(monkeypatch):
     assert "TimeoutError" in row["parse_error"]
 
 
+def test_structured_insert_failure_isolated_and_next_pending_is_processed(monkeypatch):
+    from app.services import log_parse_service
+
+    decoded = [{"config_id": 1004, "window": "main", "final_reason": "planned-click-count-exhausted"}]
+    monkeypatch.setattr(log_parse_service, "decode_extra", lambda _extra: decoded)
+    db = FakeDb(
+        [pending_pair(event_id=1001), pending_pair(event_id=1002)],
+        fail_success_insert=True,
+    )
+
+    result = asyncio.run(log_parse_service.process_pending_batch(db))
+
+    assert result.scanned == 2
+    assert result.failed == 1
+    assert result.success == 1
+    assert db.failed_success_insert is True
+    assert db.savepoint_rollbacks >= 1
+    statuses = [
+        params_for_row(statement, 0)["status"]
+        for statement in db.inserted
+    ]
+    assert statuses == ["failed", "success"]
+
+
 def test_admin_parse_loop_commits_each_batch_rolls_back_errors_and_can_cancel(monkeypatch):
     from app import admin_main
 
@@ -239,8 +304,10 @@ def test_admin_parse_loop_commits_each_batch_rolls_back_errors_and_can_cancel(mo
         nonlocal calls
         calls += 1
         if calls == 1:
+            return None
+        if calls == 2:
             raise RuntimeError("temporary failure")
-        if calls >= 2:
+        if calls >= 3:
             raise asyncio.CancelledError
 
     monkeypatch.setattr(admin_main, "async_session_factory", factory)
@@ -250,8 +317,9 @@ def test_admin_parse_loop_commits_each_batch_rolls_back_errors_and_can_cancel(mo
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(admin_main.pending_log_parse_loop())
 
-    assert calls == 2
-    assert factory.sessions[0].rollbacks == 1
+    assert calls == 3
+    assert factory.sessions[0].commits == 1
+    assert factory.sessions[1].rollbacks == 1
 
 
 def test_admin_lifespan_starts_and_cancels_parse_and_etl_tasks(monkeypatch):
@@ -293,6 +361,52 @@ def test_admin_lifespan_starts_and_cancels_parse_and_etl_tasks(monkeypatch):
             await asyncio.sleep(0)
 
     asyncio.run(run_lifespan())
+
+    assert started == {"etl": True, "parse": True}
+    assert cancelled == {"etl": True, "parse": True}
+
+
+def test_admin_lifespan_cleans_up_both_tasks_when_body_raises(monkeypatch):
+    from types import SimpleNamespace
+
+    from app import admin_main
+
+    started = {"etl": False, "parse": False}
+    cancelled = {"etl": False, "parse": False}
+
+    async def blocking_loop(name):
+        started[name] = True
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled[name] = True
+            raise
+
+    async def fake_etl():
+        await blocking_loop("etl")
+
+    async def fake_parse():
+        await blocking_loop("parse")
+
+    monkeypatch.setattr(
+        admin_main,
+        "get_settings",
+        lambda: SimpleNamespace(
+            ADMIN_TOKEN="a" * 40,
+            CDN_BASE_URL="https://cdn.test.local",
+            COS_BUCKET="sdk-config-bucket",
+        ),
+    )
+    monkeypatch.setattr(admin_main, "etl_refresh_loop", fake_etl)
+    monkeypatch.setattr(admin_main, "pending_log_parse_loop", fake_parse)
+
+    async def run_lifespan():
+        async with admin_main.lifespan(admin_main.app):
+            await asyncio.sleep(0)
+            raise RuntimeError("body failed")
+
+    with pytest.raises(RuntimeError, match="body failed"):
+        asyncio.run(run_lifespan())
 
     assert started == {"etl": True, "parse": True}
     assert cancelled == {"etl": True, "parse": True}
