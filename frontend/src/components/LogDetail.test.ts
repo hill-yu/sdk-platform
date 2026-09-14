@@ -42,6 +42,12 @@ describe("LogDetail", () => {
     expect(wrapper.get("[data-testid='log-extra']").text()).toBe(longExtra);
   });
 
+  it("formats the server timestamp in UTC+8", () => {
+    const wrapper = mount(LogDetail, { props: { item: makeItem() } });
+
+    expect(wrapper.findAll(".detail-value")[0].text()).toBe("2026-08-13 18:00:00");
+  });
+
   it("copies extra and emits copy-success", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     mockClipboard(writeText);

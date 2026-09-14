@@ -83,7 +83,7 @@
               </tr>
               <template v-for="item in events.items" :key="item.id">
               <tr class="clickable-row" @click="toggleExpanded(item.id)">
-                <td>{{ item.server_ts || "-" }}</td>
+                <td>{{ formatBusinessTime(item.server_ts) }}</td>
                 <td>{{ item.event_type }}</td>
                 <td>{{ item.device_id || "-" }}</td>
                 <td>{{ item.payload?.page || "-" }}</td>
@@ -114,6 +114,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { getBreakdown, getEvents, getSummary, getTrend } from "@/api/dashboard";
 import StatCard from "@/components/StatCard.vue";
 import TrendChart from "@/components/TrendChart.vue";
+import { formatBusinessTime } from "@/utils/dateTime";
 
 const summary = reactive({
   today_pv: 0,

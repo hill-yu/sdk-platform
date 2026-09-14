@@ -23,6 +23,7 @@
 import { computed } from "vue";
 
 import type { EventItem } from "@/api/dashboard";
+import { formatBusinessTime } from "@/utils/dateTime";
 
 const props = defineProps<{ item: EventItem | null }>();
 const emit = defineEmits<{ "copy-success": []; "copy-error": [message: string] }>();
@@ -30,7 +31,7 @@ const emit = defineEmits<{ "copy-success": []; "copy-error": [message: string] }
 const fields = computed(() => {
   if (!props.item) return [];
   return [
-    { label: "时间", value: props.item.server_ts },
+    { label: "时间", value: formatBusinessTime(props.item.server_ts) },
     { label: "包名", value: props.item.package_name },
     { label: "设备 ID", value: props.item.device_id },
     { label: "SDK 版本", value: props.item.sdk_version },
