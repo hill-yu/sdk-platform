@@ -27,6 +27,29 @@ FAILED_FINAL_REASONS = {
     "home-page-load-failed",
     "total-time-timeout",
 }
+LOG_DECODE_KEY_COLUMNS = ("event_id", "event_server_ts", "record_index")
+LOG_DECODE_UPSERT_COLUMNS = (
+    "package_name",
+    "device_id",
+    "status",
+    "decoder_version",
+    "decoded_timestamp",
+    "url",
+    "config_id",
+    "window",
+    "expected_click_count",
+    "actual_click_count",
+    "ad_click_count",
+    "interstitial_presentation_count",
+    "interstitial_click_count",
+    "interstitial_close_count",
+    "duration_ms",
+    "final_reason",
+    "is_success",
+    "decoded_payload",
+    "parse_error",
+    "parsed_at",
+)
 
 
 @dataclass(frozen=True)
@@ -146,6 +169,80 @@ def _safe_parse_error(error: BaseException) -> str:
     return f"{error_type}: {reason}"[:512]
 
 
+def _failed_values(
+    event: SdkEvent,
+    decoder_version: str,
+    error: BaseException,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "event_id": event.id,
+            "event_server_ts": event.server_ts,
+            "record_index": 0,
+            "package_name": event.package_name,
+            "device_id": event.device_id,
+            "status": "failed",
+            "decoder_version": decoder_version,
+            "decoded_payload": {},
+            "parse_error": _safe_parse_error(error),
+            "parsed_at": datetime.now(timezone.utc),
+        }
+    ]
+
+
+async def build_decoded_values(
+    event: SdkEvent,
+    *,
+    decoder_version: str,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Decode one event using the same bounded parser and projection as online parsing."""
+    extra = event.payload.get("extra") if isinstance(event.payload, dict) else None
+    try:
+        decoded_records = await _decode_with_timeout(extra)
+        if not decoded_records:
+            return "unsupported", [
+                {
+                    "event_id": event.id,
+                    "event_server_ts": event.server_ts,
+                    "record_index": 0,
+                    "package_name": event.package_name,
+                    "device_id": event.device_id,
+                    "status": "unsupported",
+                    "decoder_version": decoder_version,
+                    "decoded_payload": {},
+                    "parsed_at": datetime.now(timezone.utc),
+                }
+            ]
+        return "success", [
+            _project_decoded_record(
+                record,
+                event=event,
+                record_index=index,
+                decoder_version=decoder_version,
+            )
+            for index, record in enumerate(decoded_records)
+        ]
+    except Exception as error:
+        return "failed", _failed_values(event, decoder_version, error)
+
+
+async def upsert_decoded_values(db: AsyncSession, values: list[dict[str, Any]]) -> None:
+    """Upsert decoded rows on the stable composite key."""
+    if not values:
+        return
+    statement = pg_insert(LogDecode).values(values)
+    update_values = {
+        column: getattr(statement.excluded, column)
+        for column in LOG_DECODE_UPSERT_COLUMNS
+    }
+    await db.execute(
+        statement.on_conflict_do_update(
+            index_elements=list(LOG_DECODE_KEY_COLUMNS),
+            set_=update_values,
+        )
+    )
+
+
 def _placeholder_key(decode: LogDecode):
     return and_(
         LogDecode.event_id == decode.event_id,
@@ -208,54 +305,21 @@ async def process_pending_batch(
         event = _row_value(row, "SdkEvent", 1)
         last_event_id = event.id
         last_event_server_ts = event.server_ts
-        extra = event.payload.get("extra") if isinstance(event.payload, dict) else None
         try:
             async with db.begin_nested():
-                decoded_records = await _decode_with_timeout(extra)
-                if not decoded_records:
-                    values = [
-                        {
-                            "event_id": event.id,
-                            "event_server_ts": event.server_ts,
-                            "record_index": 0,
-                            "package_name": event.package_name,
-                            "device_id": event.device_id,
-                            "status": "unsupported",
-                            "decoder_version": decode.decoder_version,
-                            "decoded_payload": {},
-                            "parsed_at": datetime.now(timezone.utc),
-                        }
-                    ]
-                    await _replace_placeholder(db, decode, values)
-                    unsupported += 1
-                    continue
-
-                values = [
-                    _project_decoded_record(
-                        record,
-                        event=event,
-                        record_index=index,
-                        decoder_version=decode.decoder_version,
-                    )
-                    for index, record in enumerate(decoded_records)
-                ]
+                status, values = await build_decoded_values(
+                    event,
+                    decoder_version=decode.decoder_version,
+                )
                 await _replace_placeholder(db, decode, values)
-                successful += 1
+                if status == "success":
+                    successful += 1
+                elif status == "unsupported":
+                    unsupported += 1
+                else:
+                    failed += 1
         except Exception as error:
-            values = [
-                {
-                    "event_id": event.id,
-                    "event_server_ts": event.server_ts,
-                    "record_index": 0,
-                    "package_name": event.package_name,
-                    "device_id": event.device_id,
-                    "status": "failed",
-                    "decoder_version": decode.decoder_version,
-                    "decoded_payload": {},
-                    "parse_error": _safe_parse_error(error),
-                    "parsed_at": datetime.now(timezone.utc),
-                }
-            ]
+            values = _failed_values(event, decode.decoder_version, error)
             async with db.begin_nested():
                 await _replace_placeholder(db, decode, values)
             failed += 1
