@@ -7,13 +7,14 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from sqlalchemy import and_, delete, exists, or_, select, text
+from sqlalchemy import Integer, and_, cast, delete, exists, func, or_, select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1] / "backend"
@@ -32,6 +33,7 @@ from app.services.log_parse_service import (  # noqa: E402
 
 BACKFILL_MAX_BATCH_SIZE = 500
 VALID_STATUSES = frozenset({"pending", "success", "unsupported", "failed"})
+DECODER_VERSION_PATTERN = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 
 
 @dataclass(frozen=True)
@@ -81,6 +83,13 @@ def payload_sha256(payload: object) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def parse_decoder_version(value: str) -> tuple[int, int, int]:
+    match = DECODER_VERSION_PATTERN.fullmatch(value)
+    if match is None:
+        raise ValueError("decoder-version-before 必须是 x.y.z 三段非负整数")
+    return tuple(int(part) for part in match.groups())
+
+
 def validate_filters(filters: BackfillFilters) -> None:
     if (filters.date_from is None) != (filters.date_to is None):
         raise ValueError("date-from 与 date-to 必须成对提供")
@@ -89,6 +98,8 @@ def validate_filters(filters: BackfillFilters) -> None:
             raise ValueError("date-from 必须早于 date-to，date-to 为排他边界")
     if filters.status is not None and filters.status not in VALID_STATUSES:
         raise ValueError("status 必须是 pending/success/unsupported/failed")
+    if filters.decoder_version_before is not None:
+        parse_decoder_version(filters.decoder_version_before)
     if not any(
         value is not None
         for value in (
@@ -147,12 +158,17 @@ def build_event_query(
             )
         )
     if filters.decoder_version_before is not None:
+        major, minor, patch = parse_decoder_version(filters.decoder_version_before)
+        version_columns = tuple(
+            cast(func.split_part(LogDecode.decoder_version, ".", index), Integer)
+            for index in (1, 2, 3)
+        )
         conditions.append(
             exists(
                 select(LogDecode.event_id).where(
                     LogDecode.event_id == SdkEvent.id,
                     LogDecode.event_server_ts == SdkEvent.server_ts,
-                    LogDecode.decoder_version < filters.decoder_version_before,
+                    tuple_(*version_columns) < tuple_(major, minor, patch),
                 )
             )
         )
@@ -321,6 +337,32 @@ def _parse_datetime(value: str | None) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+async def _run_cli(
+    *,
+    database_url: str,
+    filters: BackfillFilters,
+    apply: bool,
+    batch_size: int,
+    cursor_ts: datetime | None,
+    cursor_id: int | None,
+    emit: Callable[[str], None],
+) -> BackfillBatchResult:
+    engine = create_async_engine(database_url)
+    try:
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        return await run_backfill(
+            session_factory,
+            filters,
+            apply=apply,
+            batch_size=batch_size,
+            cursor_ts=cursor_ts,
+            cursor_id=cursor_id,
+            emit=emit,
+        )
+    finally:
+        await engine.dispose()
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--date-from")
@@ -337,34 +379,29 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    args = _build_parser().parse_args()
-    filters = BackfillFilters(
-        date_from=_parse_date(args.date_from),
-        date_to=_parse_date(args.date_to),
-        package_name=args.package_name,
-        status=args.status,
-        decoder_version_before=args.decoder_version_before,
-    )
-    validate_filters(filters)
     try:
+        args = _build_parser().parse_args()
+        filters = BackfillFilters(
+            date_from=_parse_date(args.date_from),
+            date_to=_parse_date(args.date_to),
+            package_name=args.package_name,
+            status=args.status,
+            decoder_version_before=args.decoder_version_before,
+        )
+        validate_filters(filters)
         validate_apply_confirmation(args.apply, args.confirm)
-    except ValueError as error:
-        raise SystemExit(str(error)) from error
-    if (args.cursor_ts is None) != (args.cursor_id is None):
-        raise SystemExit("cursor-ts 与 cursor-id 必须成对提供")
-    if args.batch_size <= 0 or args.batch_size > BACKFILL_MAX_BATCH_SIZE:
-        raise SystemExit(f"batch-size 必须在 1 到 {BACKFILL_MAX_BATCH_SIZE} 之间")
+        if (args.cursor_ts is None) != (args.cursor_id is None):
+            raise ValueError("cursor-ts 与 cursor-id 必须成对提供")
+        if args.batch_size <= 0 or args.batch_size > BACKFILL_MAX_BATCH_SIZE:
+            raise ValueError(f"batch-size 必须在 1 到 {BACKFILL_MAX_BATCH_SIZE} 之间")
 
-    from app.core.config import get_settings
+        from app.core.config import get_settings
 
-    database_url = os.environ.get("DATABASE_URL") or get_settings().resolved_database_url
-    engine = create_async_engine(database_url)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    try:
+        database_url = os.environ.get("DATABASE_URL") or get_settings().resolved_database_url
         asyncio.run(
-            run_backfill(
-                session_factory,
-                filters,
+            _run_cli(
+                database_url=database_url,
+                filters=filters,
                 apply=args.apply,
                 batch_size=args.batch_size,
                 cursor_ts=_parse_datetime(args.cursor_ts),
@@ -372,8 +409,11 @@ def main() -> None:
                 emit=print,
             )
         )
-    finally:
-        asyncio.run(engine.dispose())
+    except SystemExit:
+        raise
+    except Exception as error:
+        print(f"backfill failed: {type(error).__name__}", file=sys.stderr)
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":
