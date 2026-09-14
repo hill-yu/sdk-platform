@@ -201,3 +201,116 @@ def test_database_error_uses_safe_http_detail(monkeypatch):
     assert response.status_code == 500
     assert response.json()["detail"] == "列配置查询失败"
     assert "secret" not in response.text
+
+
+def test_summary_route_passes_filters_and_rejects_invalid_page_sort(monkeypatch):
+    from app.admin_main import app
+    from app.api.admin import log_analysis
+
+    calls = []
+
+    async def fake_summary(_db, **kwargs):
+        calls.append(kwargs)
+        return {"total": 0, "page": kwargs["page"], "page_size": kwargs["page_size"], "items": []}
+
+    monkeypatch.setattr(log_analysis.log_analysis_service, "get_log_analysis_summary", fake_summary)
+    app.dependency_overrides[get_db_no_commit] = override_db()
+    try:
+        with TestClient(app) as client:
+            valid = client.get(
+                "/api/admin/log-analysis/summary?date_from=2026-08-17&date_to=2026-08-17"
+                "&package_name=COM.EXAMPLE.APP&device_id=device-1&page=2&page_size=50"
+                "&sort_by=success_rate&sort_order=asc",
+                headers=auth_headers(),
+            )
+            invalid_page_size = client.get(
+                "/api/admin/log-analysis/summary?page_size=101",
+                headers=auth_headers(),
+            )
+            invalid_sort = client.get(
+                "/api/admin/log-analysis/summary?sort_by=decoded_payload",
+                headers=auth_headers(),
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert valid.status_code == 200
+    assert calls[0]["package_name"] == "com.example.app"
+    assert calls[0]["page"] == 2
+    assert calls[0]["sort_by"] == "success_rate"
+    assert invalid_page_size.status_code == 422
+    assert invalid_sort.status_code == 422
+
+
+def test_details_route_requires_group_key_and_detail_route_requires_composite_key(monkeypatch):
+    from app.admin_main import app
+    from app.api.admin import log_analysis
+
+    async def fake_details(_db, **_kwargs):
+        return {"total": 1, "page": 1, "page_size": 20, "items": [{"event_id": 7}]}
+
+    async def fake_detail(_db, **_kwargs):
+        return {"event_id": 7, "event_server_ts": "2026-08-17T09:02:03+08:00", "record_index": 0, "extra": "H1"}
+
+    monkeypatch.setattr(log_analysis.log_analysis_service, "get_log_analysis_details", fake_details)
+    monkeypatch.setattr(log_analysis.log_analysis_service, "get_log_analysis_detail", fake_detail)
+    app.dependency_overrides[get_db_no_commit] = override_db()
+    try:
+        with TestClient(app) as client:
+            missing_group = client.get(
+                "/api/admin/log-analysis/details",
+                headers=auth_headers(),
+            )
+            details = client.get(
+                "/api/admin/log-analysis/details?date=2026-08-17&package_name=COM.EXAMPLE.APP",
+                headers=auth_headers(),
+            )
+            missing_composite = client.get(
+                "/api/admin/log-analysis/details/7",
+                headers=auth_headers(),
+            )
+            detail = client.get(
+                "/api/admin/log-analysis/details/7?event_server_ts=2026-08-17T01:02:03Z&record_index=0",
+                headers=auth_headers(),
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert missing_group.status_code == 422
+    assert details.status_code == 200
+    assert missing_composite.status_code == 422
+    assert detail.status_code == 200
+    assert detail.json()["data"]["extra"] == "H1"
+
+
+def test_reparse_requires_scope_and_returns_pending_job_without_sync_processing(monkeypatch):
+    from app.admin_main import app
+    from app.api.admin import log_analysis
+
+    calls = []
+
+    async def fake_reparse(_db, **kwargs):
+        calls.append(kwargs)
+        return {"id": 77, "status": "pending", "package_name": kwargs["package_name"]}
+
+    monkeypatch.setattr(log_analysis.log_analysis_service, "create_reparse_job", fake_reparse)
+    app.dependency_overrides[get_db_no_commit] = override_db()
+    try:
+        with TestClient(app) as client:
+            unbounded = client.post(
+                "/api/admin/log-analysis/reparse",
+                headers=auth_headers(),
+                json={},
+            )
+            valid = client.post(
+                "/api/admin/log-analysis/reparse",
+                headers=auth_headers(),
+                json={"package_name": "COM.EXAMPLE.APP", "status": "failed"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert unbounded.status_code == 422
+    assert valid.status_code == 200
+    assert valid.json()["data"]["status"] == "pending"
+    assert calls[0]["package_name"] == "com.example.app"

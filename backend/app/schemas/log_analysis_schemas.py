@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from datetime import date
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.services.config_crypto import normalize_package_name
 
 
 class PackageProfileUpdateRequest(BaseModel):
@@ -35,3 +40,41 @@ class LogAnalysisColumnsResponse(BaseModel):
     available_columns: list[str]
     default_columns: list[str]
     columns: list[str]
+
+
+class LogReparseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    date_from: date | None = None
+    date_to: date | None = None
+    package_name: str | None = Field(default=None, max_length=255)
+    status: Literal["pending", "success", "unsupported", "failed"] | None = None
+    decoder_version_before: str | None = Field(default=None, max_length=32)
+
+    @field_validator("package_name")
+    @classmethod
+    def normalize_package(cls, value: str | None) -> str | None:
+        return normalize_package_name(value) if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_scope(self):
+        if (self.date_from is None) != (self.date_to is None):
+            raise ValueError("date_from 和 date_to 必须成对提供")
+        if self.date_from is not None and self.date_from > self.date_to:
+            raise ValueError("date_from 不能晚于 date_to")
+        if not any(
+            value is not None
+            for value in (
+                self.date_from,
+                self.date_to,
+                self.package_name,
+                self.status,
+                self.decoder_version_before,
+            )
+        ):
+            raise ValueError("reparse 必须指定范围或筛选条件")
+        if self.decoder_version_before is not None:
+            from app.services.log_analysis_service import parse_decoder_version
+
+            parse_decoder_version(self.decoder_version_before)
+        return self
