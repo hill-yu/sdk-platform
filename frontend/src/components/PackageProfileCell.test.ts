@@ -59,4 +59,23 @@ describe("PackageProfileCell", () => {
     expect(wrapper.text()).toContain("保存失败");
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
   });
+
+  it("ignores an old save response after package or field changes", async () => {
+    let resolveSave!: (value: unknown) => void;
+    putPackageProfile.mockReturnValue(new Promise((resolve) => { resolveSave = resolve; }));
+    const wrapper = mount(PackageProfileCell, {
+      props: { packageName: "com.example.app", field: "alias", modelValue: "Old" },
+    });
+
+    await wrapper.get("[data-testid='profile-edit']").trigger("click");
+    await wrapper.get("[data-testid='profile-input']").setValue("New");
+    await wrapper.get("[data-testid='profile-save']").trigger("click");
+    await wrapper.setProps({ packageName: "com.example.other", field: "company" });
+
+    resolveSave({ data: { package_name: "com.example.app", alias: "New", company: "", account: "" } });
+    await flushPromises();
+
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+    expect(wrapper.emitted("saved")).toBeUndefined();
+  });
 });

@@ -105,6 +105,7 @@ const EMPTY_FILTERS: LogAnalysisFilterValues = {
 const props = withDefaults(
   defineProps<{
     modelValue?: Partial<LogAnalysisFilterValues>;
+    appliedValue?: Partial<LogAnalysisFilterValues>;
     disabled?: boolean;
     loading?: boolean;
   }>(),
@@ -138,12 +139,13 @@ replaceDraft(props.modelValue);
 watch(() => props.modelValue, replaceDraft, { deep: true });
 
 const activeConditions = computed(() => {
+  const applied = normalize(props.appliedValue ?? props.modelValue);
   const conditions = [
-    { key: "date_from", label: "开始日期（北京时间）", value: draft.date_from },
-    { key: "date_to", label: "结束日期（北京时间）", value: draft.date_to },
-    { key: "package_name", label: "包名", value: draft.package_name },
-    { key: "device_id", label: "设备 ID", value: draft.device_id },
-    { key: "log_level", label: "日志级别", value: draft.log_level },
+    { key: "date_from", label: "开始日期（北京时间）", value: applied.date_from },
+    { key: "date_to", label: "结束日期（北京时间）", value: applied.date_to },
+    { key: "package_name", label: "包名", value: applied.package_name },
+    { key: "device_id", label: "设备 ID", value: applied.device_id },
+    { key: "log_level", label: "日志级别", value: applied.log_level },
   ];
   return conditions.filter((condition) => condition.value);
 });

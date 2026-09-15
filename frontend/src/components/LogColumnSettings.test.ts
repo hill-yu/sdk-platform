@@ -17,6 +17,22 @@ function mountSettings() {
 }
 
 describe("LogColumnSettings", () => {
+  it("preserves the committed order of valid columns", () => {
+    const wrapper = mount(LogColumnSettings, {
+      props: {
+        availableColumns: available,
+        defaultColumns: defaults,
+        modelValue: ["package_name", "alias", "date"],
+      },
+    });
+
+    expect(wrapper.findAll("[data-testid$='-visible'] span:first-child").map((node) => node.text())).toEqual([
+      "package_name",
+      "alias",
+      "date",
+    ]);
+  });
+
   it("keeps date and package_name visible while adding, removing, and reordering columns", async () => {
     const wrapper = mountSettings();
 

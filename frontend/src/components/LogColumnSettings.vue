@@ -87,8 +87,12 @@ const emit = defineEmits<{
 
 function ensureRequired(columns: string[]) {
   const selected = columns.filter((column, index) => props.availableColumns.includes(column) && columns.indexOf(column) === index);
-  const required = ["date", "package_name"].filter((column) => props.availableColumns.includes(column));
-  return [...required, ...selected.filter((column) => !REQUIRED_COLUMNS.has(column))];
+  for (const required of ["date", "package_name"]) {
+    if (props.availableColumns.includes(required) && !selected.includes(required)) {
+      selected.push(required);
+    }
+  }
+  return selected;
 }
 
 const draftColumns = ref<string[]>(ensureRequired(props.modelValue));

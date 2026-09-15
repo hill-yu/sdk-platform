@@ -46,4 +46,20 @@ describe("LogAnalysisFilters", () => {
       log_level: "",
     }]);
   });
+
+  it("shows applied conditions separately from an unsubmitted draft", async () => {
+    const wrapper = mount(LogAnalysisFilters, {
+      props: {
+        modelValue: filters,
+        appliedValue: filters,
+      },
+    });
+
+    await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.next");
+    expect(wrapper.get("[data-testid='effective-conditions']").text()).toContain("com.example.app");
+    expect(wrapper.get("[data-testid='effective-conditions']").text()).not.toContain("com.example.next");
+
+    await wrapper.setProps({ appliedValue: { ...filters, package_name: "com.example.next" } });
+    expect(wrapper.get("[data-testid='effective-conditions']").text()).toContain("com.example.next");
+  });
 });

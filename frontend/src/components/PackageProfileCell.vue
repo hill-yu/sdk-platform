@@ -64,6 +64,14 @@ const committedValue = computed(() => {
 });
 const fieldLabel = computed(() => ({ alias: "别名", company: "公司", account: "账户" })[props.field]);
 
+watch([() => props.packageName, () => props.field], () => {
+  requestSequence.value += 1;
+  saving.value = false;
+  editing.value = false;
+  errorMessage.value = "";
+  draftValue.value = committedValue.value;
+});
+
 watch(committedValue, (value) => {
   if (!editing.value && !saving.value) draftValue.value = value;
 }, { immediate: true });
