@@ -1,8 +1,8 @@
 # SDK 平台最新接口对接文档
 
-> 文档版本：1.2
+> 文档版本：1.3
 >
-> 更新时间：2026-08-13
+> 更新时间：2026-08-17
 >
 > 对应功能分支：`codex/log-viewer-config-tree`
 >
@@ -12,7 +12,7 @@
 
 ## 1. 文档说明
 
-本文档描述当前功能分支的待部署接口候选基线，覆盖 SDK 侧接口和管理后台接口。配置下发协议为“包名隔离 + 三段版本判断 + POST 下载 + AES-256-GCM 加密信封”。生产域名仅用于说明目标对接地址；本分支新增的 Admin `log_level` 查询参数、事件响应 `sdk_version` 和对应前端页面，在完成生产部署及验收前不得据此认定线上已经可用。实施与本地验证状态见 [日志查看与配置树编辑器实施记录](46-LOG-VIEWER-CONFIG-TREE-IMPLEMENTATION-20260813.md)。
+本文档描述当前功能分支的待部署接口候选基线，覆盖 SDK 侧接口和管理后台接口。配置下发协议为“包名隔离 + 三段版本判断 + POST 下载 + AES-256-GCM 加密信封”。生产域名仅用于说明目标对接地址；本分支新增的 Admin `log_level` 查询参数、事件响应 `sdk_version`、日志解析统计接口和对应前端页面，在完成生产部署及验收前不得据此认定线上已经可用。实施与本地验证状态见 [日志查看与配置树编辑器实施记录](46-LOG-VIEWER-CONFIG-TREE-IMPLEMENTATION-20260813.md) 和 [UTC+8 日志解析实施记录](47-UTC8-LOG-ANALYSIS-IMPLEMENTATION-20260817.md)。
 
 以下旧协议已经停用：
 
@@ -463,6 +463,126 @@ Authorization: Bearer <ADMIN_TOKEN>
 ```
 
 `log_level` 为可选枚举，只允许 `debug`、`info`、`warn`、`error`；非法值返回 HTTP 422。只要传入 `log_level`，后端就同时强制限定 `event_type=log`：省略 `event_type` 时仅返回匹配级别的日志事件，同时显式传入非 `log` 的 `event_type` 时返回空结果。前端独立日志页固定传 `event_type=log`。响应事件项包含 `sdk_version`，并在 `payload` 中保留完整的 `level`、`tag`、`message` 和原始 `extra` 字符串。分页从第 1 页开始，`page_size` 允许 1～100，响应中的 `total` 是符合筛选条件的总条数。
+
+### 11.1 Admin 日志解析统计接口
+
+以下路径均以 `/api/admin` 为前缀，并要求 Admin Bearer Token。日期参数按北京时间（`Asia/Shanghai`）自然日解释；汇总接口的 `date_from`、`date_to` 两端均包含。单日 `2026-08-17` 映射为 UTC 半开区间 `[2026-08-16T16:00:00Z, 2026-08-17T16:00:00Z)`，时间字段对外示例为 `2026-08-17T09:30:00+08:00`。包名、设备 ID、日志级别均为完全匹配，不做模糊搜索；包名会规范化为小写。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/log-analysis/summary` | 按北京时间日期和包名聚合解析指标 |
+| GET | `/log-analysis/details` | 查询某天某包名下的解析明细 |
+| GET | `/log-analysis/details/{event_id}` | 按 `event_id + event_server_ts + record_index` 查询单条完整解析详情 |
+| GET | `/package-profiles?package_name=com.example.app` | 查询包名资料 |
+| PUT | `/package-profiles/{package_name}` | 更新别名、公司、账户 |
+| GET | `/log-analysis/columns` | 查询全局统计列配置 |
+| PUT | `/log-analysis/columns` | 保存全局统计列配置 |
+| POST | `/log-analysis/reparse` | 创建重解析任务记录 |
+
+#### 汇总查询
+
+```http
+GET /api/admin/log-analysis/summary?date_from=2026-08-17&date_to=2026-08-17&package_name=com.example.app&page=1&page_size=20&sort_by=date&sort_order=desc
+Authorization: Bearer <ADMIN_TOKEN>
+```
+
+响应示例：
+
+```json
+{
+  "code": 0,
+  "data": {
+    "total": 1,
+    "page": 1,
+    "page_size": 20,
+    "items": [
+      {
+        "date": "2026-08-17",
+        "package_name": "com.example.app",
+        "alias": "测试包",
+        "company": "测试公司",
+        "account": "测试账户",
+        "primary_url": "https://example.test",
+        "url_count": 1,
+        "user_count": 2,
+        "flow_count": 3,
+        "expected_click_count": 4,
+        "actual_click_count": 3,
+        "ad_click_count": 1,
+        "interstitial_presentation_count": 1,
+        "interstitial_click_count": 1,
+        "average_duration_ms": 1234.0,
+        "duration_sample_count": 3,
+        "success_rate": 0.75,
+        "success_sample_count": 4,
+        "failed_count": 0,
+        "unsupported_count": 0,
+        "parse_failure_count": 0
+      }
+    ]
+  }
+}
+```
+
+`sort_by` 允许 `date`、`package_name`、`user_count`、`flow_count`、`success_rate`、`average_duration_ms`、`parse_failure_count`。`success_rate` 是 `is_success=true` 的数量除以有成功样本的数量；没有样本时返回 `null`。`average_duration_ms` 只对非空耗时求平均，没有样本时为 `null`；计数类指标无样本时为 `0`，客户端不得将 `null` 当成 `0%` 或 `0` 毫秒。全局列配置中的 `url` 列展示该响应里的 `primary_url`。
+
+#### 明细和单条详情
+
+```http
+GET /api/admin/log-analysis/details?date=2026-08-17&package_name=com.example.app&page=1&page_size=20
+Authorization: Bearer <ADMIN_TOKEN>
+```
+
+明细项包含解析状态、解析后的 URL、点击数、耗时、最终原因和 `decoded_payload`。列表不返回原始 `extra`；需要通过单条详情接口追溯原始内容：
+
+```http
+GET /api/admin/log-analysis/details/123?event_server_ts=2026-08-17T10:00:00%2B08:00&record_index=0
+Authorization: Bearer <ADMIN_TOKEN>
+```
+
+单条详情使用复合键定位，响应中包含 `extra` 原文和完整 `decoded_payload`。时间字段对外按 UTC+8 序列化，前端也统一展示为北京时间。
+
+#### 包名资料和列配置
+
+```http
+PUT /api/admin/package-profiles/com.example.app
+Authorization: Bearer <ADMIN_TOKEN>
+Content-Type: application/json
+
+{
+  "alias": "测试包",
+  "company": "测试公司",
+  "account": "测试账户"
+}
+```
+
+```http
+PUT /api/admin/log-analysis/columns
+Authorization: Bearer <ADMIN_TOKEN>
+Content-Type: application/json
+
+{
+  "columns": ["date", "package_name", "alias", "url", "user_count", "success_rate"]
+}
+```
+
+列配置是全局配置，不按账号或包名隔离。可用列由服务端返回，前端不得提交服务端目录外的列名。
+
+#### 重解析任务
+
+```http
+POST /api/admin/log-analysis/reparse
+Authorization: Bearer <ADMIN_TOKEN>
+Content-Type: application/json
+
+{
+  "date_from": "2026-08-17",
+  "date_to": "2026-08-17",
+  "package_name": "com.example.app"
+}
+```
+
+当前接口会校验请求中的日期、包名、状态和 `decoder_version_before` 筛选意图，创建 `sdk_log_reparse_jobs` 任务记录用于审计和后续人工或脚本化回填编排；当前表行实际持久化的是包名、时间范围、创建者和初始计数，不应把筛选字段当成已可查询的作业明细。历史数据实际重算请使用 `scripts/backfill_log_decodes.py`。不要把该接口理解为已经内置后台 worker 并自动消费任务。
 
 ## 12. 对接验收清单
 

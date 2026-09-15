@@ -82,7 +82,98 @@ Authorization: Bearer <ADMIN_TOKEN>
 
 单条日志的完整 `extra` 位于响应项的 `payload.extra`。后台详情区原样展示该字符串，并提供复制操作，不会将其解析成键值对象或截断后再复制。
 
-## 5. 数据库升级
+## 5. Admin 日志解析统计
+
+日志上报成功后，后端会保留原始事件，并对 `payload.extra` 中的字符串做异步解析，解析结果写入 `sdk_log_decodes`。解析只针对日志 `extra` 原始字符串，不改变 `sdk_events.payload`。
+
+### 5.1 时间和筛选口径
+
+- 业务日期统一按 `Asia/Shanghai`（UTC+8，北京时间）解释。
+- `date_from`、`date_to`、`date` 都表示北京时间自然日，不是 UTC 日期；汇总接口两端包含。单日 `2026-08-17` 映射为 `[2026-08-16T16:00:00Z, 2026-08-17T16:00:00Z)`，返回时间示例为 `2026-08-17T09:30:00+08:00`。
+- `package_name`、`device_id`、`log_level` 都是完全匹配。
+- API 对外展示的时间使用 UTC+8；数据库仍保存绝对时间。
+
+### 5.2 汇总接口
+
+```http
+GET /api/admin/log-analysis/summary?date_from=2026-08-17&date_to=2026-08-17&package_name=com.example.app&page=1&page_size=20
+Authorization: Bearer <ADMIN_TOKEN>
+```
+
+汇总维度为北京时间日期和包名。核心指标包括：
+
+| 字段 | 说明 |
+|---|---|
+| `user_count` | 去重设备数 |
+| `flow_count` | 解析成功的流程日志数 |
+| `expected_click_count` | 解析出的计划点击数总和 |
+| `actual_click_count` | 解析出的实际点击数总和 |
+| `ad_click_count` | 广告区域点击数总和 |
+| `average_duration_ms` | 有耗时样本时的平均耗时，单位 ms；无样本时为 `null` |
+| `duration_sample_count` | 参与平均耗时的非空耗时样本数 |
+| `success_rate` | 成功样本占比；无样本时为 `null` |
+| `parse_failure_count` | `failed + unsupported` 的解析失败数量 |
+
+### 5.3 明细和详情
+
+```http
+GET /api/admin/log-analysis/details?date=2026-08-17&package_name=com.example.app&page=1&page_size=20
+Authorization: Bearer <ADMIN_TOKEN>
+```
+
+明细列表用于查看解析后的每条记录。单条完整详情使用复合键查询：
+
+```http
+GET /api/admin/log-analysis/details/{event_id}?event_server_ts=<ISO_WITH_TIMEZONE>&record_index=0
+Authorization: Bearer <ADMIN_TOKEN>
+```
+
+只有单条详情返回原始 `extra`，用于和 `decoded_payload` 追溯比对。
+
+### 5.4 资料和列配置
+
+包名资料：
+
+```http
+PUT /api/admin/package-profiles/com.example.app
+Authorization: Bearer <ADMIN_TOKEN>
+Content-Type: application/json
+
+{
+  "alias": "测试包",
+  "company": "测试公司",
+  "account": "测试账户"
+}
+```
+
+全局列配置：
+
+```http
+PUT /api/admin/log-analysis/columns
+Authorization: Bearer <ADMIN_TOKEN>
+Content-Type: application/json
+
+{
+  "columns": ["date", "package_name", "alias", "url", "user_count", "success_rate"]
+}
+```
+
+列配置为全局配置，所有包名共用。`url` 是列配置中的列名，展示时对应汇总响应里的 `primary_url`。
+
+### 5.5 重解析和历史回填
+
+`POST /api/admin/log-analysis/reparse` 当前会校验日期、包名、状态和 `decoder_version_before` 筛选意图并创建重解析任务记录，方便审计和后续编排；任务表当前主要保存包名、时间范围、创建者和初始计数，历史数据实际重算仍使用脚本：
+
+```bash
+python scripts/backfill_log_decodes.py --date-from 2026-08-17 --date-to 2026-08-18 --package-name com.example.app
+python scripts/backfill_log_decodes.py --date-from 2026-08-17 --date-to 2026-08-18 --package-name com.example.app --apply --confirm BACKFILL_LOG_DECODES
+```
+
+`date-to` 是排他边界。正式执行前必须先 dry-run，并确认扫描量、成功数、失败数和游标符合预期。
+
+当前没有已验证的 reparse job 后台消费者；Admin 启动时的 pending 日志解析循环只处理普通日志解码占位记录。因此该接口返回 `pending` 只代表任务记录已创建，不代表重解析已经开始或完成。
+
+## 6. 数据库升级
 
 先停止 SDK 写入或进入维护窗口，备份后执行：
 
@@ -92,3 +183,12 @@ python scripts/migrate_event_package_name.py --apply --confirm MIGRATE_EVENT_PAC
 ```
 
 第一条只生成预检计划，不写数据库。第二条在单个事务内完成列改名、字段扩容、索引和物化视图重建，并校验事件总数、主表、分区表与视图列。已迁移数据库重复执行时不会再修改结构。
+
+日志解析功能还需要执行解析表和 UTC+8 物化视图迁移：
+
+```bash
+python scripts/migrate_log_analysis.py
+python scripts/migrate_log_analysis.py --apply --confirm MIGRATE_LOG_ANALYSIS
+```
+
+该脚本会检查事件总数、非空 `extra` 数、分区行数、解析表、索引和物化视图定义。重复执行应保持无损、可重入。
