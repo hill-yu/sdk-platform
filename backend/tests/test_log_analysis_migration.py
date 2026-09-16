@@ -143,7 +143,8 @@ def test_init_db_contains_log_analysis_tables_indexes_and_beijing_views():
         assert index in sql
 
     assert "(server_ts AT TIME ZONE 'Asia/Shanghai')::date AS stat_date" in sql
-    assert "date_trunc('hour', server_ts AT TIME ZONE 'Asia/Shanghai') AS hour" in sql
+    assert "date_trunc('hour', server_ts, 'Asia/Shanghai') AS hour" in sql
+    assert "date_trunc('hour', server_ts AT TIME ZONE 'Asia/Shanghai') AS hour" not in sql
 
 
 def test_migration_plan_builds_tables_indexes_and_beijing_views():
@@ -180,7 +181,54 @@ def test_migration_plan_builds_tables_indexes_and_beijing_views():
     assert "raw_extra" not in sql
     assert "extra JSONB" not in sql
     assert "(server_ts AT TIME ZONE 'Asia/Shanghai')::date" in sql
-    assert "date_trunc('hour', server_ts AT TIME ZONE 'Asia/Shanghai')" in sql
+    assert "date_trunc('hour', server_ts, 'Asia/Shanghai')" in sql
+    assert "date_trunc('hour', server_ts AT TIME ZONE 'Asia/Shanghai')" not in sql
+
+
+def test_hourly_view_uses_timezone_aware_beijing_bucket():
+    from scripts.migrate_log_analysis import HOURLY_VIEW_SQL
+
+    assert "date_trunc('hour', server_ts, 'Asia/Shanghai')" in HOURLY_VIEW_SQL
+    assert "server_ts AT TIME ZONE 'Asia/Shanghai'" not in HOURLY_VIEW_SQL
+
+
+def test_old_naive_hour_view_is_rebuilt_without_recreating_log_tables():
+    from scripts.migrate_log_analysis import build_migration_statements
+
+    statements = build_migration_statements(
+        existing_tables={
+            "sdk_log_decodes",
+            "sdk_package_profiles",
+            "sdk_admin_preferences",
+            "sdk_log_reparse_jobs",
+        },
+        existing_indexes={
+            "idx_log_decodes_package_ts",
+            "idx_log_decodes_status_ts",
+            "idx_log_decodes_decoder_status",
+            "idx_log_decodes_event_ts",
+            "idx_package_profiles_updated",
+            "idx_admin_preferences_updated",
+            "idx_log_reparse_jobs_status",
+            "idx_log_reparse_jobs_range",
+        },
+        view_summaries={
+            "mv_daily_event_stats": "sha256:existing|tz:Asia/Shanghai",
+            "mv_hourly_trend": "sha256:existing|tz:Asia/Shanghai",
+        },
+        existing_columns={
+            "sdk_log_reparse_jobs": {"status_filter", "decoder_version_before"},
+        },
+        constraint_definitions={
+            "chk_log_reparse_jobs_status": "CHECK ((status)::text = ANY ((ARRAY['pending', 'running', 'success', 'failed', 'cancelled'])::text[]))",
+        },
+        view_column_types={"mv_hourly_trend.hour": "timestamp without time zone"},
+    )
+
+    sql = "\n".join(statements)
+    assert "DROP MATERIALIZED VIEW IF EXISTS mv_hourly_trend" in sql
+    assert "date_trunc('hour', server_ts, 'Asia/Shanghai')" in sql
+    assert "CREATE TABLE" not in sql
 
 
 def test_migrated_schema_requires_no_destructive_statements():
@@ -225,7 +273,7 @@ def test_migrated_schema_with_legacy_utc_views_rebuilds_only_views():
     assert "DROP MATERIALIZED VIEW IF EXISTS mv_daily_event_stats" in sql
     assert "DROP MATERIALIZED VIEW IF EXISTS mv_hourly_trend" in sql
     assert "(server_ts AT TIME ZONE 'Asia/Shanghai')::date" in sql
-    assert "date_trunc('hour', server_ts AT TIME ZONE 'Asia/Shanghai')" in sql
+    assert "date_trunc('hour', server_ts, 'Asia/Shanghai')" in sql
 
 
 def test_existing_tables_with_missing_indexes_plan_only_safe_index_creation():
@@ -287,6 +335,8 @@ def test_snapshot_includes_counts_partitions_and_view_summaries():
                 return Result([("mv_daily_event_stats", "SELECT old daily"), ("mv_hourly_trend", "SELECT old hourly")])
             if "FROM pg_indexes" in sql:
                 return Result([(name,) for name in REQUIRED_LOG_ANALYSIS_INDEXES])
+            if "pg_attribute" in sql:
+                return Result([("mv_hourly_trend.hour", "timestamp with time zone")])
             if "to_regclass" in sql:
                 return Result([(None,)])
             raise AssertionError(sql)
@@ -298,6 +348,7 @@ def test_snapshot_includes_counts_partitions_and_view_summaries():
     assert snapshot.existing_indexes == REQUIRED_LOG_ANALYSIS_INDEXES
     assert snapshot.partition_counts == {"sdk_events_202609": 1, "sdk_events_202610": 2}
     assert set(snapshot.view_summaries) == {"mv_daily_event_stats", "mv_hourly_trend"}
+    assert snapshot.view_column_types == {"mv_hourly_trend.hour": "timestamp with time zone"}
     assert all(summary.startswith("sha256:") for summary in snapshot.view_summaries.values())
 
 
@@ -320,6 +371,8 @@ def test_dry_run_reads_snapshot_but_executes_no_ddl(monkeypatch):
             if "pg_matviews" in sql:
                 return _Result([])
             if "FROM pg_indexes" in sql:
+                return _Result([])
+            if "pg_attribute" in sql:
                 return _Result([])
             if "to_regclass" in sql:
                 return _Result([(None,)])
@@ -403,6 +456,8 @@ def test_snapshot_uses_non_empty_extra_predicate_for_null_blank_and_whitespace()
             if "pg_matviews" in sql:
                 return _Result([])
             if "FROM pg_indexes" in sql:
+                return _Result([])
+            if "pg_attribute" in sql:
                 return _Result([])
             if "to_regclass" in sql:
                 return _Result([(None,)])
@@ -521,6 +576,8 @@ class _ApplyConnection:
         if "FROM pg_indexes" in sql:
             indexes = self.existing_indexes_after if self.ddl else self.existing_indexes_before
             return _Result([(name,) for name in indexes])
+        if "pg_attribute" in sql:
+            return _Result([("mv_hourly_trend.hour", "timestamp with time zone")])
         if "to_regclass" in sql:
             table = params["relation"].split(".")[-1]
             existing = self.existing_tables_after if self.ddl else self.existing_tables_before

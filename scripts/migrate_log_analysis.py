@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import os
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -40,6 +40,9 @@ class SchemaSnapshot:
     existing_tables: set[str]
     existing_indexes: set[str]
     view_summaries: dict[str, str]
+    existing_columns: dict[str, set[str]] = field(default_factory=dict)
+    constraint_definitions: dict[str, str] = field(default_factory=dict)
+    view_column_types: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -74,7 +77,7 @@ GROUP BY 1, 2, 3, 4, 5"""
 
 HOURLY_VIEW_SQL = """CREATE MATERIALIZED VIEW mv_hourly_trend AS
 SELECT
-    date_trunc('hour', server_ts AT TIME ZONE 'Asia/Shanghai') AS hour,
+    date_trunc('hour', server_ts, 'Asia/Shanghai') AS hour,
     event_type,
     COUNT(*) AS event_count,
     COUNT(DISTINCT device_id) AS unique_devices
@@ -167,13 +170,17 @@ def build_migration_statements(
     existing_tables: set[str],
     view_summaries: dict[str, str],
     existing_indexes: set[str] | None = None,
+    existing_columns: dict[str, set[str]] | None = None,
+    constraint_definitions: dict[str, str] | None = None,
+    view_column_types: dict[str, str] | None = None,
 ) -> list[str]:
     statements: list[str] = []
     missing_tables = not set(REQUIRED_TABLES).issubset(existing_tables)
-    stale_views = any(
-        not view_summaries.get(name, "").endswith("|tz:Asia/Shanghai")
-        for name in EXPECTED_VIEW_SUMMARIES
-    )
+    daily_view_stale = not view_summaries.get("mv_daily_event_stats", "").endswith("|tz:Asia/Shanghai")
+    if view_column_types is None:
+        hourly_view_stale = not view_summaries.get("mv_hourly_trend", "").endswith("|tz:Asia/Shanghai")
+    else:
+        hourly_view_stale = view_column_types.get("mv_hourly_trend.hour") != "timestamp with time zone"
     if missing_tables:
         statements.extend(CREATE_TABLE_STATEMENTS)
         statements.extend(REQUIRED_INDEX_STATEMENTS)
@@ -183,12 +190,17 @@ def build_migration_statements(
             for statement in REQUIRED_INDEX_STATEMENTS
             if _index_name(statement) not in existing_indexes
         )
-    if missing_tables or stale_views:
+    if missing_tables or daily_view_stale:
         statements.extend(
             [
                 "DROP MATERIALIZED VIEW IF EXISTS mv_daily_event_stats",
                 DAILY_VIEW_SQL,
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_daily ON mv_daily_event_stats (stat_date, event_type, package_name, page, element)",
+            ]
+        )
+    if missing_tables or hourly_view_stale:
+        statements.extend(
+            [
                 "DROP MATERIALIZED VIEW IF EXISTS mv_hourly_trend",
                 HOURLY_VIEW_SQL,
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_hourly ON mv_hourly_trend (hour, event_type)",
@@ -262,6 +274,21 @@ async def read_snapshot(connection) -> SchemaSnapshot:
             )
         )
     ).scalars().all()
+    view_column_rows = (
+        await connection.execute(
+            text(
+                "SELECT c.relname || '.' || attribute.attname AS column_key, "
+                "format_type(attribute.atttypid, attribute.atttypmod) AS column_type "
+                "FROM pg_class c "
+                "JOIN pg_namespace namespace ON namespace.oid = c.relnamespace "
+                "JOIN pg_attribute attribute ON attribute.attrelid = c.oid "
+                "WHERE namespace.nspname = current_schema() "
+                "AND c.relname = 'mv_hourly_trend' "
+                "AND attribute.attname = 'hour' "
+                "AND attribute.attnum > 0 AND NOT attribute.attisdropped"
+            )
+        )
+    ).all()
     return SchemaSnapshot(
         total_count=total_count,
         non_null_extra_count=non_null_extra_count,
@@ -273,6 +300,7 @@ async def read_snapshot(connection) -> SchemaSnapshot:
         },
         existing_indexes={str(name) for name in index_rows},
         view_summaries={str(name): _summary(str(definition)) for name, definition in view_rows},
+        view_column_types={str(key): str(column_type) for key, column_type in view_column_rows},
     )
 
 
@@ -300,6 +328,9 @@ async def migrate(database_url: str, *, apply: bool) -> MigrationReport:
                 existing_tables=before.existing_tables,
                 view_summaries=before.view_summaries,
                 existing_indexes=before.existing_indexes,
+                existing_columns=before.existing_columns,
+                constraint_definitions=before.constraint_definitions,
+                view_column_types=before.view_column_types,
             )
             if not apply:
                 return MigrationReport(statements=statements, before=before)

@@ -241,7 +241,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_daily ON mv_daily_event_stats (stat_dat
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_hourly_trend AS
 SELECT
-    date_trunc('hour', server_ts AT TIME ZONE 'Asia/Shanghai') AS hour,
+    date_trunc('hour', server_ts, 'Asia/Shanghai') AS hour,
     event_type,
     COUNT(*)                      AS event_count,
     COUNT(DISTINCT device_id)     AS unique_devices

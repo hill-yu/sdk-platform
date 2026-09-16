@@ -114,6 +114,15 @@ async def test_24_hour_trend_serializes_times_as_utc_plus_8_business_time() -> N
 
 
 @pytest.mark.asyncio
+async def test_24_hour_trend_binds_an_aware_utc_lower_bound() -> None:
+    db = _CapturingSession()
+
+    await get_trend(db, range_value="24h")  # type: ignore[arg-type]
+
+    assert db.params["start_time"].tzinfo is timezone.utc
+
+
+@pytest.mark.asyncio
 async def test_summary_binds_utc_boundaries_for_utc_plus_8_business_days(monkeypatch) -> None:
     db = _SummarySession()
     monkeypatch.setattr(analysis_service, "business_today", lambda: date(2026, 8, 17))
