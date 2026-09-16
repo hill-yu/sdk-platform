@@ -232,29 +232,29 @@ UTC 扫描判断：
 
 ## 8. 本地 PostgreSQL 迁移演练
 
-计划命令：
+本次按顺序实际尝试以下 4 条命令；前两条是迁移 dry-run/apply，后两条是北京时间单日回填 dry-run/apply。回填的 `--date-to` 是排他边界。
 
 ```powershell
 py scripts/migrate_log_analysis.py
 py scripts/migrate_log_analysis.py --apply --confirm MIGRATE_LOG_ANALYSIS
-py scripts/migrate_log_analysis.py
-py scripts/migrate_log_analysis.py --apply --confirm MIGRATE_LOG_ANALYSIS
+py scripts/backfill_log_decodes.py --date-from 2026-08-17 --date-to 2026-08-18
+py scripts/backfill_log_decodes.py --date-from 2026-08-17 --date-to 2026-08-18 --apply --confirm BACKFILL_LOG_DECODES
 ```
 
-演练记录：
+执行记录：
 
 | 项目 | 状态 | 记录 |
 |---|---|---|
-| dry-run | 未执行 | 当前 shell 未设置 `DATABASE_URL`；`py scripts/migrate_log_analysis.py` 退出并提示必须设置 `DATABASE_URL` |
-| 第一次 apply | 未执行 | dry-run 未通过环境门禁，未执行写入 |
-| 第二次 dry-run | 未执行 | 同上 |
-| 第二次 apply | 未执行 | 同上 |
-| 事件总数 | 未记录 | 无本地 PostgreSQL 连接 |
+| 迁移 dry-run | 未执行 | 当前 shell 未设置 `DATABASE_URL`；命令退出并提示必须设置 `DATABASE_URL` |
+| 迁移 apply | 未执行 | 同上；未触达数据库、事务和写入 |
+| 回填 dry-run | 未执行 | 使用本地默认数据库配置连接时返回 `ConnectionRefusedError` |
+| 回填 apply | 未执行 | 同上；未触达回填事务 |
+| 事件总数 | 未记录 | 本机未发现 PostgreSQL 服务 |
 | 非空 `extra` 数 | 未记录 | 无本地 PostgreSQL 连接 |
 | 分区行数 | 未记录 | 无本地 PostgreSQL 连接 |
 | 表、索引、视图 | 未记录 | 无本地 PostgreSQL 连接 |
 
-如本地没有可用 PostgreSQL 或 `DATABASE_URL`，记录为未执行，不得伪造迁移结果。
+本次所需环境变量为 `DATABASE_URL`；回填还需要可连接的本地 PostgreSQL 和已完成解析表迁移。apply 命令虽按要求尝试，但由于环境门禁/连接失败均未执行写入。如本地没有可用 PostgreSQL，必须记录为未执行，不得伪造迁移结果。
 
 ## 9. 端到端 smoke
 
