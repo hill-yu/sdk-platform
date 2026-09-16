@@ -13,3 +13,4 @@ frontend/dist/
 
 # Claude/Codex agent intermediate files
 .claude/
+.worktrees/

@@ -115,6 +115,12 @@
           <button data-testid="refresh-button" class="ghost" type="button" @click="loadLogs()">刷新</button>
         </div>
         <p class="timezone-note">日期按北京时间筛选，包名、设备 ID 和日志级别为完全匹配。</p>
+        <LogExportPanel
+          :device-id="rawFilters.device_id"
+          :log-level="rawFilters.log_level as '' | LogLevel"
+          :date-from="rawFilters.date_from"
+          :date-to="rawFilters.date_to"
+        />
       </section>
       <div class="viewer-grid">
         <section class="panel list-panel">
@@ -153,6 +159,7 @@ import LogAnalysisFilters, { type LogAnalysisFilterValues } from "@/components/L
 import LogColumnSettings from "@/components/LogColumnSettings.vue";
 import PackageProfileCell, { type PackageProfileField } from "@/components/PackageProfileCell.vue";
 import LogDetail from "@/components/LogDetail.vue";
+import LogExportPanel from "@/components/LogExportPanel.vue";
 import { formatBusinessTime } from "@/utils/dateTime";
 import { beginFeedback, setFeedbackError, setFeedbackSuccess } from "@/utils/feedback";
 

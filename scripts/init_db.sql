@@ -202,7 +202,28 @@ COMMENT ON TABLE sdk_admin_preferences IS '日志分析全局管理偏好';
 COMMENT ON TABLE sdk_log_reparse_jobs IS '日志重新解析作业，不保存原始extra';
 
 -- ============================================================
--- 6. 分析物化视图
+-- 6. 日志导出任务
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sdk_log_export_jobs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    package_names JSONB NOT NULL,
+    device_id VARCHAR(64),
+    log_level VARCHAR(10),
+    date_from DATE,
+    date_to DATE,
+    file_path TEXT,
+    row_count BIGINT NOT NULL DEFAULT 0,
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ,
+    CONSTRAINT chk_log_export_jobs_status CHECK (status IN ('pending', 'running', 'success', 'failed'))
+);
+CREATE INDEX IF NOT EXISTS idx_log_export_jobs_status_created ON sdk_log_export_jobs (status, created_at);
+
+-- ============================================================
+-- 7. 分析物化视图
 -- ============================================================
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_daily_event_stats AS
 SELECT
@@ -230,7 +251,7 @@ GROUP BY 1, 2;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_hourly ON mv_hourly_trend (hour, event_type);
 
 -- ============================================================
--- 7. 刷新物化视图函数
+-- 8. 刷新物化视图函数
 -- ============================================================
 CREATE OR REPLACE FUNCTION refresh_materialized_views()
 RETURNS void AS $$
@@ -243,7 +264,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ============================================================
--- 8. 分区维护函数
+-- 9. 分区维护函数
 -- ============================================================
 CREATE OR REPLACE FUNCTION create_next_partition()
 RETURNS TEXT AS $$
@@ -287,7 +308,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ============================================================
--- 9. 初始数据
+-- 10. 初始数据
 -- ============================================================
 -- 加密配置必须由管理后台创建；初始化脚本不写入明文配置或默认包名。
 
