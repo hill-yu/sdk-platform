@@ -52,9 +52,9 @@ def test_profile_get_and_put_use_normalized_package_and_null_safe_response(monke
         calls.append(("get", package_name))
         return {"package_name": package_name, "alias": "", "company": "", "account": ""}
 
-    async def fake_put(_db, package_name, *, alias, company, account):
-        calls.append(("put", package_name, alias, company, account))
-        return {"package_name": package_name, "alias": alias, "company": company, "account": account}
+    async def fake_put(_db, package_name, *, updates):
+        calls.append(("put", package_name, updates))
+        return {"package_name": package_name, **updates, "company": "Example", "account": "account-1"}
 
     monkeypatch.setattr(log_analysis.log_analysis_service, "get_package_profile", fake_get)
     monkeypatch.setattr(log_analysis.log_analysis_service, "upsert_package_profile", fake_put)
@@ -78,7 +78,7 @@ def test_profile_get_and_put_use_normalized_package_and_null_safe_response(monke
     assert put_response.status_code == 200
     assert calls == [
         ("get", "com.example.app"),
-        ("put", "com.example.app", "", "Example", "account-1"),
+        ("put", "com.example.app", {"alias": "", "company": "Example", "account": "account-1"}),
     ]
 
 
