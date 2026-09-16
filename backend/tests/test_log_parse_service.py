@@ -327,8 +327,8 @@ def test_admin_lifespan_starts_and_cancels_parse_and_etl_tasks(monkeypatch):
 
     from app import admin_main
 
-    started = {"etl": False, "parse": False}
-    cancelled = {"etl": False, "parse": False}
+    started = {"etl": False, "parse": False, "reparse": False}
+    cancelled = {"etl": False, "parse": False, "reparse": False}
 
     async def blocking_loop(name):
         started[name] = True
@@ -344,6 +344,9 @@ def test_admin_lifespan_starts_and_cancels_parse_and_etl_tasks(monkeypatch):
     async def fake_parse():
         await blocking_loop("parse")
 
+    async def fake_reparse():
+        await blocking_loop("reparse")
+
     monkeypatch.setattr(
         admin_main,
         "get_settings",
@@ -355,6 +358,7 @@ def test_admin_lifespan_starts_and_cancels_parse_and_etl_tasks(monkeypatch):
     )
     monkeypatch.setattr(admin_main, "etl_refresh_loop", fake_etl)
     monkeypatch.setattr(admin_main, "pending_log_parse_loop", fake_parse)
+    monkeypatch.setattr(admin_main, "reparse_job_loop", fake_reparse)
 
     async def run_lifespan():
         async with admin_main.lifespan(admin_main.app):
@@ -362,8 +366,8 @@ def test_admin_lifespan_starts_and_cancels_parse_and_etl_tasks(monkeypatch):
 
     asyncio.run(run_lifespan())
 
-    assert started == {"etl": True, "parse": True}
-    assert cancelled == {"etl": True, "parse": True}
+    assert started == {"etl": True, "parse": True, "reparse": True}
+    assert cancelled == {"etl": True, "parse": True, "reparse": True}
 
 
 def test_admin_lifespan_cleans_up_both_tasks_when_body_raises(monkeypatch):
@@ -371,8 +375,8 @@ def test_admin_lifespan_cleans_up_both_tasks_when_body_raises(monkeypatch):
 
     from app import admin_main
 
-    started = {"etl": False, "parse": False}
-    cancelled = {"etl": False, "parse": False}
+    started = {"etl": False, "parse": False, "reparse": False}
+    cancelled = {"etl": False, "parse": False, "reparse": False}
 
     async def blocking_loop(name):
         started[name] = True
@@ -388,6 +392,9 @@ def test_admin_lifespan_cleans_up_both_tasks_when_body_raises(monkeypatch):
     async def fake_parse():
         await blocking_loop("parse")
 
+    async def fake_reparse():
+        await blocking_loop("reparse")
+
     monkeypatch.setattr(
         admin_main,
         "get_settings",
@@ -399,6 +406,7 @@ def test_admin_lifespan_cleans_up_both_tasks_when_body_raises(monkeypatch):
     )
     monkeypatch.setattr(admin_main, "etl_refresh_loop", fake_etl)
     monkeypatch.setattr(admin_main, "pending_log_parse_loop", fake_parse)
+    monkeypatch.setattr(admin_main, "reparse_job_loop", fake_reparse)
 
     async def run_lifespan():
         async with admin_main.lifespan(admin_main.app):
@@ -408,5 +416,5 @@ def test_admin_lifespan_cleans_up_both_tasks_when_body_raises(monkeypatch):
     with pytest.raises(RuntimeError, match="body failed"):
         asyncio.run(run_lifespan())
 
-    assert started == {"etl": True, "parse": True}
-    assert cancelled == {"etl": True, "parse": True}
+    assert started == {"etl": True, "parse": True, "reparse": True}
+    assert cancelled == {"etl": True, "parse": True, "reparse": True}

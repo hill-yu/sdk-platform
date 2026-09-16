@@ -15,6 +15,7 @@ from app.core.config import get_settings
 from app.core.database import async_session_factory
 from app.core.middleware import RequestSizeLimitMiddleware
 from app.services.log_parse_service import process_pending_batch
+from app.services.log_reparse_service import reparse_job_loop
 
 logger = logging.getLogger(__name__)
 PARSE_LOOP_INTERVAL_SECONDS = 1.0
@@ -88,13 +89,15 @@ async def lifespan(app: FastAPI):
     logger.info("ETL 定时刷新已启动")
     parse_task = asyncio.create_task(pending_log_parse_loop())
     logger.info("日志解析循环已启动")
+    reparse_task = asyncio.create_task(reparse_job_loop())
+    logger.info("日志重解析循环已启动")
 
     try:
         yield  # 应用运行中
     finally:
-        for task in (etl_task, parse_task):
+        for task in (etl_task, parse_task, reparse_task):
             task.cancel()
-        for task in (etl_task, parse_task):
+        for task in (etl_task, parse_task, reparse_task):
             try:
                 await task
             except asyncio.CancelledError:
