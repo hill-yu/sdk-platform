@@ -446,12 +446,16 @@ def test_reparse_requires_scope_and_only_creates_pending_job():
             date_to=ANALYSIS_DATE,
             package_name="COM.EXAMPLE.APP",
             status="failed",
-            decoder_version_before=None,
+            decoder_version_before="1.2.3",
             created_by="admin-hash",
         )
     )
     assert db.flushed is True
     assert db.added[0].status == "pending"
+    assert db.added[0].status_filter == "failed"
+    assert db.added[0].decoder_version_before == "1.2.3"
     assert db.added[0].package_name == "com.example.app"
     assert job["id"] == 77
     assert job["status"] == "pending"
+    assert job["status_filter"] == "failed"
+    assert job["decoder_version_before"] == "1.2.3"

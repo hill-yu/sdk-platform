@@ -70,12 +70,18 @@ class LogReparseJob(Base):
     __table_args__ = (
         Index("idx_log_reparse_jobs_status", "status", "created_at"),
         Index("idx_log_reparse_jobs_range", "range_start", "range_end"),
+        CheckConstraint(
+            "status IN ('pending', 'running', 'success', 'failed', 'cancelled')",
+            name="chk_log_reparse_jobs_status",
+        ),
     )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     package_name = Column(String(255))
     range_start = Column(DateTime(timezone=True), nullable=False)
     range_end = Column(DateTime(timezone=True), nullable=False)
+    status_filter = Column(String(32))
+    decoder_version_before = Column(String(32))
     cursor_event_id = Column(BigInteger)
     cursor_server_ts = Column(DateTime(timezone=True))
     processed_count = Column(BigInteger, nullable=False, default=0)

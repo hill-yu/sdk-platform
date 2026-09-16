@@ -179,6 +179,8 @@ CREATE TABLE IF NOT EXISTS sdk_log_reparse_jobs (
     package_name      VARCHAR(255),
     range_start       TIMESTAMPTZ  NOT NULL,
     range_end         TIMESTAMPTZ  NOT NULL,
+    status_filter     VARCHAR(32),
+    decoder_version_before VARCHAR(32),
     cursor_event_id   BIGINT,
     cursor_server_ts  TIMESTAMPTZ,
     processed_count   BIGINT       NOT NULL DEFAULT 0,
@@ -190,7 +192,7 @@ CREATE TABLE IF NOT EXISTS sdk_log_reparse_jobs (
     created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
 
-    CONSTRAINT chk_log_reparse_jobs_status CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'cancelled'))
+    CONSTRAINT chk_log_reparse_jobs_status CHECK (status IN ('pending', 'running', 'success', 'failed', 'cancelled'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_log_reparse_jobs_status ON sdk_log_reparse_jobs (status, created_at DESC);

@@ -135,6 +135,8 @@ CREATE_TABLE_STATEMENTS = [
     package_name      VARCHAR(255),
     range_start       TIMESTAMPTZ  NOT NULL,
     range_end         TIMESTAMPTZ  NOT NULL,
+    status_filter     VARCHAR(32),
+    decoder_version_before VARCHAR(32),
     cursor_event_id   BIGINT,
     cursor_server_ts  TIMESTAMPTZ,
     processed_count   BIGINT       NOT NULL DEFAULT 0,
@@ -145,7 +147,7 @@ CREATE_TABLE_STATEMENTS = [
     created_by        VARCHAR(64),
     created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    CONSTRAINT chk_log_reparse_jobs_status CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'cancelled'))
+    CONSTRAINT chk_log_reparse_jobs_status CHECK (status IN ('pending', 'running', 'success', 'failed', 'cancelled'))
 )""",
 ]
 
@@ -190,6 +192,27 @@ def build_migration_statements(
             for statement in REQUIRED_INDEX_STATEMENTS
             if _index_name(statement) not in existing_indexes
         )
+    if not missing_tables and existing_columns is not None:
+        job_columns = existing_columns.get("sdk_log_reparse_jobs", set())
+        if "status_filter" not in job_columns:
+            statements.append(
+                "ALTER TABLE sdk_log_reparse_jobs ADD COLUMN IF NOT EXISTS status_filter VARCHAR(32)"
+            )
+        if "decoder_version_before" not in job_columns:
+            statements.append(
+                "ALTER TABLE sdk_log_reparse_jobs ADD COLUMN IF NOT EXISTS decoder_version_before VARCHAR(32)"
+            )
+    if not missing_tables and constraint_definitions is not None:
+        definition = constraint_definitions.get("chk_log_reparse_jobs_status", "")
+        target_statuses = ("pending", "running", "success", "failed", "cancelled")
+        if "succeeded" in definition or not all(status in definition for status in target_statuses):
+            statements.extend(
+                [
+                    "UPDATE sdk_log_reparse_jobs SET status = 'success' WHERE status = 'succeeded'",
+                    "ALTER TABLE sdk_log_reparse_jobs DROP CONSTRAINT IF EXISTS chk_log_reparse_jobs_status",
+                    "ALTER TABLE sdk_log_reparse_jobs ADD CONSTRAINT chk_log_reparse_jobs_status CHECK (status IN ('pending', 'running', 'success', 'failed', 'cancelled'))",
+                ]
+            )
     if missing_tables or daily_view_stale:
         statements.extend(
             [
@@ -289,6 +312,28 @@ async def read_snapshot(connection) -> SchemaSnapshot:
             )
         )
     ).all()
+    column_rows = (
+        await connection.execute(
+            text(
+                "SELECT table_name, column_name FROM information_schema.columns "
+                "WHERE table_schema = current_schema() "
+                "AND table_name IN ("
+                + ", ".join(f"'{table_name}'" for table_name in REQUIRED_TABLES)
+                + ")"
+            )
+        )
+    ).all()
+    existing_columns: dict[str, set[str]] = {}
+    for table_name, column_name in column_rows:
+        existing_columns.setdefault(str(table_name), set()).add(str(column_name))
+    constraint_rows = (
+        await connection.execute(
+            text(
+                "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint "
+                "WHERE conrelid = 'sdk_log_reparse_jobs'::regclass"
+            )
+        )
+    ).all()
     return SchemaSnapshot(
         total_count=total_count,
         non_null_extra_count=non_null_extra_count,
@@ -301,6 +346,8 @@ async def read_snapshot(connection) -> SchemaSnapshot:
         existing_indexes={str(name) for name in index_rows},
         view_summaries={str(name): _summary(str(definition)) for name, definition in view_rows},
         view_column_types={str(key): str(column_type) for key, column_type in view_column_rows},
+        existing_columns=existing_columns,
+        constraint_definitions={str(name): str(definition) for name, definition in constraint_rows},
     )
 
 
