@@ -39,11 +39,12 @@ class FakeDb:
             params = statement.compile(dialect=postgresql.dialect()).params
             table_name = statement.table.name
             if table_name == "sdk_package_profiles":
+                current = self.profile or SimpleNamespace(alias=None, company=None, account=None)
                 self.profile = SimpleNamespace(
                     package_name=params["package_name"],
-                    alias=params.get("alias"),
-                    company=params.get("company"),
-                    account=params.get("account"),
+                    alias=params.get("alias", current.alias),
+                    company=params.get("company", current.company),
+                    account=params.get("account", current.account),
                 )
             elif table_name == "sdk_admin_preferences":
                 self.preference = SimpleNamespace(
@@ -58,6 +59,9 @@ class FakeDb:
 
     async def rollback(self):
         self.rollbacks += 1
+
+    async def flush(self):
+        pass
 
 
 class Result:
@@ -166,27 +170,25 @@ def test_package_profile_upsert_creates_updates_and_can_clear_values():
         log_analysis_service.upsert_package_profile(
             db,
             "COM.Example.App",
-            alias=" Alias ",
-            company=" Example Company ",
-            account=" account-1 ",
+            updates={
+                "alias": " Alias ",
+                "company": " Example Company ",
+                "account": " account-1 ",
+            },
         )
     )
     second = asyncio.run(
         log_analysis_service.upsert_package_profile(
             db,
             "com.example.app",
-            alias="New Alias",
-            company="",
-            account="",
+            updates={"alias": "New Alias", "company": "", "account": ""},
         )
     )
     third = asyncio.run(
         log_analysis_service.upsert_package_profile(
             db,
             "com.example.app",
-            alias="",
-            company="",
-            account="",
+            updates={"alias": "", "company": "", "account": ""},
         )
     )
 
@@ -197,9 +199,40 @@ def test_package_profile_upsert_creates_updates_and_can_clear_values():
     assert db.profile.alias is None
     assert db.profile.company is None
     assert db.profile.account is None
-    profile_sql = str(db.statements[-1].compile(dialect=postgresql.dialect()))
+    profile_sql = str(next(statement for statement in reversed(db.statements) if isinstance(statement, Insert)).compile(dialect=postgresql.dialect()))
     assert "ON CONFLICT (package_name) DO UPDATE" in profile_sql
     assert len([statement for statement in db.statements if isinstance(statement, Insert)]) == 3
+
+
+def test_partial_profile_update_does_not_overwrite_omitted_fields():
+    from app.services import log_analysis_service
+
+    existing = SimpleNamespace(
+        package_name="com.example.app",
+        alias="Old",
+        company="Keep Co",
+        account="keep-account",
+    )
+    db = FakeDb(profile=existing)
+    result = asyncio.run(
+        log_analysis_service.upsert_package_profile(
+            db,
+            "com.example.app",
+            updates={"alias": "New"},
+        )
+    )
+
+    statement = next(item for item in db.statements if isinstance(item, Insert))
+    compiled = str(statement.compile(dialect=postgresql.dialect()))
+    assert "alias = excluded.alias" in compiled.lower()
+    assert "company = excluded.company" not in compiled.lower()
+    assert "account = excluded.account" not in compiled.lower()
+    assert result == {
+        "package_name": "com.example.app",
+        "alias": "New",
+        "company": "Keep Co",
+        "account": "keep-account",
+    }
 
 
 def test_package_profile_rejects_invalid_package_name():

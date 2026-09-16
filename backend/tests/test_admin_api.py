@@ -10,6 +10,75 @@ def _auth_headers(token: str = "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0") -> di
     return {"Authorization": f"Bearer {token}"}
 
 
+class _CommitSession:
+    def __init__(self):
+        self.committed = False
+
+    async def commit(self):
+        self.committed = True
+
+    async def rollback(self):
+        pass
+
+
+def test_package_profile_update_rejects_empty_object():
+    from app.admin_main import app
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/admin/package-profiles/com.example.app",
+            headers=_auth_headers(),
+            json={},
+        )
+
+    assert response.status_code == 422
+
+
+def test_package_profile_update_accepts_explicit_empty_string(monkeypatch):
+    from app.admin_main import app
+    from app.api.admin import log_analysis
+    from app.core.database import get_db_no_commit
+
+    session = _CommitSession()
+
+    async def override_db():
+        yield session
+
+    async def fake_upsert(_db: Any, package_name: str, *, updates: dict[str, str | None]):
+        assert package_name == "com.example.app"
+        assert updates == {"alias": ""}
+        return {"package_name": package_name, "alias": "", "company": "Keep", "account": "Keep"}
+
+    app.dependency_overrides[get_db_no_commit] = override_db
+    monkeypatch.setattr(log_analysis.log_analysis_service, "upsert_package_profile", fake_upsert)
+    try:
+        with TestClient(app) as client:
+            response = client.put(
+                "/api/admin/package-profiles/com.example.app",
+                headers=_auth_headers(),
+                json={"alias": ""},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["data"]["alias"] == ""
+    assert session.committed is True
+
+
+def test_package_profile_update_rejects_unknown_field():
+    from app.admin_main import app
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/admin/package-profiles/com.example.app",
+            headers=_auth_headers(),
+            json={"unknown": "value"},
+        )
+
+    assert response.status_code == 422
+
+
 def test_admin_summary_requires_bearer_token():
     from app.admin_main import app
 

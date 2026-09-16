@@ -54,12 +54,14 @@ async def put_package_profile(
 ):
     normalized = _normalize_package_or_422(package_name)
     try:
+        updates = {
+            field: getattr(payload, field)
+            for field in payload.model_fields_set
+        }
         data = await log_analysis_service.upsert_package_profile(
             db,
             normalized,
-            alias=payload.alias,
-            company=payload.company,
-            account=payload.account,
+            updates=updates,
         )
         await db.commit()
     except ValueError as exc:

@@ -50,6 +50,7 @@ DETAIL_SORT_COLUMNS = {
     "package_name": LogDecode.package_name,
 }
 DECODER_VERSION_PATTERN = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+PROFILE_FIELDS = frozenset({"alias", "company", "account"})
 
 
 def _profile_value(value: str | None) -> str | None:
@@ -80,34 +81,25 @@ async def upsert_package_profile(
     db: AsyncSession,
     package_name: str,
     *,
-    alias: str | None,
-    company: str | None,
-    account: str | None,
+    updates: dict[str, str | None],
 ) -> dict[str, str]:
     normalized = normalize_package_name(package_name)
-    values = {
-        "package_name": normalized,
-        "alias": _profile_value(alias),
-        "company": _profile_value(company),
-        "account": _profile_value(account),
-    }
-    statement = pg_insert(PackageProfile).values(values)
+    unknown = set(updates) - PROFILE_FIELDS
+    if unknown or not updates:
+        raise ValueError("包资料更新字段无效")
+    normalized_updates = {key: _profile_value(value) for key, value in updates.items()}
+    statement = pg_insert(PackageProfile).values(
+        package_name=normalized,
+        **normalized_updates,
+    )
     await db.execute(
         statement.on_conflict_do_update(
             index_elements=[PackageProfile.package_name],
-            set_={
-                "alias": statement.excluded.alias,
-                "company": statement.excluded.company,
-                "account": statement.excluded.account,
-            },
+            set_={key: getattr(statement.excluded, key) for key in normalized_updates},
         )
     )
-    return {
-        "package_name": normalized,
-        "alias": values["alias"] or "",
-        "company": values["company"] or "",
-        "account": values["account"] or "",
-    }
+    await db.flush()
+    return await get_package_profile(db, normalized)
 
 
 def validate_column_selection(columns: Sequence[str]) -> list[str]:

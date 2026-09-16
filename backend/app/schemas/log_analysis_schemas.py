@@ -11,9 +11,15 @@ from app.services.config_crypto import normalize_package_name
 class PackageProfileUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    alias: str = Field(default="", max_length=255)
-    company: str = Field(default="", max_length=255)
-    account: str = Field(default="", max_length=255)
+    alias: str | None = Field(default=None, max_length=255)
+    company: str | None = Field(default=None, max_length=255)
+    account: str | None = Field(default=None, max_length=255)
+
+    @model_validator(mode="after")
+    def require_one_field(self):
+        if not self.model_fields_set:
+            raise ValueError("至少提交一个包资料字段")
+        return self
 
 
 class PackageProfileResponse(BaseModel):
