@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import hashlib
 import os
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
@@ -30,6 +31,7 @@ REQUIRED_INDEXES = frozenset(
         "idx_log_reparse_jobs_range",
     }
 )
+REPARSE_STATUS_VALUES = frozenset({"pending", "running", "success", "failed", "cancelled"})
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,11 @@ def _summary(definition: str | None) -> str:
 
 def _quoted_identifier(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
+
+
+def _has_exact_reparse_status_constraint(definition: str) -> bool:
+    values = set(re.findall(r"'([^']+)'", definition))
+    return values == REPARSE_STATUS_VALUES
 
 
 DAILY_VIEW_SQL = """CREATE MATERIALIZED VIEW mv_daily_event_stats AS
@@ -101,7 +108,7 @@ CREATE_TABLE_STATEMENTS = [
     decoded_timestamp TIMESTAMPTZ,
     url              TEXT,
     config_id        INTEGER,
-    window           VARCHAR(32),
+    "window" VARCHAR(32),
     expected_click_count INTEGER,
     actual_click_count INTEGER,
     ad_click_count   INTEGER,
@@ -137,6 +144,8 @@ CREATE_TABLE_STATEMENTS = [
     range_end         TIMESTAMPTZ  NOT NULL,
     status_filter     VARCHAR(32),
     decoder_version_before VARCHAR(32),
+    lease_owner       VARCHAR(64),
+    lease_expires_at  TIMESTAMPTZ,
     cursor_event_id   BIGINT,
     cursor_server_ts  TIMESTAMPTZ,
     processed_count   BIGINT       NOT NULL DEFAULT 0,
@@ -178,6 +187,7 @@ def build_migration_statements(
 ) -> list[str]:
     statements: list[str] = []
     missing_tables = not set(REQUIRED_TABLES).issubset(existing_tables)
+    reparse_table_exists = "sdk_log_reparse_jobs" in existing_tables
     daily_view_stale = not view_summaries.get("mv_daily_event_stats", "").endswith("|tz:Asia/Shanghai")
     if view_column_types is None:
         hourly_view_stale = not view_summaries.get("mv_hourly_trend", "").endswith("|tz:Asia/Shanghai")
@@ -192,7 +202,7 @@ def build_migration_statements(
             for statement in REQUIRED_INDEX_STATEMENTS
             if _index_name(statement) not in existing_indexes
         )
-    if not missing_tables and existing_columns is not None:
+    if reparse_table_exists and existing_columns is not None:
         job_columns = existing_columns.get("sdk_log_reparse_jobs", set())
         if "status_filter" not in job_columns:
             statements.append(
@@ -202,14 +212,21 @@ def build_migration_statements(
             statements.append(
                 "ALTER TABLE sdk_log_reparse_jobs ADD COLUMN IF NOT EXISTS decoder_version_before VARCHAR(32)"
             )
-    if not missing_tables and constraint_definitions is not None:
+        if "lease_owner" not in job_columns:
+            statements.append(
+                "ALTER TABLE sdk_log_reparse_jobs ADD COLUMN IF NOT EXISTS lease_owner VARCHAR(64)"
+            )
+        if "lease_expires_at" not in job_columns:
+            statements.append(
+                "ALTER TABLE sdk_log_reparse_jobs ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ"
+            )
+    if reparse_table_exists and constraint_definitions is not None:
         definition = constraint_definitions.get("chk_log_reparse_jobs_status", "")
-        target_statuses = ("pending", "running", "success", "failed", "cancelled")
-        if "succeeded" in definition or not all(status in definition for status in target_statuses):
+        if not _has_exact_reparse_status_constraint(definition):
             statements.extend(
                 [
-                    "UPDATE sdk_log_reparse_jobs SET status = 'success' WHERE status = 'succeeded'",
                     "ALTER TABLE sdk_log_reparse_jobs DROP CONSTRAINT IF EXISTS chk_log_reparse_jobs_status",
+                    "UPDATE sdk_log_reparse_jobs SET status = 'success' WHERE status = 'succeeded'",
                     "ALTER TABLE sdk_log_reparse_jobs ADD CONSTRAINT chk_log_reparse_jobs_status CHECK (status IN ('pending', 'running', 'success', 'failed', 'cancelled'))",
                 ]
             )
@@ -330,7 +347,7 @@ async def read_snapshot(connection) -> SchemaSnapshot:
         await connection.execute(
             text(
                 "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint "
-                "WHERE conrelid = 'sdk_log_reparse_jobs'::regclass"
+                "WHERE conrelid = to_regclass('public.sdk_log_reparse_jobs')"
             )
         )
     ).all()
@@ -364,6 +381,24 @@ def verify_lossless(before: SchemaSnapshot, after: SchemaSnapshot) -> None:
     missing_indexes = REQUIRED_INDEXES - after.existing_indexes
     if missing_indexes:
         raise RuntimeError("迁移后缺少索引: " + ", ".join(sorted(missing_indexes)))
+    required_reparse_columns = {
+        "status_filter",
+        "decoder_version_before",
+        "lease_owner",
+        "lease_expires_at",
+    }
+    missing_reparse_columns = required_reparse_columns - after.existing_columns.get(
+        "sdk_log_reparse_jobs", set()
+    )
+    if missing_reparse_columns:
+        raise RuntimeError(
+            "迁移后重解析表缺少列: " + ", ".join(sorted(missing_reparse_columns))
+        )
+    constraint = after.constraint_definitions.get("chk_log_reparse_jobs_status", "")
+    if not _has_exact_reparse_status_constraint(constraint):
+        raise RuntimeError("迁移后重解析状态约束不是目标集合")
+    if after.view_column_types.get("mv_hourly_trend.hour") != "timestamp with time zone":
+        raise RuntimeError("迁移后小时列不是 timestamp with time zone")
 
 
 async def migrate(database_url: str, *, apply: bool) -> MigrationReport:

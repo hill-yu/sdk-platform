@@ -170,7 +170,6 @@ def test_migration_plan_builds_tables_indexes_and_beijing_views():
     assert "company           VARCHAR(255)" in sql
     assert "account           VARCHAR(255)" in sql
     assert "display_name" not in sql
-    assert "owner" not in sql
     assert "profile           JSONB" not in sql
     assert "CREATE TABLE IF NOT EXISTS sdk_admin_preferences" in sql
     assert "preference_key    VARCHAR(128) PRIMARY KEY" in sql
@@ -515,6 +514,145 @@ def test_snapshot_uses_non_empty_extra_predicate_for_null_blank_and_whitespace()
     assert "BTRIM(payload->>'extra') <> ''" in predicate
 
 
+def test_snapshot_does_not_use_regclass_cast_when_reparse_table_is_missing():
+    from scripts import migrate_log_analysis
+
+    class Connection:
+        async def execute(self, statement, params=None):
+            sql = str(statement)
+            if "pg_constraint" in sql:
+                assert "::regclass" not in sql
+                return _Result([])
+            if "payload->>'extra' IS NOT NULL" in sql:
+                return _Result([(0,)])
+            if "COUNT(*) FROM sdk_events" in sql:
+                return _Result([(0,)])
+            if "pg_inherits" in sql or "pg_matviews" in sql or "pg_indexes" in sql:
+                return _Result([])
+            if "pg_attribute" in sql or "information_schema.columns" in sql:
+                return _Result([])
+            if "to_regclass" in sql:
+                return _Result([(None,)])
+            raise AssertionError(sql)
+
+    snapshot = asyncio.run(migrate_log_analysis.read_snapshot(Connection()))
+
+    assert snapshot.existing_tables == set()
+
+
+def test_existing_reparse_table_is_upgraded_when_other_required_tables_are_missing():
+    from scripts.migrate_log_analysis import build_migration_statements
+
+    statements = build_migration_statements(
+        existing_tables={"sdk_log_reparse_jobs"},
+        existing_indexes=set(),
+        view_summaries={},
+        existing_columns={"sdk_log_reparse_jobs": set()},
+        constraint_definitions={
+            "chk_log_reparse_jobs_status":
+            "CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'cancelled'))"
+        },
+    )
+
+    sql = "\n".join(statements)
+    assert "ADD COLUMN IF NOT EXISTS status_filter VARCHAR(32)" in sql
+    assert "ADD COLUMN IF NOT EXISTS decoder_version_before VARCHAR(32)" in sql
+    assert "ADD COLUMN IF NOT EXISTS lease_owner VARCHAR(64)" in sql
+    assert "ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ" in sql
+
+
+def test_status_constraint_migration_drops_updates_then_adds():
+    from scripts.migrate_log_analysis import build_migration_statements
+
+    statements = build_migration_statements(
+        existing_tables={"sdk_log_reparse_jobs"},
+        existing_indexes=set(),
+        view_summaries={},
+        existing_columns={
+            "sdk_log_reparse_jobs": {
+                "status_filter",
+                "decoder_version_before",
+                "lease_owner",
+                "lease_expires_at",
+            }
+        },
+        constraint_definitions={
+            "chk_log_reparse_jobs_status":
+            "CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'cancelled'))"
+        },
+    )
+
+    drop = next(i for i, statement in enumerate(statements) if "DROP CONSTRAINT" in statement)
+    update = next(i for i, statement in enumerate(statements) if "SET status = 'success'" in statement)
+    add = next(i for i, statement in enumerate(statements) if "ADD CONSTRAINT" in statement)
+    assert drop < update < add
+
+
+def test_verify_lossless_requires_reparse_postconditions_and_timezone_hour():
+    from scripts.migrate_log_analysis import REQUIRED_TABLES, SchemaSnapshot, verify_lossless
+
+    common = dict(
+        total_count=1,
+        non_null_extra_count=1,
+        partition_counts={"sdk_events_202609": 1},
+        existing_tables=set(REQUIRED_TABLES),
+        existing_indexes=set(REQUIRED_LOG_ANALYSIS_INDEXES),
+        view_summaries={},
+        existing_columns={
+            "sdk_log_reparse_jobs": {
+                "status_filter",
+                "decoder_version_before",
+                "lease_owner",
+                "lease_expires_at",
+            }
+        },
+        constraint_definitions={
+            "chk_log_reparse_jobs_status":
+            "CHECK (status IN ('pending', 'running', 'success', 'failed', 'cancelled'))"
+        },
+        view_column_types={"mv_hourly_trend.hour": "timestamp with time zone"},
+    )
+
+    verify_lossless(SchemaSnapshot(**common), SchemaSnapshot(**common))
+
+
+def test_verify_lossless_rejects_status_constraint_with_extra_value():
+    from scripts.migrate_log_analysis import REQUIRED_TABLES, SchemaSnapshot, verify_lossless
+
+    snapshot = SchemaSnapshot(
+        total_count=1,
+        non_null_extra_count=1,
+        partition_counts={"sdk_events_202609": 1},
+        existing_tables=set(REQUIRED_TABLES),
+        existing_indexes=set(REQUIRED_LOG_ANALYSIS_INDEXES),
+        view_summaries={},
+        existing_columns={
+            "sdk_log_reparse_jobs": {
+                "status_filter",
+                "decoder_version_before",
+                "lease_owner",
+                "lease_expires_at",
+            }
+        },
+        constraint_definitions={
+            "chk_log_reparse_jobs_status":
+            "CHECK (status IN ('pending', 'running', 'success', 'failed', 'cancelled', 'other'))"
+        },
+        view_column_types={"mv_hourly_trend.hour": "timestamp with time zone"},
+    )
+
+    with pytest.raises(RuntimeError, match="状态约束"):
+        verify_lossless(snapshot, snapshot)
+
+
+def test_log_decode_window_is_quoted_in_raw_install_sql():
+    init_sql = open("scripts/init_db.sql", encoding="utf-8").read()
+    migration_sql = open("scripts/migrate_log_analysis.py", encoding="utf-8").read()
+
+    assert '"window" VARCHAR(32)' in init_sql
+    assert '"window" VARCHAR(32)' in migration_sql
+
+
 def _snapshot(*, total=3, non_null=3, partitions=None, indexes=None):
     from scripts.migrate_log_analysis import REQUIRED_TABLES, SchemaSnapshot
 
@@ -623,8 +761,29 @@ class _ApplyConnection:
         if "pg_attribute" in sql:
             return _Result([("mv_hourly_trend.hour", "timestamp with time zone")])
         if "information_schema.columns" in sql:
+            if self.ddl:
+                return _Result(
+                    [
+                        ("sdk_log_reparse_jobs", column)
+                        for column in (
+                            "status_filter",
+                            "decoder_version_before",
+                            "lease_owner",
+                            "lease_expires_at",
+                        )
+                    ]
+                )
             return _Result([])
         if "pg_constraint" in sql:
+            if self.ddl:
+                return _Result(
+                    [
+                        (
+                            "chk_log_reparse_jobs_status",
+                            "CHECK (status IN ('pending', 'running', 'success', 'failed', 'cancelled'))",
+                        )
+                    ]
+                )
             return _Result([])
         if "to_regclass" in sql:
             table = params["relation"].split(".")[-1]

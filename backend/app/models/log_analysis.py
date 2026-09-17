@@ -82,6 +82,8 @@ class LogReparseJob(Base):
     range_end = Column(DateTime(timezone=True), nullable=False)
     status_filter = Column(String(32))
     decoder_version_before = Column(String(32))
+    lease_owner = Column(String(64))
+    lease_expires_at = Column(DateTime(timezone=True))
     cursor_event_id = Column(BigInteger)
     cursor_server_ts = Column(DateTime(timezone=True))
     processed_count = Column(BigInteger, nullable=False, default=0)
