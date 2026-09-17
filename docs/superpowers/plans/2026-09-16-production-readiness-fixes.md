@@ -4,7 +4,7 @@
 
 **目标：** 修复 24 小时趋势时区类型、包资料部分更新和日志重解析任务闭环，使当前日志分析与批量导出集成分支达到可发布状态。
 
-**架构：** PostgreSQL 以带时区小时桶提供趋势数据；包资料接口根据 Pydantic 实际提交字段做列级 upsert；新增有界重解析 worker，复用现有解码投影函数，以任务行锁、稳定游标和逐批事务驱动执行。数据库变更通过现有幂等迁移脚本完成。
+**架构：** PostgreSQL 以带时区小时桶提供趋势数据；包资料接口根据 Pydantic 实际提交字段做列级 upsert；新增有界重解析 worker，复用现有解码投影函数，以任务行锁、稳定游标、owner 校验的十分钟租约和逐批事务驱动执行。数据库变更通过现有幂等迁移脚本完成；旧状态约束按 DROP、UPDATE、ADD 顺序迁移。
 
 **技术栈：** Python 3.12、FastAPI、Pydantic 2、SQLAlchemy 2 async、PostgreSQL 16、pytest、Vue 3、Vitest、Vite。
 

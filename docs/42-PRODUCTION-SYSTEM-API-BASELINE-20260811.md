@@ -19,3 +19,11 @@ POST /api/admin/log-analysis/reparse
 接口创建有界异步任务。任务保存全部筛选条件，由 admin 后台 worker 按批执行。任务状态为：`pending`、`running`、`success`、`failed`、`cancelled`。
 
 重解析筛选条件包括北京时间自然日范围、精确包名、现有解析状态和三段整数解析器版本上限。任务不保存原始日志内容；批处理复用现有日志解码与投影逻辑。
+
+`sdk_log_reparse_jobs` 使用 `lease_owner VARCHAR(64)` 和
+`lease_expires_at TIMESTAMPTZ` 实现多实例租约。worker ID 在 worker 进程内稳定；领取时在
+`FOR UPDATE SKIP LOCKED` 下选择 `pending` 或已过期的 `running` 任务，写入 10 分钟租约，且不重置已有游标。
+批处理、续租以及 `success`/`failed` 状态推进都必须带当前 owner 条件；租约失效的旧 owner 不得推进游标、计数或覆盖终态。
+
+旧状态约束迁移顺序固定为：删除旧约束，先将历史 `succeeded` 更新为 `success`，再添加
+`pending/running/success/failed/cancelled` 目标约束。重复 dry-run 不应再次生成这些变更。

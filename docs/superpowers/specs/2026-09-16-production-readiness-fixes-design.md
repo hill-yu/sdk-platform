@@ -61,17 +61,18 @@ Pydantic 字段默认值改为 `None`，路由使用 `payload.model_fields_set` 
 - `status_filter VARCHAR(32)`：创建任务时的日志解析状态筛选；
 - `decoder_version_before VARCHAR(32)`：创建任务时的解析器版本筛选。
 
-任务状态统一为：`pending`、`running`、`success`、`failed`、`cancelled`。迁移先把历史 `succeeded` 改为 `success`，再替换约束，保证已有数据可迁移。
+任务状态统一为：`pending`、`running`、`success`、`failed`、`cancelled`。迁移必须先删除旧约束，再把历史 `succeeded` 改为 `success`，最后添加目标约束，保证已有数据可迁移。
+表同时增加 `lease_owner VARCHAR(64)` 和 `lease_expires_at TIMESTAMPTZ`，用于多实例安全租约。
 
 ### 执行模型
 
 新增专用 `log_reparse_service`：
 
-1. 用 `FOR UPDATE SKIP LOCKED` 领取一个 pending 任务并置为 running；
+1. 用 `FOR UPDATE SKIP LOCKED` 领取一个 pending 或租约已过期的 running 任务并置为 running；worker ID 在进程内稳定，领取时写入 owner 和 10 分钟 expiry，保留已有游标；
 2. 按 `(server_ts, id)` 稳定游标读取最多 50 条符合范围、包名、状态和解析器版本的日志事件；
 3. 对每条事件调用现有 `build_decoded_values()` 和 `upsert_decoded_values()`，先删除该事件旧解析结果再写入新结果；
 4. 每批更新游标和累计计数并提交，避免长事务；
-5. 无更多记录时置为 success；异常时写入脱敏且限长的 `error_summary` 并置为 failed；
+5. 每批处理和续租都校验当前 owner；无更多记录时仅由当前 owner 清租约并置为 success；异常时仅由当前 owner 写入脱敏且限长的 `error_summary`、清租约并置为 failed；租约失效的旧 owner 不得推进游标、计数或覆盖任务；
 6. 不复制、不记录原始 `extra`，只从现有 `sdk_events.payload` 读取。
 
 Admin API lifespan 启动独立重解析循环；取消服务时与 ETL、在线解析循环一起有序退出。单实例和多实例都依赖行锁避免重复领取。
