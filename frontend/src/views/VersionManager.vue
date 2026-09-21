@@ -282,6 +282,8 @@ onMounted(loadVersions);
 
 .dialog {
   width: min(780px, 100%);
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
   padding: 22px;
   border-radius: 24px;
   background: var(--panel-bg);

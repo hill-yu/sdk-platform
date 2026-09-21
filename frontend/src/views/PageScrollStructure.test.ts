@@ -31,6 +31,7 @@ import Dashboard from "@/views/Dashboard.vue";
 import ConfigManager from "@/views/ConfigManager.vue";
 import LogViewer from "@/views/LogViewer.vue";
 import VersionManager from "@/views/VersionManager.vue";
+import versionManagerSource from "@/views/VersionManager.vue?raw";
 
 describe("page wide-content scroll boundaries", () => {
   it("keeps dashboard events inside table-scroll", async () => {
@@ -49,6 +50,11 @@ describe("page wide-content scroll boundaries", () => {
     const wrapper = mount(VersionManager);
     await flushPromises();
     expect(wrapper.find(".table-scroll").exists()).toBe(true);
+  });
+
+  it("keeps the version dialog within the viewport and scrollable", () => {
+    expect(versionManagerSource).toContain("max-height: calc(100dvh - 40px);");
+    expect(versionManagerSource).toContain("overflow: auto;");
   });
 
   it("keeps analysis and raw log table containers", async () => {
