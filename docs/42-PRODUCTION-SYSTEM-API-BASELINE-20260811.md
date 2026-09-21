@@ -27,3 +27,26 @@ POST /api/admin/log-analysis/reparse
 
 旧状态约束迁移顺序固定为：删除旧约束，先将历史 `succeeded` 更新为 `success`，再添加
 `pending/running/success/failed/cancelled` 目标约束。重复 dry-run 不应再次生成这些变更。
+
+## 管理端原始事件接口
+
+### 事件筛选选项
+
+```http
+GET /api/admin/events/filter-options
+```
+
+可选查询参数为 `package_name`。响应使用 `code=0` 包装，`data` 包含
+`package_names` 和 `sdk_versions` 两个数组。两个数组均按数据库值去重、升序排列；传入
+`package_name` 时，`sdk_versions` 只包含该包名的日志版本。选项仅来自 `event_type = log`
+的事件，空包名、空版本和空结果不会伪造默认值。
+
+### 事件列表
+
+```http
+GET /api/admin/events
+```
+
+新增可选查询参数 `sdk_version`，按 `sdk_events.sdk_version` 精确匹配。事件类型、日志级别、
+包名、设备 ID、北京时间自然日范围、排序、分页及响应字段保持原有语义；多个筛选条件使用
+`AND` 组合。
