@@ -65,24 +65,56 @@ def _quoted_identifier(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
 
 
+def _strip_redundant_parentheses(expression: str) -> str:
+    while expression.startswith("(") and expression.endswith(")"):
+        depth = 0
+        quote = False
+        closes_at = None
+        index = 0
+        while index < len(expression):
+            character = expression[index]
+            if character == "'":
+                if quote and index + 1 < len(expression) and expression[index + 1] == "'":
+                    index += 2
+                    continue
+                quote = not quote
+            elif not quote:
+                if character == "(":
+                    depth += 1
+                elif character == ")":
+                    depth -= 1
+                    if depth == 0:
+                        closes_at = index
+                        break
+            index += 1
+        if closes_at != len(expression) - 1:
+            break
+        expression = expression[1:-1].strip()
+    return expression
+
+
 def _is_target_reparse_status_constraint(definition: str) -> bool:
     """Return whether a constraint is the positive target status CHECK."""
     normalized = " ".join(definition.strip().split())
-    upper = normalized.upper()
-    if not upper.startswith("CHECK") or not re.search(r"\bSTATUS\b", upper):
-        return False
-    if re.search(r"\bNOT\b|<>|!=|\bALL\b", upper):
+    check_match = re.fullmatch(r"CHECK\s*(.*)", normalized, flags=re.IGNORECASE)
+    if check_match is None:
         return False
 
-    positive_in = re.search(r"\bSTATUS\b.*\bIN\s*\(", upper)
-    positive_any = re.search(r"\bSTATUS\b.*=\s*ANY\s*\(", upper)
-    if not (positive_in or positive_any):
+    expression = _strip_redundant_parentheses(check_match.group(1))
+    in_match = re.fullmatch(
+        r"status\s+IN\s*\((.*)\)", expression, flags=re.IGNORECASE
+    )
+    any_match = re.fullmatch(
+        r"\(?status\)?\s*(?:::\s*[A-Za-z_]\w*(?:\[\])?)*\s*=\s*ANY\s*\((.*)\)",
+        expression,
+        flags=re.IGNORECASE,
+    )
+    value_expression = (
+        in_match.group(1) if in_match is not None else any_match.group(1) if any_match else None
+    )
+    if value_expression is None:
         return False
-    if re.search(r"\bAND\b|\bOR\b", upper):
-        return False
-
-    values = set(re.findall(r"'([^']+)'", normalized))
-    return values == REPARSE_STATUS_VALUES
+    return set(re.findall(r"'([^']+)'", value_expression)) == REPARSE_STATUS_VALUES
 
 
 def _has_exact_reparse_status_constraint(definition: str) -> bool:

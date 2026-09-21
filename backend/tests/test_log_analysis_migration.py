@@ -696,6 +696,37 @@ def test_reverse_status_constraint_is_not_the_target_constraint():
         migrate_log_analysis.verify_lossless(snapshot, snapshot)
 
 
+@pytest.mark.parametrize(
+    "definition",
+    [
+        "CHECK ((status IN ('pending', 'running', 'success', 'failed', 'cancelled')) IS FALSE)",
+        "CHECK ((status IN ('pending', 'running', 'success', 'failed', 'cancelled')) = FALSE)",
+        "CHECK ((status IN ('pending', 'running', 'success', 'failed', 'cancelled')) IS NULL)",
+        "CHECK (NOT (status IN ('pending', 'running', 'success', 'failed', 'cancelled')))",
+        "CHECK ((status = ANY (ARRAY['pending', 'running', 'success', 'failed', 'cancelled'])) IS FALSE)",
+        "CHECK ((status = ANY (ARRAY['pending', 'running', 'success', 'failed', 'cancelled'])) = FALSE)",
+        "CHECK ((status = ANY (ARRAY['pending', 'running', 'success', 'failed', 'cancelled'])) IS NULL)",
+        "CHECK (NOT (status = ANY (ARRAY['pending', 'running', 'success', 'failed', 'cancelled'])))",
+    ],
+)
+def test_boolean_wrapped_status_constraints_are_rejected(definition):
+    from scripts import migrate_log_analysis
+
+    assert not migrate_log_analysis._is_target_reparse_status_constraint(definition)
+
+
+def test_postgresql_positive_any_status_constraint_is_accepted():
+    from scripts import migrate_log_analysis
+
+    definition = (
+        "CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, "
+        "'running'::character varying, 'success'::character varying, "
+        "'failed'::character varying, 'cancelled'::character varying])::text[])))"
+    )
+
+    assert migrate_log_analysis._is_target_reparse_status_constraint(definition)
+
+
 def test_log_decode_window_is_quoted_in_raw_install_sql():
     init_sql = open("scripts/init_db.sql", encoding="utf-8").read()
     migration_sql = open("scripts/migrate_log_analysis.py", encoding="utf-8").read()
