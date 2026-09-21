@@ -106,7 +106,14 @@
     <template v-else>
       <section class="panel filters-panel">
         <div class="filters">
-          <input v-model="rawFilters.package_name" data-testid="package-filter" type="text" placeholder="package_name" />
+          <select v-model="rawFilters.package_name" data-testid="package-filter" :aria-busy="filterOptionsLoading" @change="changePackageFilter(rawFilters.package_name)">
+            <option value="">全部包名</option>
+            <option v-for="packageName in filterOptions.package_names" :key="packageName" :value="packageName">{{ packageName }}</option>
+          </select>
+          <select v-model="rawFilters.sdk_version" data-testid="sdk-version-filter" :disabled="!rawFilters.package_name || filterOptionsLoading">
+            <option value="">全部 SDK 版本</option>
+            <option v-for="sdkVersion in filterOptions.sdk_versions" :key="sdkVersion" :value="sdkVersion">{{ sdkVersion }}</option>
+          </select>
           <select v-model="rawFilters.log_level" data-testid="level-filter"><option value="">全部级别</option><option value="debug">debug</option><option value="info">info</option><option value="warn">warn</option><option value="error">error</option></select>
           <input v-model="rawFilters.device_id" data-testid="device-filter" type="text" placeholder="device_id" />
           <input v-model="rawFilters.date_from" data-testid="date-from-filter" type="date" />
@@ -115,6 +122,7 @@
           <button data-testid="refresh-button" class="ghost" type="button" @click="loadLogs()">刷新</button>
         </div>
         <p class="timezone-note">日期按北京时间筛选，包名、设备 ID 和日志级别为完全匹配。</p>
+        <p v-if="filterOptionsError" data-testid="filter-options-error" class="feedback error">{{ filterOptionsError }}</p>
         <LogExportPanel
           :device-id="rawFilters.device_id"
           :log-level="rawFilters.log_level as '' | LogLevel"
@@ -150,8 +158,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 
-import { getEvents } from "@/api/dashboard";
-import type { EventItem, EventQuery, LogLevel } from "@/api/dashboard";
+import { getEventFilterOptions, getEvents } from "@/api/dashboard";
+import type { EventFilterOptions, EventItem, EventQuery, LogLevel } from "@/api/dashboard";
 import { getLogAnalysisColumns, getLogAnalysisDetail, getLogAnalysisDetails, getLogAnalysisSummary, putLogAnalysisColumns } from "@/api/logAnalysis";
 import type { DetailKey, DetailsQuery, LogAnalysisColumns, LogAnalysisSummaryItem, LogDecodeItem, SummaryQuery } from "@/api/logAnalysis";
 import LogAnalysisDetail from "@/components/LogAnalysisDetail.vue";
@@ -283,12 +291,39 @@ async function saveColumns(columns: string[]) {
   finally { columnSaving.value = false; }
 }
 
-const rawFilters = reactive({ package_name: "", device_id: "", log_level: "", date_from: "", date_to: "" });
+const rawFilters = reactive({ package_name: "", sdk_version: "", device_id: "", log_level: "", date_from: "", date_to: "" });
+const filterOptions = reactive<EventFilterOptions>({ package_names: [], sdk_versions: [] });
+const filterOptionsError = ref("");
+const filterOptionsLoading = ref(false);
+let filterOptionsRequestSequence = 0;
 const rawResult = reactive({ total: 0, items: [] as EventItem[] });
 const rawPage = ref(1); const rawRequestedPage = ref(1); const rawPageSize = 20; const selected = ref<EventItem | null>(null); let rawRequestSequence = 0;
 function display(value: unknown): string { return value == null || value === "" ? "-" : String(value); }
 function levelClass(value: unknown): string { return typeof value === "string" ? `level-${value}` : "level-unknown"; }
-function rawQueryParams(targetPage: number): EventQuery { return { page: targetPage, page_size: rawPageSize, event_type: "log", package_name: rawFilters.package_name || undefined, device_id: rawFilters.device_id || undefined, log_level: (rawFilters.log_level || undefined) as LogLevel | undefined, date_from: rawFilters.date_from || undefined, date_to: rawFilters.date_to || undefined }; }
+function rawQueryParams(targetPage: number): EventQuery { return { page: targetPage, page_size: rawPageSize, event_type: "log", package_name: rawFilters.package_name || undefined, sdk_version: rawFilters.sdk_version || undefined, device_id: rawFilters.device_id || undefined, log_level: (rawFilters.log_level || undefined) as LogLevel | undefined, date_from: rawFilters.date_from || undefined, date_to: rawFilters.date_to || undefined }; }
+async function loadFilterOptions(packageName?: string): Promise<void> {
+  const requestSequence = ++filterOptionsRequestSequence;
+  filterOptionsLoading.value = true;
+  filterOptionsError.value = "";
+  try {
+    const response = await getEventFilterOptions(packageName || undefined);
+    if (requestSequence !== filterOptionsRequestSequence) return;
+    const data = responseData<EventFilterOptions>(response);
+    filterOptions.package_names = data.package_names;
+    filterOptions.sdk_versions = packageName ? data.sdk_versions : [];
+    if (rawFilters.sdk_version && !filterOptions.sdk_versions.includes(rawFilters.sdk_version)) rawFilters.sdk_version = "";
+  } catch {
+    if (requestSequence === filterOptionsRequestSequence) filterOptionsError.value = "包名和 SDK 版本选项加载失败，可继续查看日志并使用其他筛选条件；请刷新重试。";
+  } finally {
+    if (requestSequence === filterOptionsRequestSequence) filterOptionsLoading.value = false;
+  }
+}
+function changePackageFilter(packageName: string): void {
+  rawFilters.package_name = packageName;
+  rawFilters.sdk_version = "";
+  filterOptions.sdk_versions = [];
+  void loadFilterOptions(packageName || undefined);
+}
 async function loadLogs(options: { resetPage?: boolean; targetPage?: number } = {}): Promise<void> {
   const targetPage = options.resetPage ? 1 : (options.targetPage ?? rawPage.value); rawRequestedPage.value = targetPage; const requestSequence = ++rawRequestSequence; beginFeedback(feedback);
   try { const response = await getEvents(rawQueryParams(targetPage)); if (requestSequence !== rawRequestSequence) return; rawResult.total = response.data.total; rawResult.items = response.data.items; rawPage.value = targetPage; rawRequestedPage.value = targetPage; if (selected.value) selected.value = rawResult.items.find((item) => item.id === selected.value?.id) ?? null; }
@@ -296,7 +331,7 @@ async function loadLogs(options: { resetPage?: boolean; targetPage?: number } = 
 }
 const rawTotalPages = computed(() => Math.max(1, Math.ceil(rawResult.total / rawPageSize)));
 async function changePage(nextPage: number): Promise<void> { const boundedPage = Math.min(rawTotalPages.value, Math.max(1, nextPage)); if (boundedPage !== rawRequestedPage.value) await loadLogs({ targetPage: boundedPage }); }
-function switchView(nextView: View) { view.value = nextView; if (nextView === "raw" && rawRequestSequence === 0) void loadLogs(); }
+function switchView(nextView: View) { view.value = nextView; if (nextView === "raw" && rawRequestSequence === 0) { void loadFilterOptions(); void loadLogs(); } }
 function showCopySuccess(): void { setFeedbackSuccess(feedback, "extra 复制成功"); }
 function showCopyError(message: string): void { setFeedbackError(feedback, message); }
 onMounted(loadAnalysisInitial);

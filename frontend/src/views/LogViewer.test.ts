@@ -5,6 +5,7 @@ import type { EventItem } from "@/api/dashboard";
 
 const {
   getEvents,
+  getEventFilterOptions,
   getLogAnalysisColumns,
   getLogAnalysisSummary,
   getLogAnalysisDetails,
@@ -13,6 +14,7 @@ const {
   putPackageProfile,
 } = vi.hoisted(() => ({
   getEvents: vi.fn(),
+  getEventFilterOptions: vi.fn(),
   getLogAnalysisColumns: vi.fn(),
   getLogAnalysisSummary: vi.fn(),
   getLogAnalysisDetails: vi.fn(),
@@ -22,7 +24,7 @@ const {
 }));
 vi.mock("@/api/dashboard", async () => {
   const actual = await vi.importActual<typeof import("@/api/dashboard")>("@/api/dashboard");
-  return { ...actual, getEvents };
+  return { ...actual, getEvents, getEventFilterOptions };
 });
 vi.mock("@/api/logAnalysis", () => ({
   getLogAnalysisColumns,
@@ -58,6 +60,15 @@ function makeItem(overrides: Partial<EventItem> = {}): EventItem {
 
 function respond(items: EventItem[] = [makeItem()], total = items.length) {
   getEvents.mockResolvedValue({ data: { total, items } });
+}
+
+function respondFilterOptions() {
+  getEventFilterOptions.mockResolvedValue({
+    data: {
+      package_names: ["com.example.app", "com.example.other"],
+      sdk_versions: ["1.2.3", "1.4.0"],
+    },
+  });
 }
 
 function respondAnalysis() {
@@ -108,6 +119,7 @@ describe("LogViewer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     respond();
+    respondFilterOptions();
     respondAnalysis();
   });
 
@@ -202,7 +214,7 @@ describe("LogViewer", () => {
       event_type: "log",
     }));
 
-    await wrapper.get("[data-testid='package-filter']").setValue("com.filtered.app");
+    await wrapper.get("[data-testid='package-filter']").setValue("com.example.other");
     await wrapper.get("[data-testid='device-filter']").setValue("device-9");
     await wrapper.get("[data-testid='level-filter']").setValue("error");
     await wrapper.get("[data-testid='date-from-filter']").setValue("2026-08-01");
@@ -214,7 +226,8 @@ describe("LogViewer", () => {
       page: 1,
       page_size: 20,
       event_type: "log",
-      package_name: "com.filtered.app",
+      package_name: "com.example.other",
+      sdk_version: undefined,
       device_id: "device-9",
       log_level: "error",
       date_from: "2026-08-01",
@@ -222,21 +235,92 @@ describe("LogViewer", () => {
     });
   });
 
+  it("clears sdk version when package changes and sends exact filters", async () => {
+    const wrapper = await mountViewer();
+
+    await wrapper.get("[data-testid='package-filter']").setValue("com.example.app");
+    await flushPromises();
+    await wrapper.get("[data-testid='sdk-version-filter']").setValue("1.4.0");
+    await wrapper.get("[data-testid='package-filter']").setValue("com.example.other");
+
+    expect(wrapper.get<HTMLSelectElement>("[data-testid='sdk-version-filter']").element.value).toBe("");
+    await wrapper.get("[data-testid='query-button']").trigger("click");
+    await flushPromises();
+
+    expect(getEvents).toHaveBeenLastCalledWith(expect.objectContaining({
+      page: 1,
+      page_size: 20,
+      event_type: "log",
+      package_name: "com.example.other",
+      sdk_version: undefined,
+    }));
+    expect(getEventFilterOptions).toHaveBeenLastCalledWith("com.example.other");
+  });
+
+  it("preserves sdk version and filters during pagination", async () => {
+    respond([makeItem()], 41);
+    const wrapper = await mountViewer();
+
+    await wrapper.get("[data-testid='package-filter']").setValue("com.example.app");
+    await flushPromises();
+    await wrapper.get("[data-testid='sdk-version-filter']").setValue("1.4.0");
+    await wrapper.get("[data-testid='query-button']").trigger("click");
+    await wrapper.get("[data-testid='next-page']").trigger("click");
+    await flushPromises();
+
+    expect(getEvents).toHaveBeenLastCalledWith(expect.objectContaining({
+      page: 2,
+      package_name: "com.example.app",
+      sdk_version: "1.4.0",
+    }));
+  });
+
+  it("keeps the log list usable when filter options fail", async () => {
+    getEventFilterOptions.mockRejectedValueOnce(new Error("options unavailable"));
+    const wrapper = await mountViewer();
+    await flushPromises();
+
+    expect(wrapper.get("[data-testid='filter-options-error']").text()).toContain("选项加载失败");
+    expect(wrapper.find("[data-testid='log-row']").exists()).toBe(true);
+    await wrapper.get("[data-testid='refresh-button']").trigger("click");
+    expect(getEvents).toHaveBeenCalled();
+  });
+
+  it("ignores a late package options response from an older request", async () => {
+    const oldOptions = deferred<{ data: { package_names: string[]; sdk_versions: string[] } }>();
+    const newOptions = deferred<{ data: { package_names: string[]; sdk_versions: string[] } }>();
+    getEventFilterOptions
+      .mockResolvedValueOnce({ data: { package_names: ["com.example.app", "com.example.other"], sdk_versions: [] } })
+      .mockReturnValueOnce(oldOptions.promise)
+      .mockReturnValueOnce(newOptions.promise);
+    const wrapper = await mountViewer();
+
+    await wrapper.get("[data-testid='package-filter']").setValue("com.example.app");
+    await wrapper.get("[data-testid='package-filter']").setValue("com.example.other");
+    newOptions.resolve({ data: { package_names: ["com.example.app", "com.example.other"], sdk_versions: ["2.0.0"] } });
+    await flushPromises();
+    oldOptions.resolve({ data: { package_names: ["com.example.app", "com.example.other"], sdk_versions: ["1.0.0"] } });
+    await flushPromises();
+
+    expect(wrapper.findAll("[data-testid='sdk-version-filter'] option").map((option) => option.text())).toContain("2.0.0");
+    expect(wrapper.findAll("[data-testid='sdk-version-filter'] option").map((option) => option.text())).not.toContain("1.0.0");
+  });
+
   it("resets the page only for a new query and refresh preserves filters and page", async () => {
     respond([makeItem()], 41);
     const wrapper = await mountViewer();
-    await wrapper.get("[data-testid='package-filter']").setValue("com.keep.app");
+    await wrapper.get("[data-testid='package-filter']").setValue("com.example.app");
     await wrapper.get("[data-testid='next-page']").trigger("click");
     await flushPromises();
-    expect(getEvents).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, package_name: "com.keep.app" }));
+    expect(getEvents).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, package_name: "com.example.app" }));
 
     await wrapper.get("[data-testid='refresh-button']").trigger("click");
     await flushPromises();
-    expect(getEvents).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, package_name: "com.keep.app" }));
+    expect(getEvents).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, package_name: "com.example.app" }));
 
     await wrapper.get("[data-testid='query-button']").trigger("click");
     await flushPromises();
-    expect(getEvents).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, package_name: "com.keep.app" }));
+    expect(getEvents).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, package_name: "com.example.app" }));
   });
 
   it("shows a selected log in the detail panel without expanding extra in the list", async () => {
