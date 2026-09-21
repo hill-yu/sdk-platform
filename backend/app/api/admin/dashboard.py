@@ -46,6 +46,7 @@ async def get_events(
     event_type: str | None = Query(None),
     log_level: Literal["debug", "info", "warn", "error"] | None = Query(None),
     package_name: str | None = Query(None),
+    sdk_version: str | None = Query(None),
     device_id: str | None = Query(None),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
@@ -58,8 +59,18 @@ async def get_events(
         event_type=event_type,
         log_level=log_level,
         package_name=package_name,
+        sdk_version=sdk_version,
         device_id=device_id,
         date_from=date_from,
         date_to=date_to,
     )
+    return {"code": 0, "data": data}
+
+
+@router.get("/events/filter-options")
+async def get_event_filter_options(
+    package_name: str | None = Query(None),
+    db: AsyncSession = Depends(get_db_no_commit),
+):
+    data = await analysis_service.get_event_filter_options(db, package_name=package_name)
     return {"code": 0, "data": data}

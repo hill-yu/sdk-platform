@@ -131,6 +131,54 @@ def test_admin_events_passes_valid_log_level_to_service(monkeypatch):
     assert response.status_code == 200
 
 
+def test_admin_events_passes_sdk_version_to_service(monkeypatch):
+    from app.admin_main import app
+    from app.api.admin import dashboard
+
+    async def fake_get_events(_db: Any, **filters: Any) -> dict[str, Any]:
+        assert filters["sdk_version"] == "1.4.0"
+        return {"total": 0, "page": 1, "page_size": 20, "items": []}
+
+    monkeypatch.setattr(dashboard.analysis_service, "get_events", fake_get_events)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/admin/events?sdk_version=1.4.0",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+
+
+def test_event_filter_options_returns_payload(monkeypatch):
+    from app.admin_main import app
+    from app.api.admin import dashboard
+
+    async def fake_options(_db: Any, *, package_name: str | None) -> dict[str, list[str]]:
+        assert package_name == "com.example.alpha"
+        return {
+            "package_names": ["com.example.alpha"],
+            "sdk_versions": ["1.2.0"],
+        }
+
+    monkeypatch.setattr(dashboard.analysis_service, "get_event_filter_options", fake_options)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/admin/events/filter-options?package_name=com.example.alpha",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "code": 0,
+        "data": {
+            "package_names": ["com.example.alpha"],
+            "sdk_versions": ["1.2.0"],
+        },
+    }
+
+
 def test_admin_events_rejects_invalid_log_level():
     from app.admin_main import app
 
