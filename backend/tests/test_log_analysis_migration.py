@@ -645,6 +645,57 @@ def test_verify_lossless_rejects_status_constraint_with_extra_value():
         verify_lossless(snapshot, snapshot)
 
 
+def test_reverse_status_constraint_is_not_the_target_constraint():
+    from scripts import migrate_log_analysis
+    from scripts.migrate_log_analysis import REQUIRED_TABLES, SchemaSnapshot
+
+    definition = "CHECK (status NOT IN ('pending', 'running', 'success', 'failed', 'cancelled'))"
+
+    assert not migrate_log_analysis._has_exact_reparse_status_constraint(definition)
+
+    statements = migrate_log_analysis.build_migration_statements(
+        existing_tables={"sdk_log_reparse_jobs"},
+        existing_columns={
+            "sdk_log_reparse_jobs": {
+                "status_filter",
+                "decoder_version_before",
+                "lease_owner",
+                "lease_expires_at",
+            }
+        },
+        constraint_definitions={"chk_log_reparse_jobs_status": definition},
+        existing_indexes=set(REQUIRED_LOG_ANALYSIS_INDEXES),
+        view_summaries={
+            "mv_daily_event_stats": "sha256:existing|tz:Asia/Shanghai",
+            "mv_hourly_trend": "sha256:existing|tz:Asia/Shanghai",
+        },
+        view_column_types={"mv_hourly_trend.hour": "timestamp with time zone"},
+    )
+
+    assert any("DROP CONSTRAINT" in statement for statement in statements)
+
+    snapshot = SchemaSnapshot(
+        total_count=1,
+        non_null_extra_count=1,
+        partition_counts={"sdk_events_202609": 1},
+        existing_tables=set(REQUIRED_TABLES),
+        existing_indexes=set(REQUIRED_LOG_ANALYSIS_INDEXES),
+        view_summaries={},
+        existing_columns={
+            "sdk_log_reparse_jobs": {
+                "status_filter",
+                "decoder_version_before",
+                "lease_owner",
+                "lease_expires_at",
+            }
+        },
+        constraint_definitions={"chk_log_reparse_jobs_status": definition},
+        view_column_types={"mv_hourly_trend.hour": "timestamp with time zone"},
+    )
+    with pytest.raises(RuntimeError, match="状态约束"):
+        migrate_log_analysis.verify_lossless(snapshot, snapshot)
+
+
 def test_log_decode_window_is_quoted_in_raw_install_sql():
     init_sql = open("scripts/init_db.sql", encoding="utf-8").read()
     migration_sql = open("scripts/migrate_log_analysis.py", encoding="utf-8").read()

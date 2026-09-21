@@ -278,7 +278,7 @@ def test_success_clears_lease_after_owner_validation():
 
 def test_renew_and_failure_clear_only_current_owner_lease():
     now = datetime(2026, 9, 17, 0, 0, tzinfo=timezone.utc)
-    job = make_job(lease_owner="worker-a", lease_expires_at=now)
+    job = make_job(lease_owner="worker-a", lease_expires_at=now + timedelta(seconds=1))
     db = FailureDb(job)
 
     renewed = asyncio.run(
@@ -297,6 +297,29 @@ def test_renew_and_failure_clear_only_current_owner_lease():
     assert job.status == "failed"
     assert job.lease_owner is None
     assert job.lease_expires_at is None
+
+
+def test_expired_owner_cannot_renew_lease_and_sql_requires_future_expiry():
+    now = datetime(2026, 9, 17, 0, 0, tzinfo=timezone.utc)
+    job = make_job(lease_owner="worker-a", lease_expires_at=now)
+
+    class ExpiredLeaseDb(FailureDb):
+        async def execute(self, statement, *args, **kwargs):
+            self.statements.append(statement)
+            if isinstance(statement, Update):
+                return SimpleNamespace(rowcount=0)
+            return await super().execute(statement, *args, **kwargs)
+
+    db = ExpiredLeaseDb(job)
+    renewed = asyncio.run(
+        reparse_service.renew_reparse_job_lease(
+            db, job.id, worker_id="worker-a", now=now
+        )
+    )
+
+    assert renewed is False
+    sql = str(db.statements[0].compile(dialect=postgresql.dialect()))
+    assert "lease_expires_at >" in sql
 
 
 def test_batch_rejects_lease_that_expires_before_progress_update(monkeypatch):

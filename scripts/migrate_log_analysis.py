@@ -65,9 +65,29 @@ def _quoted_identifier(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
 
 
-def _has_exact_reparse_status_constraint(definition: str) -> bool:
-    values = set(re.findall(r"'([^']+)'", definition))
+def _is_target_reparse_status_constraint(definition: str) -> bool:
+    """Return whether a constraint is the positive target status CHECK."""
+    normalized = " ".join(definition.strip().split())
+    upper = normalized.upper()
+    if not upper.startswith("CHECK") or not re.search(r"\bSTATUS\b", upper):
+        return False
+    if re.search(r"\bNOT\b|<>|!=|\bALL\b", upper):
+        return False
+
+    positive_in = re.search(r"\bSTATUS\b.*\bIN\s*\(", upper)
+    positive_any = re.search(r"\bSTATUS\b.*=\s*ANY\s*\(", upper)
+    if not (positive_in or positive_any):
+        return False
+    if re.search(r"\bAND\b|\bOR\b", upper):
+        return False
+
+    values = set(re.findall(r"'([^']+)'", normalized))
     return values == REPARSE_STATUS_VALUES
+
+
+def _has_exact_reparse_status_constraint(definition: str) -> bool:
+    """Backward-compatible alias for the shared strict constraint check."""
+    return _is_target_reparse_status_constraint(definition)
 
 
 DAILY_VIEW_SQL = """CREATE MATERIALIZED VIEW mv_daily_event_stats AS
@@ -222,7 +242,7 @@ def build_migration_statements(
             )
     if reparse_table_exists and constraint_definitions is not None:
         definition = constraint_definitions.get("chk_log_reparse_jobs_status", "")
-        if not _has_exact_reparse_status_constraint(definition):
+        if not _is_target_reparse_status_constraint(definition):
             statements.extend(
                 [
                     "ALTER TABLE sdk_log_reparse_jobs DROP CONSTRAINT IF EXISTS chk_log_reparse_jobs_status",
@@ -395,7 +415,7 @@ def verify_lossless(before: SchemaSnapshot, after: SchemaSnapshot) -> None:
             "迁移后重解析表缺少列: " + ", ".join(sorted(missing_reparse_columns))
         )
     constraint = after.constraint_definitions.get("chk_log_reparse_jobs_status", "")
-    if not _has_exact_reparse_status_constraint(constraint):
+    if not _is_target_reparse_status_constraint(constraint):
         raise RuntimeError("迁移后重解析状态约束不是目标集合")
     if after.view_column_types.get("mv_hourly_trend.hour") != "timestamp with time zone":
         raise RuntimeError("迁移后小时列不是 timestamp with time zone")

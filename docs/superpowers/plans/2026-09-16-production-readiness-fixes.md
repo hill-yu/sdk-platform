@@ -406,8 +406,8 @@ ALTER TABLE sdk_log_reparse_jobs ADD COLUMN IF NOT EXISTS decoder_version_before
 旧约束不是目标约束时按顺序追加：
 
 ```sql
-UPDATE sdk_log_reparse_jobs SET status = 'success' WHERE status = 'succeeded'
 ALTER TABLE sdk_log_reparse_jobs DROP CONSTRAINT IF EXISTS chk_log_reparse_jobs_status
+UPDATE sdk_log_reparse_jobs SET status = 'success' WHERE status = 'succeeded'
 ALTER TABLE sdk_log_reparse_jobs ADD CONSTRAINT chk_log_reparse_jobs_status CHECK (status IN ('pending', 'running', 'success', 'failed', 'cancelled'))
 ```
 
