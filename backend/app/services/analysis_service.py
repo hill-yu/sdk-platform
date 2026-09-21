@@ -123,6 +123,7 @@ async def get_events(
     event_type: str | None,
     log_level: str | None,
     package_name: str | None,
+    sdk_version: str | None,
     device_id: str | None,
     date_from: date | None,
     date_to: date | None,
@@ -136,6 +137,8 @@ async def get_events(
         stmt = stmt.where(SdkEvent.event_type == "log", SdkEvent.payload["level"].astext == log_level)
     if package_name:
         stmt = stmt.where(SdkEvent.package_name == package_name)
+    if sdk_version:
+        stmt = stmt.where(SdkEvent.sdk_version == sdk_version)
     if device_id:
         stmt = stmt.where(SdkEvent.device_id == device_id)
     if date_from:
@@ -167,3 +170,36 @@ async def get_events(
         for e in rows
     ]
     return {"total": total, "page": page, "page_size": page_size, "items": items}
+
+
+async def get_event_filter_options(
+    db: AsyncSession,
+    *,
+    package_name: str | None,
+) -> dict[str, list[str]]:
+    """返回原始日志视图使用的去重、升序筛选选项。"""
+    package_stmt = (
+        select(SdkEvent.package_name)
+        .where(SdkEvent.event_type == "log", SdkEvent.package_name != "")
+        .distinct()
+        .order_by(SdkEvent.package_name)
+    )
+    version_stmt = (
+        select(SdkEvent.sdk_version)
+        .where(
+            SdkEvent.event_type == "log",
+            SdkEvent.sdk_version.is_not(None),
+            SdkEvent.sdk_version != "",
+        )
+        .distinct()
+        .order_by(SdkEvent.sdk_version)
+    )
+    if package_name:
+        version_stmt = version_stmt.where(SdkEvent.package_name == package_name)
+
+    package_rows = (await db.execute(package_stmt)).all()
+    version_rows = (await db.execute(version_stmt)).all()
+    return {
+        "package_names": sorted({row[0] for row in package_rows if row[0]}),
+        "sdk_versions": sorted({row[0] for row in version_rows if row[0]}),
+    }

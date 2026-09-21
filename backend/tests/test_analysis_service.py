@@ -182,6 +182,7 @@ async def test_events_filter_and_response_use_package_name() -> None:
         event_type=None,
         log_level=None,
         package_name="com.example.app",
+        sdk_version=None,
         device_id=None,
         date_from=None,
         date_to=None,
@@ -212,6 +213,7 @@ async def test_events_filter_by_log_level_and_include_sdk_version() -> None:
         event_type=None,
         log_level="error",
         package_name=None,
+        sdk_version=None,
         device_id=None,
         date_from=None,
         date_to=None,
@@ -245,6 +247,7 @@ async def test_events_filter_dates_use_utc_plus_8_day_boundaries() -> None:
         event_type=None,
         log_level=None,
         package_name=None,
+        sdk_version=None,
         device_id=None,
         date_from=date(2026, 8, 17),
         date_to=date(2026, 8, 17),
@@ -287,6 +290,7 @@ async def test_events_serialize_timestamps_as_utc_plus_8_business_time() -> None
         event_type=None,
         log_level=None,
         package_name=None,
+        sdk_version=None,
         device_id=None,
         date_from=None,
         date_to=None,
@@ -294,3 +298,79 @@ async def test_events_serialize_timestamps_as_utc_plus_8_business_time() -> None
 
     assert result["items"][0]["server_ts"] == "2026-08-17T18:00:00+08:00"
     assert result["items"][0]["client_ts"] == "2026-08-17T17:59:00+08:00"
+
+
+@pytest.mark.asyncio
+async def test_events_combine_package_sdk_device_level_and_date_filters() -> None:
+    event = SimpleNamespace(
+        id=5,
+        event_type="log",
+        package_name="com.example.app",
+        device_id="device-5",
+        sdk_version="1.4.0",
+        payload={"level": "error", "message": "boom"},
+        client_ts=None,
+        server_ts=None,
+    )
+    db = _EventSession(event)
+
+    result = await get_events(
+        db,  # type: ignore[arg-type]
+        page=2,
+        page_size=20,
+        event_type="log",
+        log_level="error",
+        package_name="com.example.app",
+        sdk_version="1.4.0",
+        device_id="device-5",
+        date_from=date(2026, 8, 17),
+        date_to=date(2026, 8, 17),
+    )
+
+    compiled = db.statements[1].compile(dialect=postgresql.dialect())
+    sql = str(compiled)
+    assert "sdk_events.package_name" in sql
+    assert "sdk_events.sdk_version" in sql
+    assert "sdk_events.device_id" in sql
+    assert "sdk_events.payload ->>" in sql
+    assert {"log", "error", "com.example.app", "1.4.0", "device-5"} <= set(compiled.params.values())
+    assert result["page"] == 2
+    assert result["page_size"] == 20
+    assert result["items"][0]["sdk_version"] == "1.4.0"
+
+
+class _OptionRows:
+    def __init__(self, values: list[tuple[str | None]]) -> None:
+        self.values = values
+
+    def all(self) -> list[tuple[str | None]]:
+        return self.values
+
+
+class _OptionSession:
+    def __init__(self) -> None:
+        self.statements: list[Any] = []
+
+    async def execute(self, statement: Any) -> _OptionRows:
+        self.statements.append(statement)
+        if len(self.statements) == 1:
+            return _OptionRows([("com.example.beta",), ("com.example.alpha",), ("com.example.alpha",)])
+        return _OptionRows([("1.10.0",), ("1.2.0",), ("1.2.0",), (None,)])
+
+
+@pytest.mark.asyncio
+async def test_event_filter_options_are_distinct_sorted_and_package_scoped() -> None:
+    db = _OptionSession()
+
+    result = await analysis_service.get_event_filter_options(db, package_name="com.example.alpha")  # type: ignore[arg-type]
+
+    assert result == {
+        "package_names": ["com.example.alpha", "com.example.beta"],
+        "sdk_versions": ["1.10.0", "1.2.0"],
+    }
+    package_sql = str(db.statements[0].compile(dialect=postgresql.dialect()))
+    version_sql = str(db.statements[1].compile(dialect=postgresql.dialect()))
+    assert "DISTINCT" in package_sql
+    assert "ORDER BY sdk_events.package_name" in package_sql
+    assert "sdk_events.package_name" in version_sql
+    assert "ORDER BY sdk_events.sdk_version" in version_sql
