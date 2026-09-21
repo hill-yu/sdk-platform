@@ -6,7 +6,7 @@ const { request } = vi.hoisted(() => ({
 
 vi.mock("@/api/request", () => ({ default: request }));
 
-import { getEvents } from "@/api/dashboard";
+import { getEventFilterOptions, getEvents } from "@/api/dashboard";
 import type { EventQuery } from "@/api/dashboard";
 
 describe("dashboard event API", () => {
@@ -18,6 +18,7 @@ describe("dashboard event API", () => {
       page_size: 20,
       event_type: "log",
       package_name: "com.example.app",
+      sdk_version: "1.4.0",
       device_id: "device-1",
       log_level: "error",
       date_from: "2026-08-01",
@@ -27,6 +28,14 @@ describe("dashboard event API", () => {
     getEvents(params);
     expect(request.get).toHaveBeenCalledWith("/events", {
       params,
+    });
+  });
+
+  it("loads filter options with an optional exact package name", () => {
+    getEventFilterOptions("com.example.app");
+
+    expect(request.get).toHaveBeenCalledWith("/events/filter-options", {
+      params: { package_name: "com.example.app" },
     });
   });
 });
