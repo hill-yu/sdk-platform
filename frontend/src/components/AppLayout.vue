@@ -48,9 +48,13 @@ const routeTitle = computed(() => {
 
 <style scoped>
 .shell {
-  min-height: 100vh;
+  width: 100%;
+  height: 100dvh;
+  min-width: 0;
+  min-height: 0;
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 280px minmax(0, 1fr);
+  overflow: hidden;
   background:
     radial-gradient(circle at top left, rgba(214, 140, 69, 0.28), transparent 28%),
     radial-gradient(circle at bottom right, rgba(75, 122, 91, 0.22), transparent 32%),
@@ -58,6 +62,9 @@ const routeTitle = computed(() => {
 }
 
 .sidebar {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
   padding: 32px 24px;
   border-right: 1px solid var(--border-soft);
   background: linear-gradient(180deg, rgba(16, 27, 26, 0.95), rgba(24, 36, 34, 0.78));
@@ -106,6 +113,11 @@ const routeTitle = computed(() => {
 }
 
 .content {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
   padding: 24px;
 }
 
@@ -123,12 +135,17 @@ const routeTitle = computed(() => {
 }
 
 .page {
-  min-height: calc(100vh - 120px);
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 @media (max-width: 920px) {
   .shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .sidebar {
