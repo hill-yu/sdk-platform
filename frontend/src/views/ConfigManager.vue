@@ -190,4 +190,7 @@ onMounted(loadConfigs);
 
 <style scoped>
 .layout { display:flex; flex-direction:column; gap:20px; }.content-grid{display:grid;grid-template-columns:340px 1fr;gap:18px}.panel{padding:22px;border-radius:24px;background:var(--panel-bg);border:1px solid var(--border-soft);box-shadow:var(--panel-shadow)}.toolbar,.panel-header,.actions,.mode{display:flex;gap:12px;align-items:center}.toolbar label{display:flex;gap:10px;align-items:center;flex:1}.input,.editor,button{border-radius:12px;border:1px solid var(--border-soft);background:rgba(8,13,13,.5);color:var(--text-primary);padding:10px}.input{width:100%}.editor{width:100%;min-height:420px;margin:14px 0;font-family:"Cascadia Code",Consolas,monospace}.list-item{display:flex;flex-direction:column;width:100%;margin-top:10px;text-align:left}.list-item.active{border-color:#d68c45}.primary{background:#b6622b}.feedback{padding:12px;border-radius:12px}.error{color:#ffb0a8}.success{color:#8fe3b2}@media(max-width:1000px){.content-grid{grid-template-columns:1fr}}
+.layout,.panel,.content-grid,.content-grid > *, .editor-panel,.list-panel { min-width: 0; }
+.layout,.content-grid,.editor-panel,.list-panel { min-height: 0; }
+.editor { max-width: 100%; min-width: 0; overflow: auto; }
 </style>

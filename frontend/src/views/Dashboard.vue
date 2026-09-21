@@ -212,6 +212,8 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  min-width: 0;
+  min-height: 0;
 }
 
 .stats-grid,
@@ -226,6 +228,21 @@ onMounted(async () => {
 
 .dual-grid {
   grid-template-columns: 1.1fr 1fr;
+}
+
+.stats-grid > *,
+.dual-grid > *,
+.panel,
+.panel-header,
+.controls,
+.filters,
+.pager {
+  min-width: 0;
+}
+
+.stats-grid > *,
+.dual-grid > * {
+  min-height: 0;
 }
 
 .panel {
@@ -273,6 +290,8 @@ input {
 }
 
 .table-scroll {
+  min-width: 0;
+  max-width: 100%;
   overflow-x: auto;
 }
 
@@ -295,6 +314,8 @@ input {
 
 .expanded-row pre {
   margin: 0;
+  max-width: 100%;
+  overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--text-muted);

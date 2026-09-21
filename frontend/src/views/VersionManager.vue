@@ -11,7 +11,8 @@
     </section>
 
     <section class="panel">
-      <table class="table">
+      <div class="table-scroll">
+        <table class="table">
         <thead>
           <tr>
             <th>版本号</th>
@@ -38,7 +39,8 @@
             </td>
           </tr>
         </tbody>
-      </table>
+        </table>
+      </div>
     </section>
 
     <p v-if="errorMessage" class="feedback error">{{ errorMessage }}</p>
@@ -173,6 +175,8 @@ onMounted(loadVersions);
   display: flex;
   flex-direction: column;
   gap: 20px;
+  min-width: 0;
+  min-height: 0;
 }
 
 .panel {
@@ -181,6 +185,13 @@ onMounted(loadVersions);
   background: var(--panel-bg);
   border: 1px solid var(--border-soft);
   box-shadow: var(--panel-shadow);
+  min-width: 0;
+}
+
+.table-scroll {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .panel-header,
@@ -239,6 +250,11 @@ onMounted(loadVersions);
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+  min-width: 0;
+}
+
+.form-grid > * {
+  min-width: 0;
 }
 
 .input {

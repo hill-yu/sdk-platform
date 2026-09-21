@@ -1,0 +1,68 @@
+import { flushPromises, mount } from "@vue/test-utils";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/api/dashboard", () => ({
+  getBreakdown: vi.fn().mockResolvedValue({ data: [] }),
+  getEventFilterOptions: vi.fn().mockResolvedValue({ data: { package_names: [], sdk_versions: [] } }),
+  getEvents: vi.fn().mockResolvedValue({ data: { total: 0, items: [] } }),
+  getSummary: vi.fn().mockResolvedValue({ data: {} }),
+  getTrend: vi.fn().mockResolvedValue({ data: { points: [] } }),
+}));
+
+vi.mock("@/api/config", () => ({
+  getConfigs: vi.fn().mockResolvedValue({ data: { published: [], drafts: [], history: [] } }),
+}));
+
+vi.mock("@/api/version", () => ({
+  getVersions: vi.fn().mockResolvedValue({ data: [] }),
+  createVersion: vi.fn(),
+  updateVersion: vi.fn(),
+}));
+
+vi.mock("@/api/logAnalysis", () => ({
+  getLogAnalysisColumns: vi.fn().mockResolvedValue({ data: { available_columns: [], default_columns: [], columns: [] } }),
+  getLogAnalysisSummary: vi.fn().mockResolvedValue({ data: { total: 0, page: 1, page_size: 20, items: [] } }),
+  getLogAnalysisDetails: vi.fn(),
+  getLogAnalysisDetail: vi.fn(),
+  putLogAnalysisColumns: vi.fn(),
+}));
+
+import Dashboard from "@/views/Dashboard.vue";
+import ConfigManager from "@/views/ConfigManager.vue";
+import LogViewer from "@/views/LogViewer.vue";
+import VersionManager from "@/views/VersionManager.vue";
+
+describe("page wide-content scroll boundaries", () => {
+  it("keeps dashboard events inside table-scroll", async () => {
+    const wrapper = mount(Dashboard, { global: { stubs: { TrendChart: true, StatCard: true } } });
+    await flushPromises();
+    expect(wrapper.find(".table-scroll").exists()).toBe(true);
+  });
+
+  it("keeps config editor grid structure", () => {
+    const wrapper = mount(ConfigManager, { global: { stubs: { ConfigFileTabs: true, ConfigTreeEditor: true } } });
+    expect(wrapper.find(".content-grid").exists()).toBe(true);
+    expect(wrapper.find(".editor-panel").exists()).toBe(true);
+  });
+
+  it("keeps version table inside table-scroll", async () => {
+    const wrapper = mount(VersionManager);
+    await flushPromises();
+    expect(wrapper.find(".table-scroll").exists()).toBe(true);
+  });
+
+  it("keeps analysis and raw log table containers", async () => {
+    const wrapper = mount(LogViewer, { global: { stubs: {
+      LogAnalysisDetail: true,
+      LogAnalysisFilters: true,
+      LogColumnSettings: true,
+      PackageProfileCell: true,
+      LogDetail: true,
+      LogExportPanel: true,
+    } } });
+    expect(wrapper.find(".table-scroll").exists()).toBe(true);
+    await wrapper.get("[data-testid='raw-view-tab']").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".table-scroll").exists()).toBe(true);
+  });
+});
