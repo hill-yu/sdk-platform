@@ -37,6 +37,22 @@ textarea {
   font: inherit;
 }
 
+select {
+  background-color: var(--panel-bg);
+  color: var(--text-primary);
+}
+
+option,
+optgroup {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+select:disabled {
+  background-color: var(--bg-secondary);
+  color: var(--text-muted);
+}
+
 button {
   cursor: pointer;
 }
