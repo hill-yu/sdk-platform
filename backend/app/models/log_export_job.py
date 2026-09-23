@@ -19,6 +19,7 @@ class LogExportJob(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     status = Column(String(20), nullable=False, default="pending")
     package_names = Column(JSONB, nullable=False)
+    sdk_version = Column(String(20))
     device_id = Column(String(64))
     log_level = Column(String(10))
     date_from = Column(Date)

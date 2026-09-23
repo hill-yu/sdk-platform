@@ -28,6 +28,7 @@ def test_search_and_create_export(monkeypatch):
 
     async def fake_create(_db, body):
         assert body.package_names == ["com.a", "com.b"]
+        assert body.sdk_version == "1.0.6"
         assert body.log_level == "info"
         return {"id": str(JOB_ID), "status": "pending"}
 
@@ -36,10 +37,21 @@ def test_search_and_create_export(monkeypatch):
     with TestClient(app) as client:
         result = client.get("/api/admin/log-packages?keyword=tech", headers=HEADERS)
         created = client.post("/api/admin/log-exports", headers=HEADERS, json={
-            "package_names": ["com.a", "com.b"], "log_level": "info",
+            "package_names": ["com.a", "com.b"], "sdk_version": "1.0.6", "log_level": "info",
         })
     assert result.json()["data"]["items"] == ["com.tech.a", "com.tech.b"]
     assert created.json()["data"]["status"] == "pending"
+
+
+def test_create_export_rejects_sdk_version_longer_than_20_characters():
+    from app.admin_main import app
+
+    with TestClient(app) as client:
+        response = client.post("/api/admin/log-exports", headers=HEADERS, json={
+            "package_names": ["com.a"], "sdk_version": "1.0.6-too-long-for-schema",
+        })
+
+    assert response.status_code == 422
 
 
 def test_get_unknown_job_returns_404(monkeypatch):

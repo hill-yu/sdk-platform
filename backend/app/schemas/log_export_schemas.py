@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 class LogExportCreateRequest(BaseModel):
     package_names: list[str] = Field(min_length=1, max_length=50)
+    sdk_version: str | None = Field(default=None, max_length=20)
     device_id: str | None = Field(default=None, max_length=64)
     log_level: Literal["debug", "info", "warn", "error"] | None = None
     date_from: date | None = None

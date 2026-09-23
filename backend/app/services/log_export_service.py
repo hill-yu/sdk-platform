@@ -71,6 +71,8 @@ def serialize_job(job: LogExportJob) -> dict[str, Any]:
 
 def apply_job_filters(stmt, job):
     stmt = stmt.where(SdkEvent.event_type == "log", SdkEvent.package_name.in_(job.package_names))
+    if job.sdk_version:
+        stmt = stmt.where(SdkEvent.sdk_version == job.sdk_version)
     if job.device_id:
         stmt = stmt.where(SdkEvent.device_id == job.device_id)
     if job.log_level:

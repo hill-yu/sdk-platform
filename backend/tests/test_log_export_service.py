@@ -15,10 +15,12 @@ def test_log_export_job_model_has_required_columns():
     columns = LogExportJob.__table__.columns
     assert set(columns.keys()) == {
         "id", "status", "package_names", "device_id", "log_level",
-        "date_from", "date_to", "file_path", "row_count", "error_message",
+        "sdk_version", "date_from", "date_to", "file_path", "row_count", "error_message",
         "created_at", "started_at", "finished_at",
     }
     assert columns["package_names"].nullable is False
+    assert columns["sdk_version"].nullable is True
+    assert columns["sdk_version"].type.length == 20
     assert columns["file_path"].nullable is True
 
 
@@ -27,17 +29,22 @@ def test_log_export_migration_is_idempotent_and_indexed():
     assert "CREATE TABLE IF NOT EXISTS sdk_log_export_jobs" in sql
     assert "CREATE INDEX IF NOT EXISTS idx_log_export_jobs_status_created" in sql
     assert "CHECK (status IN ('pending', 'running', 'success', 'failed'))" in sql
+    assert "ADD COLUMN IF NOT EXISTS sdk_version VARCHAR(20)" in sql
+
+    init_sql = Path("scripts/init_db.sql").read_text(encoding="utf-8")
+    assert "sdk_version VARCHAR(20)" in init_sql
 
 
 def test_create_request_trims_and_deduplicates_packages():
     from app.schemas.log_export_schemas import LogExportCreateRequest
 
     body = LogExportCreateRequest(
-        package_names=[" com.a ", "com.b", "com.a"], device_id=" ",
+        package_names=[" com.a ", "com.b", "com.a"], device_id=" ", sdk_version="1.0.6",
         date_from="2026-08-28", date_to="2026-08-28",
     )
     assert body.package_names == ["com.a", "com.b"]
     assert body.device_id is None
+    assert body.sdk_version == "1.0.6"
 
 
 def test_create_request_rejects_invalid_filters():
@@ -121,7 +128,7 @@ def test_apply_job_filters_uses_log_packages_and_selected_filters():
     from app.services.log_export_service import apply_job_filters
 
     job = SimpleNamespace(
-        package_names=["com.a", "com.b"], device_id="d1", log_level="error",
+        package_names=["com.a", "com.b"], sdk_version="1.0.6", device_id="d1", log_level="error",
         date_from=None, date_to=None,
     )
     sql = str(apply_job_filters(select(SdkEvent), job).compile(
@@ -129,5 +136,22 @@ def test_apply_job_filters_uses_log_packages_and_selected_filters():
     ))
     assert "sdk_events.event_type = 'log'" in sql
     assert "sdk_events.package_name IN ('com.a', 'com.b')" in sql
+    assert "sdk_events.sdk_version = '1.0.6'" in sql
     assert "sdk_events.device_id = 'd1'" in sql
     assert "error" in sql
+
+
+def test_apply_job_filters_omits_sdk_version_when_job_has_none():
+    from sqlalchemy import select
+    from sqlalchemy.dialects import postgresql
+    from app.models.event import SdkEvent
+    from app.services.log_export_service import apply_job_filters
+
+    job = SimpleNamespace(
+        package_names=["com.a"], sdk_version=None, device_id=None, log_level=None,
+        date_from=None, date_to=None,
+    )
+    sql = str(apply_job_filters(select(SdkEvent), job).compile(
+        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True},
+    ))
+    assert "sdk_events.sdk_version =" not in sql

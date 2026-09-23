@@ -19,3 +19,6 @@ CREATE TABLE IF NOT EXISTS sdk_log_export_jobs (
 
 CREATE INDEX IF NOT EXISTS idx_log_export_jobs_status_created
     ON sdk_log_export_jobs (status, created_at);
+
+ALTER TABLE sdk_log_export_jobs
+    ADD COLUMN IF NOT EXISTS sdk_version VARCHAR(20);

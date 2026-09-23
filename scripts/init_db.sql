@@ -212,6 +212,7 @@ CREATE TABLE IF NOT EXISTS sdk_log_export_jobs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     status VARCHAR(20) NOT NULL DEFAULT 'pending',
     package_names JSONB NOT NULL,
+    sdk_version VARCHAR(20),
     device_id VARCHAR(64),
     log_level VARCHAR(10),
     date_from DATE,
