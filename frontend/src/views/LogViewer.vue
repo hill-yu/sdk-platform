@@ -124,6 +124,8 @@
         <p class="timezone-note">日期按北京时间筛选，包名、设备 ID 和日志级别为完全匹配。</p>
         <p v-if="filterOptionsError" data-testid="filter-options-error" class="feedback error">{{ filterOptionsError }}</p>
         <LogExportPanel
+          :package-name="rawFilters.package_name"
+          :sdk-version="rawFilters.sdk_version"
           :device-id="rawFilters.device_id"
           :log-level="rawFilters.log_level as '' | LogLevel"
           :date-from="rawFilters.date_from"

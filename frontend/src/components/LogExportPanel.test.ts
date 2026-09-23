@@ -18,7 +18,7 @@ describe("LogExportPanel", () => {
 
   it("creates with selected packages and current filters then polls to success", async () => {
     const wrapper = mount(LogExportPanel, { props: {
-      deviceId: "d1", logLevel: "error", dateFrom: "2026-08-01", dateTo: "2026-08-28",
+      packageName: "", sdkVersion: "", deviceId: "d1", logLevel: "error", dateFrom: "2026-08-01", dateTo: "2026-08-28",
     }});
     expect(wrapper.get("[data-testid='export-button']").attributes("disabled")).toBeDefined();
     await wrapper.get("[data-testid='choose']").trigger("click");
@@ -32,13 +32,49 @@ describe("LogExportPanel", () => {
     await flushPromises();
     expect(wrapper.text()).toContain("12 条");
     expect(wrapper.find("[data-testid='download-button']").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("uses the page package and sdk version with all current filters", async () => {
+    const wrapper = mount(LogExportPanel, { props: {
+      packageName: "com.a", sdkVersion: "1.0.6", deviceId: "d1", logLevel: "error",
+      dateFrom: "2026-09-01", dateTo: "2026-09-23",
+    }});
+
+    expect(wrapper.find("[data-testid='choose']").exists()).toBe(false);
+    expect(wrapper.get("[data-testid='export-button']").attributes("disabled")).toBeUndefined();
+    await wrapper.get("[data-testid='export-button']").trigger("click");
+    await flushPromises();
+
+    expect(api.createLogExport).toHaveBeenCalledWith({
+      package_names: ["com.a"], sdk_version: "1.0.6", device_id: "d1", log_level: "error",
+      date_from: "2026-09-01", date_to: "2026-09-23",
+    });
+    wrapper.unmount();
+  });
+
+  it("restores multi-package selection when the page package is cleared", async () => {
+    const wrapper = mount(LogExportPanel, { props: {
+      packageName: "com.a", sdkVersion: "", deviceId: "", logLevel: "", dateFrom: "", dateTo: "",
+    }});
+
+    await wrapper.setProps({ packageName: "" });
+    expect(wrapper.find("[data-testid='choose']").exists()).toBe(true);
+    await wrapper.get("[data-testid='choose']").trigger("click");
+    await wrapper.get("[data-testid='export-button']").trigger("click");
+    await flushPromises();
+
+    expect(api.createLogExport).toHaveBeenCalledWith(expect.objectContaining({
+      package_names: ["com.a", "com.b"],
+    }));
+    wrapper.unmount();
   });
 
   it("continues polling after a transient status error", async () => {
     api.getLogExport.mockRejectedValueOnce(new Error("temporary")).mockResolvedValueOnce({
       data: { id: "job-1", status: "success", row_count: 5 },
     });
-    const wrapper = mount(LogExportPanel, { props: { deviceId: "", logLevel: "", dateFrom: "", dateTo: "" } });
+    const wrapper = mount(LogExportPanel, { props: { packageName: "", sdkVersion: "", deviceId: "", logLevel: "", dateFrom: "", dateTo: "" } });
     await wrapper.get("[data-testid='choose']").trigger("click");
     await wrapper.get("[data-testid='export-button']").trigger("click");
     await flushPromises();

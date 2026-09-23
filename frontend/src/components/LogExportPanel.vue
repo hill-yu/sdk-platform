@@ -1,7 +1,8 @@
 <template>
   <section class="export-panel">
-    <PackageMultiSelect v-model="packageNames" />
-    <button data-testid="export-button" class="primary" type="button" :disabled="!packageNames.length || submitting" @click="startExport">
+    <PackageMultiSelect v-if="!props.packageName" v-model="packageNames" />
+    <span v-else data-testid="export-package">导出包名：{{ props.packageName }}</span>
+    <button data-testid="export-button" class="primary" type="button" :disabled="!effectivePackageNames.length || submitting" @click="startExport">
       {{ submitting ? "正在创建任务" : "批量导出 CSV" }}
     </button>
     <span v-if="currentJob">状态：{{ statusText }}</span>
@@ -18,8 +19,16 @@ import { createLogExport, downloadLogExport, getLogExport } from "@/api/logExpor
 import type { LogExportJob } from "@/api/logExports";
 import PackageMultiSelect from "@/components/PackageMultiSelect.vue";
 
-const props = defineProps<{ deviceId: string; logLevel: "" | LogLevel; dateFrom: string; dateTo: string }>();
+const props = defineProps<{
+  packageName: string;
+  sdkVersion: string;
+  deviceId: string;
+  logLevel: "" | LogLevel;
+  dateFrom: string;
+  dateTo: string;
+}>();
 const packageNames = ref<string[]>([]);
+const effectivePackageNames = computed(() => props.packageName ? [props.packageName] : packageNames.value);
 const currentJob = ref<LogExportJob | null>(null);
 const submitting = ref(false);
 const error = ref("");
@@ -42,7 +51,8 @@ async function startExport() {
   submitting.value = true; error.value = "";
   try {
     const response = await createLogExport({
-      package_names: packageNames.value,
+      package_names: effectivePackageNames.value,
+      sdk_version: props.sdkVersion || undefined,
       device_id: props.deviceId || undefined,
       log_level: props.logLevel || undefined,
       date_from: props.dateFrom || undefined,

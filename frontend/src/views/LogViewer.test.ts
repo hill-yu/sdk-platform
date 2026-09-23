@@ -36,6 +36,7 @@ vi.mock("@/api/logAnalysis", () => ({
 }));
 
 import LogViewer from "@/views/LogViewer.vue";
+import LogExportPanel from "@/components/LogExportPanel.vue";
 
 const fullExtra = "complete-extra-value-".repeat(30);
 
@@ -232,6 +233,23 @@ describe("LogViewer", () => {
       log_level: "error",
       date_from: "2026-08-01",
       date_to: "2026-08-13",
+    });
+  });
+
+  it("passes the current raw package and sdk filters to the export panel", async () => {
+    const wrapper = await mountViewer();
+
+    await wrapper.get("[data-testid='package-filter']").setValue("com.example.app");
+    await flushPromises();
+    await wrapper.get("[data-testid='sdk-version-filter']").setValue("1.4.0");
+
+    expect(wrapper.findComponent(LogExportPanel).props()).toMatchObject({
+      packageName: "com.example.app",
+      sdkVersion: "1.4.0",
+      deviceId: "",
+      logLevel: "",
+      dateFrom: "",
+      dateTo: "",
     });
   });
 

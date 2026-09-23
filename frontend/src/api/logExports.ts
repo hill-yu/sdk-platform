@@ -3,6 +3,7 @@ import type { LogLevel } from "@/api/dashboard";
 
 export interface LogExportFilters {
   package_names: string[];
+  sdk_version?: string;
   device_id?: string;
   log_level?: LogLevel;
   date_from?: string;
