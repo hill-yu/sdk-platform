@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.timezone import business_day_utc_range, business_today, serialize_business_time
+from app.core.timezone import business_day_utc_range, business_hour_utc_range, business_today, serialize_business_time
 from app.models.event import SdkEvent
 
 
@@ -127,6 +127,8 @@ async def get_events(
     device_id: str | None,
     date_from: date | None,
     date_to: date | None,
+    hour_from: int | None = None,
+    hour_to: int | None = None,
 ) -> dict[str, Any]:
     """分页查询原始事件列表，支持多条件筛选"""
     stmt = select(SdkEvent)
@@ -141,12 +143,18 @@ async def get_events(
         stmt = stmt.where(SdkEvent.sdk_version == sdk_version)
     if device_id:
         stmt = stmt.where(SdkEvent.device_id == device_id)
-    if date_from:
-        start_time, _ = business_day_utc_range(date_from)
-        stmt = stmt.where(SdkEvent.server_ts >= start_time)
-    if date_to:
-        _, end_time = business_day_utc_range(date_to)
-        stmt = stmt.where(SdkEvent.server_ts < end_time)
+    if date_from and date_to:
+        range_start, range_end = business_hour_utc_range(date_from, hour_from, date_to, hour_to)
+        stmt = stmt.where(SdkEvent.server_ts >= range_start, SdkEvent.server_ts < range_end)
+    else:
+        if hour_from is not None or hour_to is not None:
+            raise ValueError("使用小时筛选时必须同时提供开始日期和结束日期")
+        if date_from:
+            start_time, _ = business_day_utc_range(date_from)
+            stmt = stmt.where(SdkEvent.server_ts >= start_time)
+        if date_to:
+            _, end_time = business_day_utc_range(date_to)
+            stmt = stmt.where(SdkEvent.server_ts < end_time)
 
     # Count total
     count_stmt = select(func.count()).select_from(stmt.subquery())

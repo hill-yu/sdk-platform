@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -148,6 +149,52 @@ def test_admin_events_passes_sdk_version_to_service(monkeypatch):
         )
 
     assert response.status_code == 200
+
+
+def test_admin_events_passes_complete_hour_range_to_service(monkeypatch):
+    from app.admin_main import app
+    from app.api.admin import dashboard
+
+    async def fake_get_events(_db: Any, **filters: Any) -> dict[str, Any]:
+        assert filters["date_from"] == date(2026, 9, 20)
+        assert filters["hour_from"] == 8
+        assert filters["date_to"] == date(2026, 9, 22)
+        assert filters["hour_to"] == 17
+        return {"total": 0, "page": 1, "page_size": 20, "items": []}
+
+    monkeypatch.setattr(dashboard.analysis_service, "get_events", fake_get_events)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/admin/events",
+            params={
+                "event_type": "log",
+                "date_from": "2026-09-20",
+                "hour_from": 8,
+                "date_to": "2026-09-22",
+                "hour_to": 17,
+            },
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "date_from=2026-09-20&date_to=2026-09-22&hour_from=8",
+        "date_from=2026-09-20&hour_from=8&hour_to=17",
+        "date_from=2026-09-20&date_to=2026-09-22&hour_from=-1&hour_to=17",
+    ],
+)
+def test_admin_events_rejects_invalid_hour_ranges(query: str):
+    from app.admin_main import app
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/admin/events?{query}", headers=_auth_headers())
+
+    assert response.status_code == 422
 
 
 def test_event_filter_options_returns_payload(monkeypatch):

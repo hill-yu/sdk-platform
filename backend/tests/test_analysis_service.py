@@ -339,6 +339,40 @@ async def test_events_combine_package_sdk_device_level_and_date_filters() -> Non
     assert result["items"][0]["sdk_version"] == "1.4.0"
 
 
+@pytest.mark.asyncio
+async def test_events_filter_hours_use_one_continuous_utc_plus_8_range() -> None:
+    event = SimpleNamespace(
+        id=6,
+        event_type="log",
+        package_name="com.example.app",
+        device_id="device-6",
+        sdk_version=None,
+        payload={},
+        client_ts=None,
+        server_ts=None,
+    )
+    db = _EventSession(event)
+
+    await get_events(
+        db,  # type: ignore[arg-type]
+        page=1,
+        page_size=20,
+        event_type="log",
+        log_level=None,
+        package_name=None,
+        sdk_version=None,
+        device_id=None,
+        date_from=date(2026, 9, 20),
+        hour_from=8,
+        date_to=date(2026, 9, 22),
+        hour_to=17,
+    )
+
+    compiled = db.statements[1].compile(dialect=postgresql.dialect())
+    assert datetime(2026, 9, 20, tzinfo=timezone.utc) in compiled.params.values()
+    assert datetime(2026, 9, 22, 10, tzinfo=timezone.utc) in compiled.params.values()
+
+
 class _OptionRows:
     def __init__(self, values: list[tuple[str | None]]) -> None:
         self.values = values

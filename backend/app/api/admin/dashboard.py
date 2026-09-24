@@ -3,12 +3,12 @@ from __future__ import annotations
 from datetime import date
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin.deps import require_admin_token
 from app.core.database import get_db, get_db_no_commit
-from app.core.timezone import business_today
+from app.core.timezone import business_hour_utc_range, business_today
 from app.services import analysis_service
 
 
@@ -50,8 +50,20 @@ async def get_events(
     device_id: str | None = Query(None),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
+    hour_from: int | None = Query(None, ge=0, le=23),
+    hour_to: int | None = Query(None, ge=0, le=23),
     db: AsyncSession = Depends(get_db_no_commit),
 ):
+    if (hour_from is None) != (hour_to is None):
+        raise HTTPException(status_code=422, detail="hour_from 和 hour_to 必须成对提供")
+    if hour_from is not None and (date_from is None or date_to is None):
+        raise HTTPException(status_code=422, detail="使用小时筛选时必须同时提供开始日期和结束日期")
+    if date_from is not None and date_to is not None:
+        try:
+            business_hour_utc_range(date_from, hour_from, date_to, hour_to)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     data = await analysis_service.get_events(
         db,
         page=page,
@@ -63,6 +75,8 @@ async def get_events(
         device_id=device_id,
         date_from=date_from,
         date_to=date_to,
+        hour_from=hour_from,
+        hour_to=hour_to,
     )
     return {"code": 0, "data": data}
 

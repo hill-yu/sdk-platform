@@ -1,8 +1,36 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from app.core.timezone import business_day_utc_range, business_today, serialize_business_time
+from app.core.timezone import business_day_utc_range, business_hour_utc_range, business_today, serialize_business_time
+
+
+def test_business_hour_range_uses_inclusive_end_hour() -> None:
+    start, end = business_hour_utc_range(
+        date(2026, 9, 20), 8,
+        date(2026, 9, 22), 17,
+    )
+
+    assert start.isoformat() == "2026-09-20T00:00:00+00:00"
+    assert end.isoformat() == "2026-09-22T10:00:00+00:00"
+
+
+def test_business_hour_range_defaults_to_full_days() -> None:
+    start, end = business_hour_utc_range(
+        date(2026, 9, 20), None,
+        date(2026, 9, 20), None,
+    )
+
+    assert end - start == timedelta(days=1)
+
+
+@pytest.mark.parametrize("hours", [(8, None), (None, 17), (-1, 17), (8, 24)])
+def test_business_hour_range_rejects_invalid_hours(hours: tuple[int | None, int | None]) -> None:
+    with pytest.raises(ValueError):
+        business_hour_utc_range(
+            date(2026, 9, 20), hours[0],
+            date(2026, 9, 20), hours[1],
+        )
 
 
 def test_business_day_utc_range_uses_utc_plus_8_boundaries() -> None:
