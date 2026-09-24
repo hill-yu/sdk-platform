@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.timezone import business_day_utc_range, business_hour_utc_range
 from app.models.event import SdkEvent
 from app.models.log_export_job import LogExportJob
 from app.schemas.log_export_schemas import LogExportCreateRequest
@@ -64,6 +65,7 @@ def serialize_job(job: LogExportJob) -> dict[str, Any]:
     return {
         "id": str(job.id), "status": job.status, "row_count": int(job.row_count or 0),
         "error_message": job.error_message,
+        "hour_from": getattr(job, "hour_from", None), "hour_to": getattr(job, "hour_to", None),
         "created_at": job.created_at.astimezone(SHANGHAI).isoformat(),
         "finished_at": job.finished_at.astimezone(SHANGHAI).isoformat() if job.finished_at else None,
     }
@@ -77,10 +79,20 @@ def apply_job_filters(stmt, job):
         stmt = stmt.where(SdkEvent.device_id == job.device_id)
     if job.log_level:
         stmt = stmt.where(SdkEvent.payload["level"].astext == job.log_level)
-    if job.date_from:
-        stmt = stmt.where(SdkEvent.server_ts >= datetime.combine(job.date_from, time.min, SHANGHAI))
-    if job.date_to:
-        stmt = stmt.where(SdkEvent.server_ts < datetime.combine(job.date_to + timedelta(days=1), time.min, SHANGHAI))
+    hour_from = getattr(job, "hour_from", None)
+    hour_to = getattr(job, "hour_to", None)
+    if job.date_from and job.date_to:
+        range_start, range_end = business_hour_utc_range(job.date_from, hour_from, job.date_to, hour_to)
+        stmt = stmt.where(SdkEvent.server_ts >= range_start, SdkEvent.server_ts < range_end)
+    else:
+        if hour_from is not None or hour_to is not None:
+            raise ValueError("使用小时筛选时必须同时提供开始日期和结束日期")
+        if job.date_from:
+            range_start, _ = business_day_utc_range(job.date_from)
+            stmt = stmt.where(SdkEvent.server_ts >= range_start)
+        if job.date_to:
+            _, range_end = business_day_utc_range(job.date_to)
+            stmt = stmt.where(SdkEvent.server_ts < range_end)
     return stmt
 
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -15,13 +15,22 @@ def test_log_export_job_model_has_required_columns():
     columns = LogExportJob.__table__.columns
     assert set(columns.keys()) == {
         "id", "status", "package_names", "device_id", "log_level",
-        "sdk_version", "date_from", "date_to", "file_path", "row_count", "error_message",
+        "sdk_version", "date_from", "hour_from", "date_to", "hour_to", "file_path", "row_count", "error_message",
         "created_at", "started_at", "finished_at",
     }
     assert columns["package_names"].nullable is False
     assert columns["sdk_version"].nullable is True
     assert columns["sdk_version"].type.length == 20
+    assert columns["hour_from"].nullable is True
+    assert columns["hour_to"].nullable is True
     assert columns["file_path"].nullable is True
+    constraints = {
+        constraint.name: str(constraint.sqltext)
+        for constraint in LogExportJob.__table__.constraints
+        if hasattr(constraint, "sqltext")
+    }
+    assert "chk_log_export_jobs_hour_bounds" in constraints
+    assert "chk_log_export_jobs_hour_pair" in constraints
 
 
 def test_log_export_migration_is_idempotent_and_indexed():
@@ -30,9 +39,15 @@ def test_log_export_migration_is_idempotent_and_indexed():
     assert "CREATE INDEX IF NOT EXISTS idx_log_export_jobs_status_created" in sql
     assert "CHECK (status IN ('pending', 'running', 'success', 'failed'))" in sql
     assert "ADD COLUMN IF NOT EXISTS sdk_version VARCHAR(20)" in sql
+    assert "ADD COLUMN IF NOT EXISTS hour_from SMALLINT" in sql
+    assert "ADD COLUMN IF NOT EXISTS hour_to SMALLINT" in sql
+    assert "chk_log_export_jobs_hour_bounds" in sql
+    assert "chk_log_export_jobs_hour_pair" in sql
 
     init_sql = Path("scripts/init_db.sql").read_text(encoding="utf-8")
     assert "sdk_version VARCHAR(20)" in init_sql
+    assert "hour_from SMALLINT" in init_sql
+    assert "hour_to SMALLINT" in init_sql
 
 
 def test_create_request_trims_and_deduplicates_packages():
@@ -54,6 +69,36 @@ def test_create_request_rejects_invalid_filters():
         LogExportCreateRequest(package_names=[])
     with pytest.raises(ValidationError):
         LogExportCreateRequest(package_names=["com.a"], date_from="2026-08-29", date_to="2026-08-28")
+
+
+def test_export_request_accepts_complete_hour_range():
+    from app.schemas.log_export_schemas import LogExportCreateRequest
+
+    body = LogExportCreateRequest(
+        package_names=["com.example.app"],
+        date_from=date(2026, 9, 20),
+        hour_from=8,
+        date_to=date(2026, 9, 22),
+        hour_to=17,
+    )
+
+    assert body.hour_from == 8
+    assert body.hour_to == 17
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"date_from": "2026-09-20", "date_to": "2026-09-22", "hour_from": 8},
+        {"date_from": "2026-09-20", "hour_from": 8, "hour_to": 17},
+        {"date_from": "2026-09-20", "date_to": "2026-09-22", "hour_from": -1, "hour_to": 17},
+    ],
+)
+def test_export_request_rejects_incomplete_or_invalid_hour_range(payload):
+    from app.schemas.log_export_schemas import LogExportCreateRequest
+
+    with pytest.raises(ValidationError):
+        LogExportCreateRequest(package_names=["com.example.app"], **payload)
 
 
 def test_csv_row_preserves_extra_and_converts_time_to_utc8():
@@ -155,3 +200,36 @@ def test_apply_job_filters_omits_sdk_version_when_job_has_none():
         dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True},
     ))
     assert "sdk_events.sdk_version =" not in sql
+
+
+def test_apply_job_filters_uses_the_same_utc_hour_range_as_event_queries():
+    from sqlalchemy import select
+    from sqlalchemy.dialects import postgresql
+    from app.models.event import SdkEvent
+    from app.services.log_export_service import apply_job_filters
+
+    job = SimpleNamespace(
+        package_names=["com.a"], sdk_version=None, device_id=None, log_level=None,
+        date_from=date(2026, 9, 20), hour_from=8,
+        date_to=date(2026, 9, 22), hour_to=17,
+    )
+    compiled = apply_job_filters(select(SdkEvent), job).compile(dialect=postgresql.dialect())
+
+    assert datetime(2026, 9, 20, tzinfo=timezone.utc) in compiled.params.values()
+    assert datetime(2026, 9, 22, 10, tzinfo=timezone.utc) in compiled.params.values()
+
+
+def test_apply_job_filters_includes_the_full_end_hour_at_23():
+    from sqlalchemy import select
+    from sqlalchemy.dialects import postgresql
+    from app.models.event import SdkEvent
+    from app.services.log_export_service import apply_job_filters
+
+    job = SimpleNamespace(
+        package_names=["com.a"], sdk_version=None, device_id=None, log_level=None,
+        date_from=date(2026, 9, 20), hour_from=8,
+        date_to=date(2026, 9, 20), hour_to=23,
+    )
+    compiled = apply_job_filters(select(SdkEvent), job).compile(dialect=postgresql.dialect())
+
+    assert datetime(2026, 9, 20, 16, tzinfo=timezone.utc) in compiled.params.values()
