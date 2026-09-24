@@ -25,7 +25,9 @@ const props = defineProps<{
   deviceId: string;
   logLevel: "" | LogLevel;
   dateFrom: string;
+  hourFrom?: string;
   dateTo: string;
+  hourTo?: string;
 }>();
 const packageNames = ref<string[]>([]);
 const effectivePackageNames = computed(() => props.packageName ? [props.packageName] : packageNames.value);
@@ -56,7 +58,9 @@ async function startExport() {
       device_id: props.deviceId || undefined,
       log_level: props.logLevel || undefined,
       date_from: props.dateFrom || undefined,
+      hour_from: props.hourFrom ? Number(props.hourFrom) : undefined,
       date_to: props.dateTo || undefined,
+      hour_to: props.hourTo ? Number(props.hourTo) : undefined,
     });
     currentJob.value = { ...response.data, row_count: 0 };
     timer = setTimeout(pollJob, 2000);

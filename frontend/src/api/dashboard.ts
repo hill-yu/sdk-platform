@@ -27,7 +27,9 @@ export interface EventQuery {
   device_id?: string;
   log_level?: LogLevel;
   date_from?: string;
+  hour_from?: number;
   date_to?: string;
+  hour_to?: number;
 }
 
 export const getSummary = () => request.get("/dashboard/summary");

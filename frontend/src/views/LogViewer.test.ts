@@ -219,7 +219,9 @@ describe("LogViewer", () => {
     await wrapper.get("[data-testid='device-filter']").setValue("device-9");
     await wrapper.get("[data-testid='level-filter']").setValue("error");
     await wrapper.get("[data-testid='date-from-filter']").setValue("2026-08-01");
+    await wrapper.get("[data-testid='hour-from-filter']").setValue("8");
     await wrapper.get("[data-testid='date-to-filter']").setValue("2026-08-13");
+    await wrapper.get("[data-testid='hour-to-filter']").setValue("17");
     await wrapper.get("[data-testid='query-button']").trigger("click");
     await flushPromises();
 
@@ -232,11 +234,13 @@ describe("LogViewer", () => {
       device_id: "device-9",
       log_level: "error",
       date_from: "2026-08-01",
+      hour_from: 8,
       date_to: "2026-08-13",
+      hour_to: 17,
     });
   });
 
-  it("passes the current raw package and sdk filters to the export panel", async () => {
+  it("passes only applied raw filters to the export panel", async () => {
     const wrapper = await mountViewer();
 
     await wrapper.get("[data-testid='package-filter']").setValue("com.example.app");
@@ -244,13 +248,55 @@ describe("LogViewer", () => {
     await wrapper.get("[data-testid='sdk-version-filter']").setValue("1.4.0");
 
     expect(wrapper.findComponent(LogExportPanel).props()).toMatchObject({
-      packageName: "com.example.app",
-      sdkVersion: "1.4.0",
+      packageName: "",
+      sdkVersion: "",
       deviceId: "",
       logLevel: "",
       dateFrom: "",
       dateTo: "",
+      hourFrom: "",
+      hourTo: "",
     });
+
+    await wrapper.get("[data-testid='query-button']").trigger("click");
+    await flushPromises();
+    expect(wrapper.findComponent(LogExportPanel).props()).toMatchObject({ packageName: "com.example.app", sdkVersion: "1.4.0" });
+  });
+
+  it("shows hour options, rejects a single hour, and resets draft and applied filters", async () => {
+    const wrapper = await mountViewer();
+    expect(wrapper.findAll("[data-testid='hour-from-filter'] option")).toHaveLength(25);
+    expect(wrapper.find("[data-testid='hour-from-filter'] option[value='8']").text()).toBe("08:00–08:59");
+
+    await wrapper.get("[data-testid='hour-from-filter']").setValue("8");
+    await wrapper.get("[data-testid='query-button']").trigger("click");
+    await flushPromises();
+    expect(getEvents).toHaveBeenCalledTimes(1);
+    expect(wrapper.get("[data-testid='error-feedback']").text()).toContain("小时");
+
+    await wrapper.get("[data-testid='reset-button']").trigger("click");
+    await flushPromises();
+    expect(wrapper.get<HTMLSelectElement>("[data-testid='hour-from-filter']").element.value).toBe("");
+    expect(wrapper.get<HTMLSelectElement>("[data-testid='hour-to-filter']").element.value).toBe("");
+    expect(wrapper.findComponent(LogExportPanel).props()).toMatchObject({ hourFrom: "", hourTo: "" });
+  });
+
+  it("keeps applied hours for pagination and refresh", async () => {
+    respond([makeItem()], 41);
+    const wrapper = await mountViewer();
+    await wrapper.get("[data-testid='date-from-filter']").setValue("2026-09-20");
+    await wrapper.get("[data-testid='hour-from-filter']").setValue("8");
+    await wrapper.get("[data-testid='date-to-filter']").setValue("2026-09-22");
+    await wrapper.get("[data-testid='hour-to-filter']").setValue("17");
+    await wrapper.get("[data-testid='query-button']").trigger("click");
+    await flushPromises();
+    await wrapper.get("[data-testid='next-page']").trigger("click");
+    await flushPromises();
+    expect(getEvents).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, hour_from: 8, hour_to: 17 }));
+
+    await wrapper.get("[data-testid='refresh-button']").trigger("click");
+    await flushPromises();
+    expect(getEvents).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, hour_from: 8, hour_to: 17 }));
   });
 
   it("clears sdk version when package changes and sends exact filters", async () => {
@@ -328,6 +374,8 @@ describe("LogViewer", () => {
     respond([makeItem()], 41);
     const wrapper = await mountViewer();
     await wrapper.get("[data-testid='package-filter']").setValue("com.example.app");
+    await wrapper.get("[data-testid='query-button']").trigger("click");
+    await flushPromises();
     await wrapper.get("[data-testid='next-page']").trigger("click");
     await flushPromises();
     expect(getEvents).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, package_name: "com.example.app" }));

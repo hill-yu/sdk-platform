@@ -85,4 +85,20 @@ describe("LogExportPanel", () => {
     await flushPromises();
     expect(wrapper.text()).toContain("5 条");
   });
+
+  it("sends the applied hour filters as numbers", async () => {
+    const wrapper = mount(LogExportPanel, { props: {
+      packageName: "com.a", sdkVersion: "", deviceId: "", logLevel: "",
+      dateFrom: "2026-09-20", hourFrom: "8", dateTo: "2026-09-22", hourTo: "17",
+    }});
+
+    await wrapper.get("[data-testid='export-button']").trigger("click");
+    await flushPromises();
+
+    expect(api.createLogExport).toHaveBeenCalledWith({
+      package_names: ["com.a"], sdk_version: undefined, device_id: undefined, log_level: undefined,
+      date_from: "2026-09-20", hour_from: 8, date_to: "2026-09-22", hour_to: 17,
+    });
+    wrapper.unmount();
+  });
 });

@@ -22,7 +22,9 @@ describe("dashboard event API", () => {
       device_id: "device-1",
       log_level: "error",
       date_from: "2026-08-01",
+      hour_from: 8,
       date_to: "2026-08-13",
+      hour_to: 17,
     };
 
     getEvents(params);

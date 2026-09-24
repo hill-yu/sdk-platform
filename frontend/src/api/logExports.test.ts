@@ -11,8 +11,8 @@ describe("log export api", () => {
   it("sends package search and export filters", async () => {
     await searchLogPackages("tech");
     expect(request.get).toHaveBeenCalledWith("/log-packages", { params: { keyword: "tech", limit: 20 } });
-    await createLogExport({ package_names: ["com.a"], log_level: "info" });
-    expect(request.post).toHaveBeenCalledWith("/log-exports", { package_names: ["com.a"], log_level: "info" });
+    await createLogExport({ package_names: ["com.a"], log_level: "info", date_from: "2026-09-20", hour_from: 8, date_to: "2026-09-22", hour_to: 17 });
+    expect(request.post).toHaveBeenCalledWith("/log-exports", { package_names: ["com.a"], log_level: "info", date_from: "2026-09-20", hour_from: 8, date_to: "2026-09-22", hour_to: 17 });
   });
 
   it("downloads csv as a blob", async () => {

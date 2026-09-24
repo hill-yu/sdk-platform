@@ -117,19 +117,30 @@
           <select v-model="rawFilters.log_level" data-testid="level-filter"><option value="">全部级别</option><option value="debug">debug</option><option value="info">info</option><option value="warn">warn</option><option value="error">error</option></select>
           <input v-model="rawFilters.device_id" data-testid="device-filter" type="text" placeholder="device_id" />
           <input v-model="rawFilters.date_from" data-testid="date-from-filter" type="date" />
+          <select v-model="rawFilters.hour_from" data-testid="hour-from-filter">
+            <option value="">开始小时</option>
+            <option v-for="option in hourOptions" :key="`from-${option.value}`" :value="option.value">{{ option.label }}</option>
+          </select>
           <input v-model="rawFilters.date_to" data-testid="date-to-filter" type="date" />
-          <button data-testid="query-button" class="primary" type="button" @click="loadLogs({ resetPage: true })">查询</button>
+          <select v-model="rawFilters.hour_to" data-testid="hour-to-filter">
+            <option value="">结束小时</option>
+            <option v-for="option in hourOptions" :key="`to-${option.value}`" :value="option.value">{{ option.label }}</option>
+          </select>
+          <button data-testid="query-button" class="primary" type="button" @click="queryRaw">查询</button>
           <button data-testid="refresh-button" class="ghost" type="button" @click="loadLogs()">刷新</button>
+          <button data-testid="reset-button" class="ghost" type="button" @click="resetRaw">重置</button>
         </div>
         <p class="timezone-note">日期按北京时间筛选，包名、设备 ID 和日志级别为完全匹配。</p>
         <p v-if="filterOptionsError" data-testid="filter-options-error" class="feedback error">{{ filterOptionsError }}</p>
         <LogExportPanel
-          :package-name="rawFilters.package_name"
-          :sdk-version="rawFilters.sdk_version"
-          :device-id="rawFilters.device_id"
-          :log-level="rawFilters.log_level as '' | LogLevel"
-          :date-from="rawFilters.date_from"
-          :date-to="rawFilters.date_to"
+          :package-name="appliedRawFilters.package_name"
+          :sdk-version="appliedRawFilters.sdk_version"
+          :device-id="appliedRawFilters.device_id"
+          :log-level="appliedRawFilters.log_level as '' | LogLevel"
+          :date-from="appliedRawFilters.date_from"
+          :hour-from="appliedRawFilters.hour_from"
+          :date-to="appliedRawFilters.date_to"
+          :hour-to="appliedRawFilters.hour_to"
         />
       </section>
       <div class="viewer-grid">
@@ -293,7 +304,11 @@ async function saveColumns(columns: string[]) {
   finally { columnSaving.value = false; }
 }
 
-const rawFilters = reactive({ package_name: "", sdk_version: "", device_id: "", log_level: "", date_from: "", date_to: "" });
+type RawFilters = { package_name: string; sdk_version: string; device_id: string; log_level: string; date_from: string; hour_from: string; date_to: string; hour_to: string };
+const emptyRawFilters = (): RawFilters => ({ package_name: "", sdk_version: "", device_id: "", log_level: "", date_from: "", hour_from: "", date_to: "", hour_to: "" });
+const rawFilters = reactive<RawFilters>(emptyRawFilters());
+const appliedRawFilters = ref<RawFilters>(emptyRawFilters());
+const hourOptions = Array.from({ length: 24 }, (_, value) => ({ value: String(value), label: `${String(value).padStart(2, "0")}:00–${String(value).padStart(2, "0")}:59` }));
 const filterOptions = reactive<EventFilterOptions>({ package_names: [], sdk_versions: [] });
 const filterOptionsError = ref("");
 const filterOptionsLoading = ref(false);
@@ -302,7 +317,31 @@ const rawResult = reactive({ total: 0, items: [] as EventItem[] });
 const rawPage = ref(1); const rawRequestedPage = ref(1); const rawPageSize = 20; const selected = ref<EventItem | null>(null); let rawRequestSequence = 0;
 function display(value: unknown): string { return value == null || value === "" ? "-" : String(value); }
 function levelClass(value: unknown): string { return typeof value === "string" ? `level-${value}` : "level-unknown"; }
-function rawQueryParams(targetPage: number): EventQuery { return { page: targetPage, page_size: rawPageSize, event_type: "log", package_name: rawFilters.package_name || undefined, sdk_version: rawFilters.sdk_version || undefined, device_id: rawFilters.device_id || undefined, log_level: (rawFilters.log_level || undefined) as LogLevel | undefined, date_from: rawFilters.date_from || undefined, date_to: rawFilters.date_to || undefined }; }
+function rawQueryParams(targetPage: number): EventQuery {
+  const filters = appliedRawFilters.value;
+  return { page: targetPage, page_size: rawPageSize, event_type: "log", package_name: filters.package_name || undefined, sdk_version: filters.sdk_version || undefined, device_id: filters.device_id || undefined, log_level: (filters.log_level || undefined) as LogLevel | undefined, date_from: filters.date_from || undefined, hour_from: filters.hour_from === "" ? undefined : Number(filters.hour_from), date_to: filters.date_to || undefined, hour_to: filters.hour_to === "" ? undefined : Number(filters.hour_to) };
+}
+function rawFilterValidationError(filters: RawFilters): string | null {
+  const hasHourFrom = filters.hour_from !== "";
+  const hasHourTo = filters.hour_to !== "";
+  if (hasHourFrom !== hasHourTo) return "开始小时和结束小时必须同时选择。";
+  if (hasHourFrom && (!filters.date_from || !filters.date_to)) return "选择小时后必须同时选择开始日期和结束日期。";
+  if (filters.date_from && filters.date_to && filters.date_from > filters.date_to) return "开始日期不能晚于结束日期。";
+  if (hasHourFrom && filters.date_from === filters.date_to && Number(filters.hour_from) > Number(filters.hour_to)) return "结束小时必须不早于开始小时。";
+  return null;
+}
+async function queryRaw(): Promise<void> {
+  const error = rawFilterValidationError(rawFilters);
+  if (error) { setFeedbackError(feedback, error); return; }
+  appliedRawFilters.value = { ...rawFilters };
+  await loadLogs({ resetPage: true });
+}
+async function resetRaw(): Promise<void> {
+  Object.assign(rawFilters, emptyRawFilters());
+  appliedRawFilters.value = emptyRawFilters();
+  filterOptions.sdk_versions = [];
+  await loadLogs({ resetPage: true });
+}
 async function loadFilterOptions(packageName?: string): Promise<void> {
   const requestSequence = ++filterOptionsRequestSequence;
   filterOptionsLoading.value = true;
