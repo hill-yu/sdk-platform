@@ -58,6 +58,7 @@
 创建 `backend/tests/test_usage_duration_migration.py`：
 
 ```python
+import re
 from pathlib import Path
 
 from sqlalchemy import CheckConstraint
@@ -85,7 +86,7 @@ def test_usage_duration_model_has_expected_table_and_check_constraint():
 
 def _assert_usage_duration_ddl(sql: str):
     assert "CREATE TABLE IF NOT EXISTS sdk_usage_durations" in sql
-    assert "duration_s INTEGER" in sql
+    assert re.search(r"duration_s\s+INTEGER", sql)
     assert "CHECK (duration_s BETWEEN 1 AND 3600)" in sql
     assert "idx_usage_durations_server_ts" in sql
     assert "idx_usage_durations_package_ts" in sql
