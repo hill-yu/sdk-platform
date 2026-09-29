@@ -1,0 +1,88 @@
+from fastapi.testclient import TestClient
+
+from app.core.database import get_db_no_commit
+
+
+TOKEN = "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0"
+
+
+class Db:
+    pass
+
+
+async def override_db():
+    yield Db()
+
+
+def headers():
+    return {"Authorization": f"Bearer {TOKEN}"}
+
+
+def test_usage_duration_admin_route_requires_token():
+    from app.admin_main import app
+
+    with TestClient(app) as client:
+        response = client.get("/api/admin/usage-durations")
+    assert response.status_code == 401
+
+
+def test_usage_duration_admin_route_normalizes_package_and_forwards_filters(monkeypatch):
+    from app.admin_main import app
+    from app.api.admin import usage_duration
+
+    calls = []
+
+    async def fake_query(_db, **kwargs):
+        calls.append(kwargs)
+        return {
+            "summary": {"total_duration_s": 0, "report_count": 0, "device_count": 0},
+            "total": 0,
+            "page": kwargs["page"],
+            "page_size": kwargs["page_size"],
+            "items": [],
+        }
+
+    monkeypatch.setattr(usage_duration.usage_duration_service, "get_usage_durations", fake_query)
+    app.dependency_overrides[get_db_no_commit] = override_db
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/admin/usage-durations",
+                params={
+                    "package_name": " COM.Example.App ",
+                    "device_id": "device-1",
+                    "sdk_version": "1.0.3",
+                    "ver": "1.0",
+                    "date_from": "2026-09-01",
+                    "date_to": "2026-09-29",
+                    "page": 2,
+                    "page_size": 50,
+                },
+                headers=headers(),
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert calls[0]["package_name"] == "com.example.app"
+    assert calls[0]["device_id"] == "device-1"
+    assert calls[0]["sdk_version"] == "1.0.3"
+    assert calls[0]["ver"] == "1.0"
+    assert calls[0]["page"] == 2
+    assert calls[0]["page_size"] == 50
+
+
+def test_usage_duration_admin_rejects_unpaired_and_overlong_dates():
+    from app.admin_main import app
+
+    with TestClient(app) as client:
+        unpaired = client.get(
+            "/api/admin/usage-durations?date_from=2026-09-01",
+            headers=headers(),
+        )
+        overlong = client.get(
+            "/api/admin/usage-durations?date_from=2026-08-01&date_to=2026-09-01",
+            headers=headers(),
+        )
+    assert unpaired.status_code == 422
+    assert overlong.status_code == 422
