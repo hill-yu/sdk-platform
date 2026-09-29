@@ -61,7 +61,33 @@ COMMENT ON TABLE sdk_events IS 'SDK原始事件表（按月分区）';
 COMMENT ON COLUMN sdk_events.payload IS 'JSONB灵活存储事件数据';
 
 -- ============================================================
--- 3. 配置表版本记录
+-- 3. SDK 使用时长记录
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sdk_usage_durations (
+    id              BIGSERIAL PRIMARY KEY,
+    package_name    VARCHAR(255) NOT NULL,
+    device_id       VARCHAR(64)  NOT NULL,
+    device_model    VARCHAR(100) NOT NULL,
+    os              VARCHAR(50)  NOT NULL,
+    app_version     VARCHAR(50)  NOT NULL,
+    sdk_version     VARCHAR(20)  NOT NULL,
+    duration_s      INTEGER      NOT NULL,
+    server_ts       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    ip              INET,
+    user_agent      TEXT,
+    CONSTRAINT chk_usage_durations_duration_s
+        CHECK (duration_s BETWEEN 1 AND 3600)
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_durations_server_ts
+    ON sdk_usage_durations (server_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_durations_package_ts
+    ON sdk_usage_durations (package_name, server_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_durations_package_device_ts
+    ON sdk_usage_durations (package_name, device_id, server_ts DESC);
+
+-- ============================================================
+-- 4. 配置表版本记录
 -- ============================================================
 CREATE TABLE IF NOT EXISTS sdk_configs (
     id              SERIAL PRIMARY KEY,
@@ -91,7 +117,7 @@ CREATE INDEX IF NOT EXISTS idx_configs_status ON sdk_configs (package_name, stat
 COMMENT ON TABLE sdk_configs IS '配置表版本记录';
 
 -- ============================================================
--- 4. SDK 版本管理
+-- 5. SDK 版本管理
 -- ============================================================
 CREATE TABLE IF NOT EXISTS sdk_versions (
     id              SERIAL PRIMARY KEY,
@@ -119,7 +145,7 @@ CREATE INDEX IF NOT EXISTS idx_versions_platform ON sdk_versions (platform, vers
 COMMENT ON TABLE sdk_versions IS 'SDK版本记录';
 
 -- ============================================================
--- 5. 日志解析、资料和全局配置
+-- 6. 日志解析、资料和全局配置
 -- ============================================================
 CREATE TABLE IF NOT EXISTS sdk_log_decodes (
     event_id         BIGINT       NOT NULL,
@@ -206,7 +232,7 @@ COMMENT ON TABLE sdk_admin_preferences IS '日志分析全局管理偏好';
 COMMENT ON TABLE sdk_log_reparse_jobs IS '日志重新解析作业，不保存原始extra';
 
 -- ============================================================
--- 6. 日志导出任务
+-- 7. 日志导出任务
 -- ============================================================
 CREATE TABLE IF NOT EXISTS sdk_log_export_jobs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -238,7 +264,7 @@ CREATE TABLE IF NOT EXISTS sdk_log_export_jobs (
 CREATE INDEX IF NOT EXISTS idx_log_export_jobs_status_created ON sdk_log_export_jobs (status, created_at);
 
 -- ============================================================
--- 7. 分析物化视图
+-- 8. 分析物化视图
 -- ============================================================
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_daily_event_stats AS
 SELECT
