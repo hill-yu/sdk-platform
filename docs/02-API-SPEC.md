@@ -11,10 +11,12 @@
   - [A2. 配置获取](#a2-配置获取-get-apiv1config)
   - [A3. 点击上报](#a3-点击上报-post-apiv1click)
   - [A4. 日志上报](#a4-日志上报-post-apiv1log)
+  - [A5. 使用时长上报](#a5-使用时长上报-post-apiv1usage-duration)
 - [B. 管理后台接口（端口 8101）](#b-管理后台接口端口-8101)
   - [B1. 数据大盘](#b1-数据大盘)
   - [B2. 配置表管理](#b2-配置表管理)
   - [B3. SDK 版本管理](#b3-sdk-版本管理)
+  - [B4. 使用时长查询](#b4-使用时长查询)
 - [C. 通用规范](#c-通用规范)
 
 ---
@@ -342,6 +344,26 @@ SDK 批量上报日志。
 # 4. 数据库写入异常 → 返回 500
 # 5. 全部成功返回 {"code":0, "message":"ok", "data":{"accepted":N}}
 ```
+
+---
+
+### A5. 使用时长上报 `POST /api/v1/usage-duration`
+
+SDK 按使用周期上报本阶段产生的使用时长秒数。接口无需 SDK Token，但使用现有 SDK 写接口限流。
+
+请求字段为 `package_name`、`device_id`、`device_model`、`os`、`ver`、`sdk_version` 和
+`duration_s`，均必填；`duration_s` 必须是 1～3600 的整数。服务端接收时间、客户端 IP
+和 User-Agent 写入独立的 `sdk_usage_durations` 表。请求不接受 `timestamp` 或 `report_id`，
+本期不提供幂等去重。
+
+成功响应：
+
+```json
+{"code":0,"message":"ok","data":{"accepted":1,"rejected":0}}
+```
+
+完整字段约束、请求示例、错误规则见
+[SDK 使用时长接口对接文档](49-SDK-USAGE-DURATION-API-20260929.md)。
 
 ---
 
@@ -677,6 +699,24 @@ GET /api/admin/versions?platform=ios
 #### B3.3 编辑版本 `PUT /api/admin/versions/{id}`
 
 > 可修改 update_policy、download_url、release_notes、status 等。
+
+---
+
+### B4. 使用时长查询
+
+```http
+GET /api/admin/usage-durations
+```
+
+要求 `Authorization: Bearer <ADMIN_TOKEN>`。支持按 `package_name`、`device_id`、
+`sdk_version`、`ver` 精确筛选，以及按 UTC+8 自然日范围筛选；`date_from` 和 `date_to`
+必须成对提供，日期跨度最多 31 天。支持 `page`（默认 1）和 `page_size`（默认 20，最大 100）。
+
+响应同时提供 `summary` 汇总和 `items` 分页明细：汇总包括总时长、上报记录数和设备数，
+总数 `total` 与 `summary.report_count` 一致；明细按服务器接收时间倒序、记录 ID 倒序稳定排序。
+
+完整筛选条件、响应字段和示例见
+[SDK 使用时长接口对接文档](49-SDK-USAGE-DURATION-API-20260929.md)。
 
 ---
 
