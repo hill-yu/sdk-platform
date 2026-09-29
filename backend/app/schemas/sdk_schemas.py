@@ -85,6 +85,26 @@ class LogReportResponse(BaseModel):
 
 
 # ============================================================
+# 使用时长
+# ============================================================
+
+class UsageDurationReportRequest(BaseModel):
+    """SDK 使用时长上报请求"""
+    package_name: str = Field(..., min_length=1, max_length=255)
+    device_id: str = Field(..., min_length=1, max_length=64)
+    device_model: str = Field(..., min_length=1, max_length=100)
+    os: str = Field(..., min_length=1, max_length=50)
+    ver: str = Field(..., min_length=1, max_length=50)
+    sdk_version: str = Field(..., min_length=1, max_length=20)
+    duration_s: int = Field(..., ge=1, le=3600, strict=True)
+
+    @field_validator("package_name")
+    @classmethod
+    def validate_package_name(cls, value: str) -> str:
+        return normalize_package_name(value)
+
+
+# ============================================================
 # 统一响应
 # ============================================================
 

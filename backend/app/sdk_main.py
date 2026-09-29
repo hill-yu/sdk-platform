@@ -3,7 +3,7 @@ SDK API 服务入口 — 端口 8100
 """
 import uvicorn
 from fastapi import FastAPI
-from app.api.sdk import version, config, click, log
+from app.api.sdk import version, config, click, log, usage_duration
 from app.core.middleware import RequestSizeLimitMiddleware
 
 
@@ -14,6 +14,7 @@ app.include_router(version.router)
 app.include_router(config.router)
 app.include_router(click.router)
 app.include_router(log.router)
+app.include_router(usage_duration.router)
 
 
 @app.get("/health")
