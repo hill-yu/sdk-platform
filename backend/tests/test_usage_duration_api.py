@@ -97,3 +97,12 @@ def test_usage_duration_returns_safe_500_on_database_error(client):
     response = client.post("/api/v1/usage-duration", json=VALID_BODY)
     assert response.status_code == 500
     assert response.json()["detail"] == "数据库写入失败"
+
+
+@pytest.mark.parametrize("field", ["timestamp", "report_id"])
+def test_usage_duration_rejects_unsupported_fields(client, field):
+    response = client.post(
+        "/api/v1/usage-duration",
+        json={**VALID_BODY, field: "unsupported"},
+    )
+    assert response.status_code == 422

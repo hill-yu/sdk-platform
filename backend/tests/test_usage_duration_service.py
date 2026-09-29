@@ -49,6 +49,25 @@ def test_build_filters_uses_all_exact_match_fields():
     assert "server_ts < " in sql
 
 
+def test_build_filters_keeps_explicit_empty_values_as_exact_matches():
+    filters = usage_duration_service.build_usage_filters(
+        package_name="",
+        device_id="",
+        sdk_version="",
+        ver="",
+        range_start=datetime(2026, 9, 1, tzinfo=timezone.utc),
+        range_end=datetime(2026, 9, 2, tzinfo=timezone.utc),
+    )
+    sql = " AND ".join(
+        str(item.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+        for item in filters
+    )
+    assert "package_name = ''" in sql
+    assert "device_id = ''" in sql
+    assert "sdk_version = ''" in sql
+    assert "app_version = ''" in sql
+
+
 class Result:
     def __init__(self, *, mapping=None, rows=None):
         self.mapping = mapping

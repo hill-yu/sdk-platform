@@ -2,7 +2,7 @@
 SDK 接口 Pydantic 请求/响应模型
 """
 from typing import Optional, Any
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.services.config_crypto import normalize_package_name
 
@@ -90,6 +90,8 @@ class LogReportResponse(BaseModel):
 
 class UsageDurationReportRequest(BaseModel):
     """SDK 使用时长上报请求"""
+    model_config = ConfigDict(extra="forbid")
+
     package_name: str = Field(..., min_length=1, max_length=255)
     device_id: str = Field(..., min_length=1, max_length=64)
     device_model: str = Field(..., min_length=1, max_length=100)

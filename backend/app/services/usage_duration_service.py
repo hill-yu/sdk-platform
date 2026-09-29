@@ -43,13 +43,13 @@ def build_usage_filters(
         SdkUsageDuration.server_ts >= range_start,
         SdkUsageDuration.server_ts < range_end,
     ]
-    if package_name:
+    if package_name is not None:
         filters.append(SdkUsageDuration.package_name == package_name)
-    if device_id:
+    if device_id is not None:
         filters.append(SdkUsageDuration.device_id == device_id)
-    if sdk_version:
+    if sdk_version is not None:
         filters.append(SdkUsageDuration.sdk_version == sdk_version)
-    if ver:
+    if ver is not None:
         filters.append(SdkUsageDuration.app_version == ver)
     return filters
 

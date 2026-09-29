@@ -17,18 +17,18 @@ router = APIRouter(
 
 @router.get("/usage-durations")
 async def get_usage_durations(
-    package_name: str | None = Query(None, max_length=255),
-    device_id: str | None = Query(None, max_length=64),
-    sdk_version: str | None = Query(None, max_length=20),
-    ver: str | None = Query(None, max_length=50),
+    package_name: str | None = Query(None, min_length=1, max_length=255),
+    device_id: str | None = Query(None, min_length=1, max_length=64),
+    sdk_version: str | None = Query(None, min_length=1, max_length=20),
+    ver: str | None = Query(None, min_length=1, max_length=50),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db_no_commit),
 ):
-    normalized_package = normalize_package_name(package_name) if package_name else None
     try:
+        normalized_package = normalize_package_name(package_name) if package_name is not None else None
         data = await usage_duration_service.get_usage_durations(
             db,
             package_name=normalized_package,

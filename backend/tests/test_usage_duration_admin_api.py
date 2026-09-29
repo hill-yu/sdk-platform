@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+import pytest
 
 from app.core.database import get_db_no_commit
 
@@ -86,3 +87,40 @@ def test_usage_duration_admin_rejects_unpaired_and_overlong_dates():
         )
     assert unpaired.status_code == 422
     assert overlong.status_code == 422
+
+
+def test_usage_duration_admin_rejects_invalid_package_name():
+    from app.admin_main import app
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/admin/usage-durations?package_name=!!!",
+            headers=headers(),
+        )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("field", ["package_name", "device_id", "sdk_version", "ver"])
+def test_usage_duration_admin_rejects_empty_filter_values(monkeypatch, field):
+    from app.admin_main import app
+    from app.api.admin import usage_duration
+
+    async def fake_query(_db, **_kwargs):
+        return {
+            "summary": {"total_duration_s": 0, "report_count": 0, "device_count": 0},
+            "total": 0,
+            "page": 1,
+            "page_size": 20,
+            "items": [],
+        }
+
+    monkeypatch.setattr(usage_duration.usage_duration_service, "get_usage_durations", fake_query)
+    app.dependency_overrides[get_db_no_commit] = override_db
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/admin/usage-durations",
+            params={field: ""},
+            headers=headers(),
+        )
+    app.dependency_overrides.clear()
+    assert response.status_code == 422
