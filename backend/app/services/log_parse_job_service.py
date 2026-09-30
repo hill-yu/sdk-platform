@@ -48,6 +48,33 @@ class ParseJobFailure(RuntimeError):
     """Raised when a parse job must enter the failed terminal state."""
 
 
+class ParseExecutorPool:
+    """Own one bounded process lane per executor and reuse it across batches."""
+
+    def __init__(self, lane_count: int) -> None:
+        self.executors: list[Any] = []
+        self.ensure(lane_count)
+
+    def ensure(self, lane_count: int) -> None:
+        target = min(max(lane_count, 1), MAX_PARSE_CONCURRENCY)
+        try:
+            while len(self.executors) < target:
+                self.executors.append(PARSE_EXECUTOR_FACTORY(max_workers=1))
+        except BaseException:
+            self.shutdown()
+            raise
+
+    def replace_lane(self, lane_index: int) -> None:
+        old_executor = self.executors[lane_index]
+        terminate_parse_executor(old_executor)
+        self.executors[lane_index] = PARSE_EXECUTOR_FACTORY(max_workers=1)
+
+    def shutdown(self) -> None:
+        executors, self.executors = self.executors, []
+        for executor in executors:
+            shutdown_parse_executor(executor)
+
+
 @dataclass(frozen=True)
 class ParseBatchResult:
     scanned: int = 0
@@ -399,6 +426,7 @@ async def process_parse_job_batch(
     worker_id: str,
     now: datetime,
     batch_size: int = PARSE_BATCH_SIZE,
+    executor_pool: ParseExecutorPool | None = None,
 ) -> ParseBatchResult:
     result = await db.execute(select(LogReparseJob).where(LogReparseJob.id == job_id))
     job = result.scalar_one_or_none()
@@ -432,50 +460,45 @@ async def process_parse_job_batch(
     failed_h1_count = 0
     no_h1_count = 0
     lane_count = min(max(int(job.concurrency or 1), 1), MAX_PARSE_CONCURRENCY, len(events))
-    executors = []
-    try:
-        executors = [PARSE_EXECUTOR_FACTORY(max_workers=1) for _ in range(lane_count)]
-    except BaseException:
-        for executor in executors:
-            shutdown_parse_executor(executor)
-        raise
+    owns_executor_pool = executor_pool is None
+    pool = executor_pool or ParseExecutorPool(lane_count)
+    pool.ensure(lane_count)
 
     decoded_results: list[Any] = [None] * len(events)
 
     async def run_lane(lane_index: int) -> None:
-        executor = executors[lane_index]
         loop = asyncio.get_running_loop()
-        try:
-            await loop.run_in_executor(executor, parse_worker_ready)
-            for event_index in range(lane_index, len(events), lane_count):
-                event = events[event_index]
-                try:
-                    decoded_results[event_index] = await asyncio.wait_for(
-                        loop.run_in_executor(
-                            executor,
-                            PARSE_DECODE_FUNCTION,
-                            event_snapshot(event),
-                            job.id,
-                        ),
-                        timeout=PARSE_TIMEOUT_SECONDS,
-                    )
-                except (asyncio.TimeoutError, TimeoutError) as exc:
-                    decoded_results[event_index] = exc
-                    terminate_parse_executor(executor)
-                    executor = PARSE_EXECUTOR_FACTORY(max_workers=1)
-                    await loop.run_in_executor(executor, parse_worker_ready)
-                except Exception as exc:
-                    decoded_results[event_index] = exc
-        finally:
-            shutdown_parse_executor(executor)
+        await loop.run_in_executor(pool.executors[lane_index], parse_worker_ready)
+        for event_index in range(lane_index, len(events), lane_count):
+            event = events[event_index]
+            try:
+                decoded_results[event_index] = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        pool.executors[lane_index],
+                        PARSE_DECODE_FUNCTION,
+                        event_snapshot(event),
+                        job.id,
+                    ),
+                    timeout=PARSE_TIMEOUT_SECONDS,
+                )
+            except (asyncio.TimeoutError, TimeoutError) as exc:
+                decoded_results[event_index] = exc
+                pool.replace_lane(lane_index)
+                await loop.run_in_executor(pool.executors[lane_index], parse_worker_ready)
+            except Exception as exc:
+                decoded_results[event_index] = exc
 
-    lane_results = await asyncio.gather(
-        *(run_lane(lane_index) for lane_index in range(lane_count)),
-        return_exceptions=True,
-    )
-    for lane_result in lane_results:
-        if isinstance(lane_result, BaseException):
-            raise lane_result
+    try:
+        lane_results = await asyncio.gather(
+            *(run_lane(lane_index) for lane_index in range(lane_count)),
+            return_exceptions=True,
+        )
+        for lane_result in lane_results:
+            if isinstance(lane_result, BaseException):
+                raise lane_result
+    finally:
+        if owns_executor_pool:
+            pool.shutdown()
 
     event_keys = [(event.id, event.server_ts) for event in events]
     await db.execute(

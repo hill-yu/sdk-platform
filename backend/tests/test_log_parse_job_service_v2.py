@@ -529,6 +529,56 @@ def test_parse_executor_is_bounded_and_receives_serializable_snapshots(monkeypat
     assert captured["cancel_futures"] is True
 
 
+def test_parse_executor_pool_is_reused_across_batches_and_shutdown_once(monkeypatch) -> None:
+    from concurrent.futures import Future
+
+    from app.models.event import SdkEvent
+    from app.models.log_analysis import LogReparseJob
+    from app.services import log_parse_job_service as service
+
+    class RecordingExecutor:
+        instances = []
+
+        def __init__(self, max_workers: int):
+            self.shutdown_calls = 0
+            self.__class__.instances.append(self)
+
+        def submit(self, function, *args):
+            future = Future()
+            future.set_result(function(*args))
+            return future
+
+        def shutdown(self, **kwargs):
+            self.shutdown_calls += 1
+
+    monkeypatch.setattr(service, "PARSE_EXECUTOR_FACTORY", RecordingExecutor)
+    monkeypatch.setattr(service, "PARSE_DECODE_FUNCTION", lambda _snapshot, _job_id: ([], [], 1, 0.0))
+    job = LogReparseJob(
+        id=91,
+        package_name="com.example.app",
+        range_start=RANGE_START,
+        range_end=RANGE_END,
+        snapshot_end=NOW,
+        status="running",
+        lease_owner="worker-1",
+        lease_expires_at=NOW.replace(hour=2),
+        concurrency=2,
+    )
+    events = [
+        SdkEvent(id=index, event_type="log", package_name="com.example.app", server_ts=NOW, payload={"extra": "raw"})
+        for index in (20, 21)
+    ]
+    pool = service.ParseExecutorPool(2)
+
+    asyncio.run(service.process_parse_job_batch(BatchDb(job, events), 91, worker_id="worker-1", now=NOW, executor_pool=pool))
+    asyncio.run(service.process_parse_job_batch(BatchDb(job, events), 91, worker_id="worker-1", now=NOW, executor_pool=pool))
+
+    assert len(RecordingExecutor.instances) == 2
+    assert all(executor.shutdown_calls == 0 for executor in RecordingExecutor.instances)
+    pool.shutdown()
+    assert all(executor.shutdown_calls == 1 for executor in RecordingExecutor.instances)
+
+
 def test_parse_executor_uses_bounded_waves_so_queue_wait_is_not_a_timeout(monkeypatch) -> None:
     from concurrent.futures import ThreadPoolExecutor
     import time

@@ -11,6 +11,7 @@ from app.core.database import async_session_factory
 from app.services.log_parse_job_service import (
     LeaseLostError,
     ParseBatchResult,
+    ParseExecutorPool,
     claim_parse_job,
     get_parse_job,
     mark_parse_job_failed,
@@ -63,41 +64,47 @@ async def run_worker_once(
     if job is None:
         return False
     claimed_job_id = job.id
-    await db.commit()
-    if stop_event is not None and stop_event.is_set():
-        await release_parse_job(db, job.id, worker_id=worker_id, now=utc_now())
+    configured_concurrency = getattr(job, "concurrency", None) or MAX_CONCURRENCY
+    executor_pool = ParseExecutorPool(min(max(int(configured_concurrency), 1), MAX_CONCURRENCY))
+    try:
         await db.commit()
-        return True
-    while True:
-        try:
-            result: ParseBatchResult = await process_parse_job_batch(
-                db,
-                job.id,
-                worker_id=worker_id,
-                now=utc_now(),
-                batch_size=BATCH_SIZE,
-            )
-            await db.commit()
-        except asyncio.CancelledError:
-            await db.rollback()
-            raise
-        except LeaseLostError:
-            await db.rollback()
-            return True
-        except Exception as error:
-            await db.rollback()
-            await mark_parse_job_failed(db, claimed_job_id, error, now=utc_now())
-            await db.commit()
-            return True
-        if result.done:
-            return True
         if stop_event is not None and stop_event.is_set():
-            await release_parse_job(db, job.id, worker_id=worker_id, now=utc_now())
+            await release_parse_job(db, claimed_job_id, worker_id=worker_id, now=utc_now())
             await db.commit()
             return True
-        refreshed = await get_parse_job(db, job.id)
-        if refreshed is None or refreshed.status in {"cancelled", "failed", "success"}:
-            return True
+        while True:
+            try:
+                result: ParseBatchResult = await process_parse_job_batch(
+                    db,
+                    claimed_job_id,
+                    worker_id=worker_id,
+                    now=utc_now(),
+                    batch_size=BATCH_SIZE,
+                    executor_pool=executor_pool,
+                )
+                await db.commit()
+            except asyncio.CancelledError:
+                await db.rollback()
+                raise
+            except LeaseLostError:
+                await db.rollback()
+                return True
+            except Exception as error:
+                await db.rollback()
+                await mark_parse_job_failed(db, claimed_job_id, error, now=utc_now())
+                await db.commit()
+                return True
+            if result.done:
+                return True
+            if stop_event is not None and stop_event.is_set():
+                await release_parse_job(db, claimed_job_id, worker_id=worker_id, now=utc_now())
+                await db.commit()
+                return True
+            refreshed = await get_parse_job(db, claimed_job_id)
+            if refreshed is None or refreshed.status in {"cancelled", "failed", "success"}:
+                return True
+    finally:
+        executor_pool.shutdown()
 
 
 async def worker_loop(*, worker_id: str, stop_event: asyncio.Event | None = None) -> None:
