@@ -24,7 +24,7 @@ BACKEND_ROOT = REPO_ROOT / "backend"
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from sqlalchemy import delete, insert
+from sqlalchemy import delete, func, insert, select
 
 from app.core.database import async_session_factory, engine
 from app.models.event import SdkEvent
@@ -44,6 +44,8 @@ from app.workers.log_parse_worker import run_worker_once
 
 TERMINAL_STATES = {"success", "failed", "cancelled"}
 BENCHMARK_PREFIX = "__sdk_parse_benchmark__"
+H1_EVENTS_PER_EVENT = 2
+CLICKS_PER_H1_EVENT = 5
 
 
 class BenchmarkFailure(RuntimeError):
@@ -64,20 +66,36 @@ def parse_args() -> argparse.Namespace:
 
 
 def make_events(package_name: str, count: int, start: datetime) -> list[dict[str, object]]:
-    payload = {"level": "info", "message": "benchmark", "extra": "controlled raw benchmark event"}
-    return [
-        {
+    events = []
+    for index in range(count):
+        if index % 20 == 0:
+            extra = "controlled raw benchmark fallback"
+        else:
+            extra = (
+                "H1|t=268H0A000|w=main|i=GC|p=3|"
+                "pa=b11hfn1,a01hfn1,w11hfn1|a=b|s=b|r=p|u=FEm||"
+                "H1|t=268H0A001|w=main|i=GD|p=2|"
+                "pa=a11hfn1,w01hfn1|a=a|s=a|r=p|u=10"
+            )
+        events.append(
+            {
             "event_type": "log",
             "package_name": package_name,
             "device_id": f"benchmark-device-{index % 32}",
             "sdk_version": "benchmark",
             "session_id": f"benchmark-session-{index % 128}",
-            "payload": payload,
+            "payload": {"level": "info", "message": "benchmark", "extra": extra},
             "client_ts": start + timedelta(microseconds=index),
             "server_ts": start + timedelta(microseconds=index),
-        }
-        for index in range(count)
-    ]
+            }
+        )
+    return events
+
+
+def expected_counts(count: int) -> tuple[int, int, int]:
+    fallback_events = sum(index % 20 == 0 for index in range(count))
+    h1_events = count - fallback_events
+    return h1_events * H1_EVENTS_PER_EVENT, h1_events * H1_EVENTS_PER_EVENT * CLICKS_PER_H1_EVENT // H1_EVENTS_PER_EVENT, fallback_events
 
 
 async def cleanup(package_name: str, job_id: int | None) -> None:
@@ -129,7 +147,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict[str, object]:
 
         async def process_job() -> None:
             async with async_session_factory() as session:
-                await run_worker_once(session, worker_id=worker_id)
+                await run_worker_once(session, worker_id=worker_id, job_id=job_id)
 
         worker_task = asyncio.create_task(process_job())
         job_state = None
@@ -160,21 +178,41 @@ async def run_benchmark(args: argparse.Namespace) -> dict[str, object]:
             final_job = await get_parse_job(session, job_id)
             if final_job is None:
                 raise BenchmarkFailure("benchmark job disappeared")
+            expected_h1_count, expected_click_count, expected_no_h1_count = expected_counts(args.events)
+            h1_count = int(
+                (await session.execute(
+                    select(func.count()).select_from(H1Declaration).where(H1Declaration.package_name == package_name)
+                )).scalar_one()
+                or 0
+            )
+            click_count = int(
+                (await session.execute(
+                    select(func.count()).select_from(LogClickAttempt).where(LogClickAttempt.package_name == package_name)
+                )).scalar_one()
+                or 0
+            )
             counts_match = (
                 final_job.total_count == args.events
                 and final_job.processed_count == args.events
+                and final_job.h1_count == expected_h1_count
                 and final_job.failed_h1_count == 0
-                and final_job.no_h1_count == args.events
+                and final_job.no_h1_count == expected_no_h1_count
+                and h1_count == expected_h1_count
+                and click_count == expected_click_count
             )
             passed = final_job.status == "success" and counts_match and elapsed <= args.max_seconds
             result = {
                 "events": args.events,
                 "elapsed_seconds": round(elapsed, 3),
-                "h1_count": final_job.h1_count,
+                "h1_count": h1_count,
+                "expected_h1_count": expected_h1_count,
+                "click_count": click_count,
+                "expected_click_count": expected_click_count,
                 "failed_h1_count": final_job.failed_h1_count,
                 "status": final_job.status,
                 "processed_count": final_job.processed_count,
                 "no_h1_count": final_job.no_h1_count,
+                "expected_no_h1_count": expected_no_h1_count,
                 "package_name": package_name,
                 "job_id": job_id,
                 "passed": passed,

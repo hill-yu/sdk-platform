@@ -52,15 +52,17 @@ async def run_worker_once(
     db,
     *,
     worker_id: str,
+    job_id: int | None = None,
     now: datetime | None = None,
     stop_event: asyncio.Event | None = None,
 ) -> bool:
     if stop_event is not None and stop_event.is_set():
         return False
     current = now or utc_now()
-    job = await claim_parse_job(db, worker_id=worker_id, now=current)
+    job = await claim_parse_job(db, worker_id=worker_id, now=current, job_id=job_id)
     if job is None:
         return False
+    claimed_job_id = job.id
     await db.commit()
     if stop_event is not None and stop_event.is_set():
         await release_parse_job(db, job.id, worker_id=worker_id, now=utc_now())
@@ -84,7 +86,7 @@ async def run_worker_once(
             return True
         except Exception as error:
             await db.rollback()
-            await mark_parse_job_failed(db, job.id, error, now=utc_now())
+            await mark_parse_job_failed(db, claimed_job_id, error, now=utc_now())
             await db.commit()
             return True
         if result.done:

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from time import perf_counter
 from typing import Any
 
-from sqlalchemy import and_, delete, func, insert, or_, select, update
+from sqlalchemy import and_, delete, func, insert, or_, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -175,6 +175,7 @@ def build_h1_and_click_rows(
             "sdk_version": event.sdk_version,
             "decoder_version": DECODER_VERSION,
         }
+        click_base = {key: value for key, value in base.items() if key not in {"device_id", "sdk_version"}}
         try:
             decoded = asdict(parse_host_final_result_line(record))
             h1_rows.append(
@@ -199,7 +200,7 @@ def build_h1_and_click_rows(
                 attempt_index = int(attempt.get("index") or fallback_index)
                 click_rows.append(
                     {
-                        **base,
+                        **click_base,
                         "config_id": decoded.get("config_id"),
                         "attempt_index": attempt_index,
                         "target_kind": attempt.get("target_kind"),
@@ -305,21 +306,24 @@ async def claim_parse_job(
     *,
     worker_id: str,
     now: datetime,
+    job_id: int | None = None,
 ) -> LogReparseJob | None:
+    eligible = or_(
+        LogReparseJob.status == "pending",
+        and_(
+            LogReparseJob.status == "running",
+            or_(
+                LogReparseJob.lease_expires_at.is_(None),
+                LogReparseJob.lease_expires_at <= now,
+            ),
+        ),
+    )
+    conditions = [eligible]
+    if job_id is not None:
+        conditions.append(LogReparseJob.id == job_id)
     result = await db.execute(
         select(LogReparseJob)
-        .where(
-            or_(
-                LogReparseJob.status == "pending",
-                and_(
-                    LogReparseJob.status == "running",
-                    or_(
-                        LogReparseJob.lease_expires_at.is_(None),
-                        LogReparseJob.lease_expires_at <= now,
-                    ),
-                ),
-            )
-        )
+        .where(*conditions)
         .order_by(LogReparseJob.created_at, LogReparseJob.id)
         .limit(1)
         .with_for_update(skip_locked=True)
@@ -473,6 +477,21 @@ async def process_parse_job_batch(
         if isinstance(lane_result, BaseException):
             raise lane_result
 
+    event_keys = [(event.id, event.server_ts) for event in events]
+    await db.execute(
+        delete(H1DeclarationStage).where(
+            H1DeclarationStage.job_id == job.id,
+            tuple_(H1DeclarationStage.event_id, H1DeclarationStage.event_server_ts).in_(event_keys),
+        )
+    )
+    await db.execute(
+        delete(LogClickAttemptStage).where(
+            LogClickAttemptStage.job_id == job.id,
+            tuple_(LogClickAttemptStage.event_id, LogClickAttemptStage.event_server_ts).in_(event_keys),
+        )
+    )
+    staged_h1_rows: list[dict[str, object]] = []
+    staged_click_rows: list[dict[str, object]] = []
     for event, decoded in zip(events, decoded_results, strict=True):
         if not _lease_valid(job, worker_id, now):
             raise LeaseLostError("解析任务租约已失效")
@@ -497,25 +516,13 @@ async def process_parse_job_batch(
         h1_count += len(h1_rows)
         failed_h1_count += sum(row["status"] == "failed" for row in h1_rows)
         no_h1_count += event_no_h1
-        async with db.begin_nested():
-            await db.execute(
-                delete(H1DeclarationStage).where(
-                    H1DeclarationStage.job_id == job.id,
-                    H1DeclarationStage.event_id == event.id,
-                    H1DeclarationStage.event_server_ts == event.server_ts,
-                )
-            )
-            await db.execute(
-                delete(LogClickAttemptStage).where(
-                    LogClickAttemptStage.job_id == job.id,
-                    LogClickAttemptStage.event_id == event.id,
-                    LogClickAttemptStage.event_server_ts == event.server_ts,
-                )
-            )
-            if h1_rows:
-                await db.execute(insert(H1DeclarationStage).values(h1_rows))
-            if click_rows:
-                await db.execute(insert(LogClickAttemptStage).values(click_rows))
+        staged_h1_rows.extend(h1_rows)
+        staged_click_rows.extend(click_rows)
+
+    if staged_h1_rows:
+        await db.execute(insert(H1DeclarationStage).values(staged_h1_rows))
+    if staged_click_rows:
+        await db.execute(insert(LogClickAttemptStage).values(staged_click_rows))
 
     last_event = events[-1]
     job.processed_count = (job.processed_count or 0) + len(events)

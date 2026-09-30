@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from datetime import datetime, timezone
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 
@@ -38,6 +40,29 @@ def test_benchmark_creates_and_polls_a_real_parse_job() -> None:
     assert "--max-seconds" in source
     assert "passed" in source
     assert "delete(SdkEvent)" in source
+    assert "H1|" in source
+    assert "pa=" in source
+    assert "select(func.count()).select_from(H1Declaration)" in source
+    assert "select(func.count()).select_from(LogClickAttempt)" in source
+    assert "job_id=job_id" in source
+
+
+def test_benchmark_fixture_has_real_h1_pa_mix_and_explicit_fallback_counts() -> None:
+    spec = spec_from_file_location("benchmark_log_parse", ROOT / "scripts/benchmark_log_parse.py")
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    events = module.make_events(
+        "__sdk_parse_benchmark__test",
+        21,
+        datetime(2026, 9, 30, tzinfo=timezone.utc),
+    )
+    extras = [event["payload"]["extra"] for event in events]
+    h1_extras = [extra for extra in extras if "H1|" in extra]
+    assert len(h1_extras) == 19
+    assert all(extra.count("H1|") == 2 and "|pa=" in extra for extra in h1_extras)
+    assert module.expected_counts(21) == (38, 95, 2)
 
 
 def test_benchmark_help_is_runnable() -> None:

@@ -19,6 +19,76 @@ def test_worker_limits_are_bounded() -> None:
     assert 1 <= log_parse_worker.MAX_CONCURRENCY <= 3
 
 
+def test_worker_can_be_scoped_to_the_benchmark_job(monkeypatch) -> None:
+    from app.workers import log_parse_worker
+
+    captured = {}
+
+    class Session:
+        async def rollback(self):
+            pass
+
+    async def fake_claim(_db, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    monkeypatch.setattr(log_parse_worker, "claim_parse_job", fake_claim)
+
+    handled = asyncio.run(log_parse_worker.run_worker_once(Session(), worker_id="benchmark", job_id=91))
+
+    assert handled is False
+    assert captured["job_id"] == 91
+
+
+def test_worker_uses_claimed_id_after_batch_failure_and_rollback(monkeypatch) -> None:
+    from app.workers import log_parse_worker
+
+    class Job:
+        def __init__(self):
+            self.expired = False
+            self.status = "running"
+            self.cancel_requested_at = None
+
+        @property
+        def id(self):
+            if self.expired:
+                raise RuntimeError("expired ORM state")
+            return 91
+
+    class Session:
+        def __init__(self):
+            self.rollbacks = 0
+            self.commits = 0
+
+        async def rollback(self):
+            self.rollbacks += 1
+
+        async def commit(self):
+            self.commits += 1
+
+    job = Job()
+    failures = []
+
+    async def fake_claim(_db, **kwargs):
+        return job
+
+    async def fake_process(_db, _job_id, **kwargs):
+        job.expired = True
+        raise RuntimeError("batch failed")
+
+    async def fake_mark_failed(_db, job_id, error, **kwargs):
+        failures.append((job_id, error))
+
+    monkeypatch.setattr(log_parse_worker, "claim_parse_job", fake_claim)
+    monkeypatch.setattr(log_parse_worker, "process_parse_job_batch", fake_process)
+    monkeypatch.setattr(log_parse_worker, "mark_parse_job_failed", fake_mark_failed)
+    session = Session()
+
+    assert asyncio.run(log_parse_worker.run_worker_once(session, worker_id="worker-1")) is True
+    assert session.rollbacks == 1
+    assert failures[0][0] == 91
+
+
 def test_worker_commits_each_batch_and_resumes_until_done(monkeypatch) -> None:
     from app.workers import log_parse_worker
 

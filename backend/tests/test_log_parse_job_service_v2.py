@@ -433,7 +433,7 @@ def test_process_batch_stages_rows_and_advances_stable_cursor() -> None:
         batch_size=200,
     )
     events = [
-        SdkEvent(id=20, event_type="log", package_name="com.example.app", server_ts=NOW, payload={"extra": "H1|i=GC|p=1"}),
+        SdkEvent(id=20, event_type="log", package_name="com.example.app", server_ts=NOW, payload={"extra": "H1|i=GC|p=1|pa=b11hfn1"}),
         SdkEvent(id=21, event_type="log", package_name="com.example.app", server_ts=NOW, payload={"extra": "raw"}),
     ]
     db = BatchDb(job, events)
@@ -445,7 +445,12 @@ def test_process_batch_stages_rows_and_advances_stable_cursor() -> None:
     assert result.no_h1_count == 1
     assert job.cursor_server_ts == NOW
     assert job.cursor_event_id == 21
-    assert db.nested_commits == 2
+    assert db.nested_commits == 0
+    stage_deletes = [statement for statement in db.statements if statement.__class__.__name__ == "Delete"]
+    assert len(stage_deletes) == 2
+    assert all("event_id" in str(statement.compile(dialect=postgresql.dialect())) for statement in stage_deletes)
+    assert "device_id" not in db.statements[-1].compile(dialect=postgresql.dialect()).string
+    assert "sdk_version" not in db.statements[-1].compile(dialect=postgresql.dialect()).string
 
 
 def test_parse_executor_is_bounded_and_receives_serializable_snapshots(monkeypatch) -> None:
