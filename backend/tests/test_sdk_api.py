@@ -285,4 +285,4 @@ def test_log_returns_quickly_after_returning_insert_and_creates_pending(client, 
     assert pending["status"] == "pending"
     assert pending["package_name"] == "com.example.app"
     assert pending["device_id"] == "device-1"
-    assert pending["decoder_version"] == "1.0.0"
+    assert pending["decoder_version"] == "2.0.0"

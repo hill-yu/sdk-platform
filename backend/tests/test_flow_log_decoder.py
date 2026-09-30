@@ -18,7 +18,7 @@ def vectors() -> dict[str, Any]:
 
 
 def test_decoder_version_is_stable() -> None:
-    assert DECODER_VERSION == "1.0.0"
+    assert DECODER_VERSION == "2.0.0"
 
 
 def test_decode_extra_decodes_representative_h1_vector(vectors: dict[str, Any]) -> None:
@@ -37,6 +37,12 @@ def test_decode_extra_decodes_multiple_h1_records(vectors: dict[str, Any]) -> No
     decoded = decode_extra(vector["extra"])
 
     assert [item["config_id"] for item in decoded] == vector["expected_config_ids"]
+
+
+def test_decode_extra_does_not_overwrite_an_earlier_h1() -> None:
+    decoded = decode_extra("H1|i=GC|p=1||H1|i=GD|p=2")
+
+    assert [item["config_id"] for item in decoded] == [1004, 1005]
 
 
 def test_decode_extra_decodes_legacy_final_flow_result(vectors: dict[str, Any]) -> None:
