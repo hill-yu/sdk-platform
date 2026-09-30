@@ -194,6 +194,7 @@ CREATE_TABLE_STATEMENTS = [
     package_name      VARCHAR(255),
     range_start       TIMESTAMPTZ  NOT NULL,
     range_end         TIMESTAMPTZ  NOT NULL,
+    snapshot_end      TIMESTAMPTZ  NOT NULL,
     status_filter     VARCHAR(32),
     decoder_version_before VARCHAR(32),
     lease_owner       VARCHAR(64),
@@ -203,6 +204,16 @@ CREATE_TABLE_STATEMENTS = [
     processed_count   BIGINT       NOT NULL DEFAULT 0,
     decoded_count     BIGINT       NOT NULL DEFAULT 0,
     failed_count      BIGINT       NOT NULL DEFAULT 0,
+    total_count       BIGINT       NOT NULL DEFAULT 0,
+    h1_count          BIGINT       NOT NULL DEFAULT 0,
+    failed_h1_count   BIGINT       NOT NULL DEFAULT 0,
+    no_h1_count       BIGINT       NOT NULL DEFAULT 0,
+    batch_size        INTEGER      NOT NULL DEFAULT 200,
+    concurrency       INTEGER      NOT NULL DEFAULT 3,
+    started_at        TIMESTAMPTZ,
+    finished_at       TIMESTAMPTZ,
+    last_heartbeat_at TIMESTAMPTZ,
+    cancel_requested_at TIMESTAMPTZ,
     status            VARCHAR(20)  NOT NULL DEFAULT 'pending',
     error_summary     TEXT,
     created_by        VARCHAR(64),
@@ -272,6 +283,31 @@ def build_migration_statements(
             statements.append(
                 "ALTER TABLE sdk_log_reparse_jobs ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ"
             )
+        if "snapshot_end" not in job_columns:
+            statements.extend(
+                [
+                    "ALTER TABLE sdk_log_reparse_jobs ADD COLUMN IF NOT EXISTS snapshot_end TIMESTAMPTZ",
+                    "UPDATE sdk_log_reparse_jobs SET snapshot_end = range_end WHERE snapshot_end IS NULL",
+                    "ALTER TABLE sdk_log_reparse_jobs ALTER COLUMN snapshot_end SET NOT NULL",
+                ]
+            )
+        for column, sql_type, default in (
+            ("total_count", "BIGINT", "0"),
+            ("h1_count", "BIGINT", "0"),
+            ("failed_h1_count", "BIGINT", "0"),
+            ("no_h1_count", "BIGINT", "0"),
+            ("batch_size", "INTEGER", "200"),
+            ("concurrency", "INTEGER", "3"),
+        ):
+            if column not in job_columns:
+                statements.append(
+                    f"ALTER TABLE sdk_log_reparse_jobs ADD COLUMN IF NOT EXISTS {column} {sql_type} NOT NULL DEFAULT {default}"
+                )
+        for column in ("started_at", "finished_at", "last_heartbeat_at", "cancel_requested_at"):
+            if column not in job_columns:
+                statements.append(
+                    f"ALTER TABLE sdk_log_reparse_jobs ADD COLUMN IF NOT EXISTS {column} TIMESTAMPTZ"
+                )
     if reparse_table_exists and constraint_definitions is not None:
         definition = constraint_definitions.get("chk_log_reparse_jobs_status", "")
         if not _is_target_reparse_status_constraint(definition):
