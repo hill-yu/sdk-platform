@@ -45,6 +45,9 @@ def test_benchmark_creates_and_polls_a_real_parse_job() -> None:
     assert "select(func.count()).select_from(H1Declaration)" in source
     assert "select(func.count()).select_from(LogClickAttempt)" in source
     assert "job_id=job_id" in source
+    assert "args.package_name" not in source
+    assert "package_name = f\"{BENCHMARK_PREFIX}{uuid4().hex}\"" in source
+    assert "cleanup(package_name, job_id)" in source
 
 
 def test_benchmark_fixture_has_real_h1_pa_mix_and_explicit_fallback_counts() -> None:
@@ -75,3 +78,4 @@ def test_benchmark_help_is_runnable() -> None:
     )
     assert result.returncode == 0
     assert "--events" in result.stdout
+    assert "--package-name" not in result.stdout

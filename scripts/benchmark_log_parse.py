@@ -56,11 +56,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--events", type=int, default=10_000, help="number of controlled raw events (default: 10000)")
     parser.add_argument("--max-seconds", type=float, default=60.0, help="maximum task elapsed time (default: 60)")
-    parser.add_argument(
-        "--package-name",
-        default=None,
-        help="benchmark package name; must start with __sdk_parse_benchmark__",
-    )
     parser.add_argument("--keep-data", action="store_true", help="keep controlled rows for post-run inspection")
     return parser.parse_args()
 
@@ -117,9 +112,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict[str, object]:
     if args.max_seconds <= 0:
         raise BenchmarkFailure("--max-seconds must be positive")
 
-    package_name = args.package_name or f"{BENCHMARK_PREFIX}{uuid4().hex}"
-    if not package_name.startswith(BENCHMARK_PREFIX):
-        raise BenchmarkFailure(f"--package-name must start with {BENCHMARK_PREFIX}")
+    package_name = f"{BENCHMARK_PREFIX}{uuid4().hex}"
 
     job_id: int | None = None
     now = datetime.now(timezone.utc)
