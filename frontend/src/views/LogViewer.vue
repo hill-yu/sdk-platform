@@ -280,7 +280,7 @@ function setMetricScope(value: LogAnalysisFilterValues) {
   metricScope.value = { package_name: value.package_name, date_from: value.date_from, hour_from: value.hour_from, date_to: value.date_to, hour_to: value.hour_to };
 }
 function queryAnalysis(value: LogAnalysisFilterValues) { appliedFilters.value = { ...value }; setMetricScope(value); void loadSummary({ resetPage: true }); }
-function refreshAnalysis(value?: LogAnalysisFilterValues) { if (value) setMetricScope(value); void loadSummary(); }
+function refreshAnalysis() { void loadSummary(); refreshMetrics(); }
 function resetAnalysis(value: LogAnalysisFilterValues) { appliedFilters.value = { ...value }; metricScope.value = { package_name: "", date_from: value.date_from, hour_from: value.hour_from, date_to: value.date_to, hour_to: value.hour_to }; void loadSummary({ resetPage: true }); }
 function refreshMetrics() { metricScope.value = { ...metricScope.value }; }
 async function openFailureDrawer(selection: { target_kind: "web_element" | "ad_area"; config_id?: number }) {

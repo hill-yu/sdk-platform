@@ -232,6 +232,30 @@ describe("LogViewer", () => {
     expect(wrapper.get("[data-testid='error-feedback']").text()).toContain("summary unavailable");
   });
 
+  it("refreshes every analysis surface from applied A, not an unsubmitted draft B", async () => {
+    const wrapper = await mountAnalysisViewer();
+    await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
+    await wrapper.get("[data-testid='filter-query-existing']").trigger("click");
+    await flushPromises();
+    vi.clearAllMocks();
+
+    await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.next");
+    await wrapper.get("[data-testid='filter-refresh']").trigger("click");
+    await flushPromises();
+
+    expect(getLogAnalysisSummary).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.app" }));
+    expect(getMetricOverview).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.app" }));
+    expect(getMetricConfigs).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.app" }));
+    expect(getMetricTargets).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.app" }));
+
+    await wrapper.get("[data-testid='filter-query-existing']").trigger("click");
+    await flushPromises();
+    expect(getLogAnalysisSummary).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.next" }));
+    expect(getMetricOverview).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.next" }));
+    expect(getMetricConfigs).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.next" }));
+    expect(getMetricTargets).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.next" }));
+  });
+
   it("composes scoped metrics and failure details without clearing the legacy summary", async () => {
     const wrapper = await mountAnalysisViewer();
     await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
