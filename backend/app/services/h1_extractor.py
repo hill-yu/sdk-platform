@@ -12,15 +12,17 @@ def _h1_record_spans(extra: str) -> list[tuple[int, int]]:
     starts = [match.start(1) for match in H1_BOUNDARY.finditer(extra)]
     spans: list[tuple[int, int]] = []
     for index, start in enumerate(starts):
-        if index + 1 == len(starts):
-            newline = re.search(r"\r?\n", extra[start:])
-            end = start + newline.start() if newline is not None else len(extra)
-        else:
+        boundaries: list[int] = []
+        newline = re.search(r"\r?\n", extra[start:])
+        if newline is not None:
+            boundaries.append(start + newline.start())
+        if index + 1 < len(starts):
             next_start = starts[index + 1]
             delimiter_start = next_start - 2 if extra[next_start - 2:next_start] == "||" else next_start - 1
             if delimiter_start > 0 and extra[delimiter_start - 1:delimiter_start] == "\r":
                 delimiter_start -= 1
-            end = delimiter_start
+            boundaries.append(delimiter_start)
+        end = min(boundaries) if boundaries else len(extra)
         spans.append((start, end))
     return spans
 

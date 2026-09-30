@@ -55,6 +55,21 @@ def test_decode_extra_keeps_h1_and_legacy_records_in_a_mixed_extra() -> None:
     assert decoded[1]["source_type"] == "readable"
 
 
+def test_decode_extra_keeps_interleaved_legacy_record_between_h1_records() -> None:
+    extra = (
+        "H1|i=GC|p=1\n"
+        "FINAL_FLOW_RESULT|ts=2026-08-17T12:34:56+08:00|url=u42\n"
+        "H1|i=GD|p=2"
+    )
+
+    decoded = decode_extra(extra)
+
+    assert [item["config_id"] for item in decoded if item["protocol_version"] == "H1"] == [1004, 1005]
+    legacy = next(item for item in decoded if item["source_type"] == "readable")
+    assert legacy["url"] == "u42"
+    assert all(item["url"] != "u42" for item in decoded if item["protocol_version"] == "H1")
+
+
 def test_decode_extra_decodes_legacy_final_flow_result(vectors: dict[str, Any]) -> None:
     vector = vectors["legacy_final_flow_result"]
 
