@@ -1,0 +1,18 @@
+[Unit]
+Description=SDK Log Parse Worker
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=www
+WorkingDirectory=/www/wwwroot/sdk-api/backend
+EnvironmentFile=/www/wwwroot/sdk-api/backend/.env
+ExecStart=/www/wwwroot/sdk-api/backend/venv/bin/python -m app.workers.log_parse_worker
+Restart=always
+RestartSec=3
+CPUQuota=300%
+MemoryMax=1536M
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

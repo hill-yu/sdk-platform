@@ -28,6 +28,12 @@ POST /api/admin/log-analysis/reparse
 旧状态约束迁移顺序固定为：删除旧约束，先将历史 `succeeded` 更新为 `success`，再添加
 `pending/running/success/failed/cancelled` 目标约束。重复 dry-run 不应再次生成这些变更。
 
+## 2026-09-30 新解析链路状态说明
+
+仓库已实现显式解析任务、结构化 H1/点击指标、设备时长汇总和 H1 混合导出，具体接口、口径、worker、基准和发布步骤见 `docs/50-LOG-METRICS-DEVICE-DURATION-H1-EXPORT-IMPLEMENTATION-20260930.md`。
+
+这部分是待部署实现，不代表生产服务器已经运行新版本。当前生产事实仍以已安装的 API、前端和 systemd 配置为准；只有完成数据库备份、幂等迁移、API/worker/前端发布及 10,000 条端到端基准后，才能将新链路标记为已部署。
+
 ## 管理端原始事件接口
 
 ### 事件筛选选项
