@@ -7,9 +7,10 @@ from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timedelta, timezone
 from dataclasses import asdict, dataclass
 from types import SimpleNamespace
+from time import perf_counter
 from typing import Any
 
-from sqlalchemy import and_, delete, func, insert, or_, select
+from sqlalchemy import and_, delete, func, insert, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -90,6 +91,23 @@ def build_h1_and_click_rows_from_snapshot(
     snapshot: dict[str, object], job_id: int
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], int]:
     return build_h1_and_click_rows(SimpleNamespace(**snapshot), job_id)
+
+
+def decode_snapshot_with_elapsed(
+    snapshot: dict[str, object], job_id: int
+) -> tuple[list[dict[str, object]], list[dict[str, object]], int, float]:
+    """Decode one snapshot in a worker process and report only its own runtime."""
+    started = perf_counter()
+    h1_rows, click_rows, no_h1_count = build_h1_and_click_rows_from_snapshot(snapshot, job_id)
+    return h1_rows, click_rows, no_h1_count, perf_counter() - started
+
+
+def shutdown_parse_executor(executor: Any) -> None:
+    """Always reap worker processes, including queued work on older runtimes."""
+    try:
+        executor.shutdown(wait=True, cancel_futures=True)
+    except TypeError:
+        executor.shutdown(wait=True)
 
 
 def _parse_error(exc: BaseException) -> str:
@@ -302,6 +320,31 @@ async def clear_parse_staging(db: AsyncSession, job_id: int) -> None:
     await db.execute(delete(H1DeclarationStage).where(H1DeclarationStage.job_id == job_id))
 
 
+async def release_parse_job(
+    db: AsyncSession,
+    job_id: int,
+    *,
+    worker_id: str,
+    now: datetime,
+) -> None:
+    """Return only this worker's running job to pending without changing progress."""
+    await db.execute(
+        update(LogReparseJob)
+        .where(
+            LogReparseJob.id == job_id,
+            LogReparseJob.status == "running",
+            LogReparseJob.lease_owner == worker_id,
+        )
+        .values(
+            status="pending",
+            lease_owner=None,
+            lease_expires_at=None,
+            last_heartbeat_at=now,
+        )
+    )
+    await db.flush()
+
+
 async def mark_parse_job_failed(
     db: AsyncSession,
     job_id: int,
@@ -363,45 +406,50 @@ async def process_parse_job_batch(
     executor = PARSE_EXECUTOR_FACTORY(
         max_workers=min(max(int(job.concurrency or 1), 1), MAX_PARSE_CONCURRENCY)
     )
-    timed_out_any = False
 
-    async def decode_event(event: SdkEvent):
-        nonlocal timed_out_any
-        loop = asyncio.get_running_loop()
-        try:
-            return await asyncio.wait_for(
-                loop.run_in_executor(
-                    executor,
-                    build_h1_and_click_rows_from_snapshot,
-                    event_snapshot(event),
-                    job.id,
-                ),
-                timeout=PARSE_TIMEOUT_SECONDS,
-            )
-        except (asyncio.TimeoutError, TimeoutError) as exc:
-            timed_out_any = True
-            return exc
-
+    decoded_results = []
     try:
-        decoded_results = await asyncio.gather(*(decode_event(event) for event in events))
+        loop = asyncio.get_running_loop()
+        max_workers = min(max(int(job.concurrency or 1), 1), MAX_PARSE_CONCURRENCY)
+        for offset in range(0, len(events), max_workers):
+            wave = events[offset : offset + max_workers]
+            decoded_results.extend(
+                await asyncio.gather(
+                    *(
+                        loop.run_in_executor(
+                            executor,
+                            decode_snapshot_with_elapsed,
+                            event_snapshot(event),
+                            job.id,
+                        )
+                        for event in wave
+                    ),
+                    return_exceptions=True,
+                )
+            )
     finally:
-        # A timed-out decoder may still be finishing in its worker thread. Do not
-        # block the DB worker on it, while normal batches shut down cleanly.
-        executor.shutdown(wait=not timed_out_any)
+        shutdown_parse_executor(executor)
 
     for event, decoded in zip(events, decoded_results, strict=True):
         if not _lease_valid(job, worker_id, now):
             raise LeaseLostError("解析任务租约已失效")
-        timed_out = isinstance(decoded, (asyncio.TimeoutError, TimeoutError))
+        timeout_error: BaseException | None = None
+        if isinstance(decoded, BaseException):
+            if isinstance(decoded, (asyncio.TimeoutError, TimeoutError)):
+                timeout_error = decoded
+            else:
+                raise decoded
+        else:
+            h1_rows, click_rows, event_no_h1, elapsed = decoded
+            if elapsed > PARSE_TIMEOUT_SECONDS:
+                timeout_error = TimeoutError("H1 parse timed out")
+        timed_out = timeout_error is not None
         if timed_out:
             job.consecutive_timeout_count = (job.consecutive_timeout_count or 0) + 1
             h1_rows, click_rows, event_no_h1 = _timeout_rows(event, job.id)
             if job.consecutive_timeout_count >= 10:
-                raise ParseJobFailure("连续超时 10 条") from decoded
+                raise ParseJobFailure("连续超时 10 条") from timeout_error
         else:
-            if isinstance(decoded, BaseException):
-                raise decoded
-            h1_rows, click_rows, event_no_h1 = decoded
             job.consecutive_timeout_count = 0
         h1_count += len(h1_rows)
         failed_h1_count += sum(row["status"] == "failed" for row in h1_rows)
@@ -435,9 +483,9 @@ async def process_parse_job_batch(
     job.cursor_event_id = last_event.id
     job.last_heartbeat_at = now
     job.lease_expires_at = now + timedelta(seconds=PARSE_LEASE_SECONDS)
-    next_processed = job.processed_count
+    next_h1_count = job.h1_count
     next_failed_h1 = job.failed_h1_count
-    if next_processed >= 100 and next_failed_h1 / next_processed > 0.2:
+    if next_h1_count >= 100 and next_failed_h1 / next_h1_count > 0.2:
         raise ParseJobFailure("解析失败率超过 20%")
     await db.flush()
     return ParseBatchResult(

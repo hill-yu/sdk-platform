@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import signal
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -150,3 +151,69 @@ def test_worker_marks_unexpected_batch_failure_and_cleans_up(monkeypatch) -> Non
     assert session.rollbacks == 1
     assert failures[0][0] == 91
     assert isinstance(failures[0][1], RuntimeError)
+
+
+def test_worker_stop_finishes_and_commits_current_batch_then_releases_job(monkeypatch) -> None:
+    from app.workers import log_parse_worker
+
+    class Session:
+        def __init__(self):
+            self.commits = 0
+            self.rollbacks = 0
+
+        async def commit(self):
+            self.commits += 1
+
+        async def rollback(self):
+            self.rollbacks += 1
+
+    session = Session()
+    stop_event = asyncio.Event()
+    job = SimpleNamespace(id=91, status="running", cancel_requested_at=None)
+    releases = []
+
+    async def fake_claim(_db, **kwargs):
+        return job
+
+    async def fake_process(_db, job_id, **kwargs):
+        stop_event.set()
+        return SimpleNamespace(done=False)
+
+    async def fake_release(_db, job_id, *, worker_id, now):
+        releases.append((job_id, worker_id, now))
+
+    monkeypatch.setattr(log_parse_worker, "claim_parse_job", fake_claim)
+    monkeypatch.setattr(log_parse_worker, "process_parse_job_batch", fake_process)
+    monkeypatch.setattr(log_parse_worker, "release_parse_job", fake_release)
+
+    handled = asyncio.run(
+        log_parse_worker.run_worker_once(
+            session,
+            worker_id="worker-1",
+            stop_event=stop_event,
+        )
+    )
+
+    assert handled is True
+    assert session.commits == 3
+    assert session.rollbacks == 0
+    assert releases[0][0:2] == (91, "worker-1")
+
+
+def test_worker_signal_handlers_only_request_stop(monkeypatch) -> None:
+    from app.workers import log_parse_worker
+
+    stop_event = asyncio.Event()
+    registered = {}
+
+    def fake_signal(signum, handler):
+        registered[signum] = handler
+        return signal.SIG_DFL
+
+    monkeypatch.setattr(log_parse_worker.signal, "signal", fake_signal)
+    previous = log_parse_worker.install_signal_handlers(stop_event)
+
+    assert set(registered) == {signal.SIGTERM, signal.SIGINT}
+    registered[signal.SIGTERM](signal.SIGTERM, None)
+    assert stop_event.is_set()
+    assert set(previous) == {signal.SIGTERM, signal.SIGINT}

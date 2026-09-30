@@ -332,6 +332,41 @@ def test_claim_reclaims_expired_running_job_without_resetting_progress() -> None
     assert job.cursor_event_id == 44
 
 
+def test_release_parse_job_is_owner_scoped_and_preserves_progress() -> None:
+    from app.services.log_parse_job_service import release_parse_job
+
+    class ReleaseDb:
+        def __init__(self):
+            self.statements = []
+
+        async def execute(self, statement):
+            self.statements.append(statement)
+            return Result()
+
+        async def flush(self):
+            pass
+
+    db = ReleaseDb()
+    asyncio.run(
+        release_parse_job(
+            db,
+            91,
+            worker_id="worker-1",
+            now=NOW,
+        )
+    )
+
+    sql = str(
+        db.statements[0].compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+    assert "status = 'running'" in sql
+    assert "lease_owner = 'worker-1'" in sql
+    assert "cursor_event_id" not in sql
+
+
 class BatchDb:
     def __init__(self, job, events=(), *, fail_on_insert=False):
         self.job = job
@@ -447,8 +482,9 @@ def test_parse_executor_is_bounded_and_receives_serializable_snapshots(monkeypat
             future.set_result(function(*args))
             return future
 
-        def shutdown(self, *, wait: bool):
+        def shutdown(self, *, wait: bool, cancel_futures: bool = False):
             captured["wait"] = wait
+            captured["cancel_futures"] = cancel_futures
 
     monkeypatch.setattr(service, "PARSE_EXECUTOR_FACTORY", RecordingExecutor)
     monkeypatch.setattr(service, "build_h1_and_click_rows_from_snapshot", lambda snapshot, job_id: ([], [], 1))
@@ -475,6 +511,57 @@ def test_parse_executor_is_bounded_and_receives_serializable_snapshots(monkeypat
     }
     pickle.dumps(captured["snapshot"])
     assert captured["wait"] is True
+    assert captured["cancel_futures"] is True
+
+
+def test_parse_executor_uses_bounded_waves_so_queue_wait_is_not_a_timeout(monkeypatch) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    import time
+
+    from app.models.event import SdkEvent
+    from app.models.log_analysis import LogReparseJob
+    from app.services import log_parse_job_service as service
+
+    monkeypatch.setattr(service, "PARSE_EXECUTOR_FACTORY", ThreadPoolExecutor)
+    monkeypatch.setattr(service, "PARSE_TIMEOUT_SECONDS", 0.05)
+    job = LogReparseJob(
+        id=91,
+        package_name="com.example.app",
+        range_start=RANGE_START,
+        range_end=RANGE_END,
+        snapshot_end=NOW,
+        status="running",
+        lease_owner="worker-1",
+        lease_expires_at=NOW.replace(hour=2),
+        concurrency=1,
+    )
+    events = [
+        SdkEvent(
+            id=index,
+            event_type="log",
+            package_name="com.example.app",
+            server_ts=NOW,
+            payload={"extra": "raw"},
+        )
+        for index in (20, 21)
+    ]
+
+    def slow_but_bounded(_event, _job_id):
+        time.sleep(0.04)
+        return [], [], 1
+
+    monkeypatch.setattr(service, "build_h1_and_click_rows", slow_but_bounded)
+    result = asyncio.run(
+        service.process_parse_job_batch(
+            BatchDb(job, events),
+            91,
+            worker_id="worker-1",
+            now=NOW,
+        )
+    )
+
+    assert result.scanned == 2
+    assert job.consecutive_timeout_count == 0
 
 
 def test_cancel_requested_between_batches_stops_before_scanning_or_publishing() -> None:
@@ -544,6 +631,54 @@ def test_ten_consecutive_timeouts_fail_the_job(monkeypatch) -> None:
         )
 
 
+def test_actual_decoder_elapsed_time_counts_as_a_timeout(monkeypatch) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    import time
+
+    from app.models.event import SdkEvent
+    from app.models.log_analysis import LogReparseJob
+    from app.services import log_parse_job_service as service
+
+    monkeypatch.setattr(service, "PARSE_EXECUTOR_FACTORY", ThreadPoolExecutor)
+    monkeypatch.setattr(service, "PARSE_TIMEOUT_SECONDS", 0.01)
+    job = LogReparseJob(
+        id=91,
+        package_name="com.example.app",
+        range_start=RANGE_START,
+        range_end=RANGE_END,
+        snapshot_end=NOW,
+        status="running",
+        lease_owner="worker-1",
+        lease_expires_at=NOW.replace(hour=2),
+        consecutive_timeout_count=0,
+    )
+    event = SdkEvent(
+        id=20,
+        event_type="log",
+        package_name="com.example.app",
+        server_ts=NOW,
+        payload={"extra": "H1|i=GC"},
+    )
+
+    def slow_decode(_event, _job_id):
+        time.sleep(0.03)
+        return [], [], 0
+
+    monkeypatch.setattr(service, "build_h1_and_click_rows", slow_decode)
+    result = asyncio.run(
+        service.process_parse_job_batch(
+            BatchDb(job, [event]),
+            91,
+            worker_id="worker-1",
+            now=NOW,
+        )
+    )
+
+    assert result.h1_count == 1
+    assert result.failed_h1_count == 1
+    assert job.consecutive_timeout_count == 1
+
+
 def test_mark_failed_cleans_lease_and_redacts_error() -> None:
     from app.models.log_analysis import LogReparseJob
     from app.services.log_parse_job_service import mark_parse_job_failed
@@ -576,7 +711,7 @@ def test_mark_failed_cleans_lease_and_redacts_error() -> None:
     assert "postgres://" not in job.error_summary
 
 
-def test_failure_rate_over_twenty_percent_after_100_events_fails_job(monkeypatch) -> None:
+def test_failure_rate_uses_h1_count_and_does_not_count_no_h1_events(monkeypatch) -> None:
     from concurrent.futures import ThreadPoolExecutor
 
     from app.models.event import SdkEvent
@@ -600,7 +735,9 @@ def test_failure_rate_over_twenty_percent_after_100_events_fails_job(monkeypatch
         for index in range(100)
     ]
 
-    def failed_rows(event, job_id):
+    def mixed_rows(event, job_id):
+        if event.id != 0:
+            return [], [], 1
         return [
             {
                 "job_id": job_id,
@@ -614,7 +751,70 @@ def test_failure_rate_over_twenty_percent_after_100_events_fails_job(monkeypatch
             }
         ], [], 0
 
-    monkeypatch.setattr(service, "build_h1_and_click_rows", failed_rows)
+    monkeypatch.setattr(service, "build_h1_and_click_rows", mixed_rows)
+
+    result = asyncio.run(
+        service.process_parse_job_batch(
+            BatchDb(job, events),
+            91,
+            worker_id="worker-1",
+            now=NOW,
+            batch_size=200,
+        )
+    )
+
+    assert result.scanned == 100
+    assert job.h1_count == 1
+    assert job.failed_h1_count == 1
+
+
+def test_failure_rate_counts_each_h1_row_in_a_multi_h1_event(monkeypatch) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.models.event import SdkEvent
+    from app.models.log_analysis import LogReparseJob
+    from app.services import log_parse_job_service as service
+
+    monkeypatch.setattr(service, "PARSE_EXECUTOR_FACTORY", ThreadPoolExecutor)
+    job = LogReparseJob(
+        id=91,
+        package_name="com.example.app",
+        range_start=RANGE_START,
+        range_end=RANGE_END,
+        snapshot_end=NOW,
+        status="running",
+        lease_owner="worker-1",
+        lease_expires_at=NOW.replace(hour=2),
+    )
+    events = [
+        SdkEvent(
+            id=index,
+            event_type="log",
+            package_name="com.example.app",
+            server_ts=NOW,
+            payload={"extra": "H1|i=GC"},
+        )
+        for index in range(50)
+    ]
+
+    def two_h1_rows(event, job_id):
+        rows = []
+        for record_index in (1, 2):
+            rows.append(
+                {
+                    "job_id": job_id,
+                    "event_id": event.id,
+                    "event_server_ts": event.server_ts,
+                    "record_index": record_index,
+                    "package_name": event.package_name,
+                    "status": "failed" if event.id < 21 and record_index == 1 else "success",
+                    "decoder_version": "2.0.0",
+                    "parsed_at": NOW,
+                }
+            )
+        return rows, [], 0
+
+    monkeypatch.setattr(service, "build_h1_and_click_rows", two_h1_rows)
 
     with pytest.raises(service.ParseJobFailure, match="20%"):
         asyncio.run(
@@ -626,6 +826,9 @@ def test_failure_rate_over_twenty_percent_after_100_events_fails_job(monkeypatch
                 batch_size=200,
             )
         )
+
+    assert job.h1_count == 100
+    assert job.failed_h1_count == 21
 
 
 def test_publish_replaces_only_job_scope_and_marks_success() -> None:
