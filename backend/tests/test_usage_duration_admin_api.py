@@ -124,3 +124,55 @@ def test_usage_duration_admin_rejects_empty_filter_values(monkeypatch, field):
         )
     app.dependency_overrides.clear()
     assert response.status_code == 422
+
+
+def test_usage_duration_summary_and_devices_routes_forward_scope(monkeypatch):
+    from app.admin_main import app
+    from app.api.admin import usage_duration
+
+    calls = []
+
+    async def fake_summary(_db, **kwargs):
+        calls.append(("summary", kwargs))
+        return {"total": 0, "page": kwargs["page"], "page_size": kwargs["page_size"], "items": []}
+
+    async def fake_devices(_db, **kwargs):
+        calls.append(("devices", kwargs))
+        return {"total": 0, "page": kwargs["page"], "page_size": kwargs["page_size"], "items": []}
+
+    monkeypatch.setattr(usage_duration.usage_duration_service, "get_usage_summary", fake_summary)
+    monkeypatch.setattr(usage_duration.usage_duration_service, "get_usage_devices", fake_devices)
+    app.dependency_overrides[get_db_no_commit] = override_db
+    try:
+        with TestClient(app) as client:
+            summary = client.get(
+                "/api/admin/usage-durations/summary",
+                params={
+                    "package_name": "COM.EXAMPLE.APP",
+                    "date_from": "2026-09-29",
+                    "hour_from": 8,
+                    "date_to": "2026-09-29",
+                    "hour_to": 17,
+                    "page": 2,
+                    "page_size": 50,
+                },
+                headers=headers(),
+            )
+            devices = client.get(
+                "/api/admin/usage-durations/devices",
+                params={
+                    "package_name": "COM.EXAMPLE.APP",
+                    "device_model": "Pixel",
+                    "date_from": "2026-09-29",
+                    "date_to": "2026-09-29",
+                },
+                headers=headers(),
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert summary.status_code == 200
+    assert devices.status_code == 200
+    assert calls[0][1]["package_name"] == "com.example.app"
+    assert calls[0][1]["page"] == 2
+    assert calls[1][1]["device_model"] == "Pixel"
