@@ -107,6 +107,21 @@ def test_create_parse_job_rejects_an_existing_active_job() -> None:
         )
 
 
+def test_create_parse_job_rejects_a_fully_future_range() -> None:
+    from app.services.log_parse_job_service import create_parse_job
+
+    with pytest.raises(ValueError, match="snapshot_end"):
+        asyncio.run(
+            create_parse_job(
+                JobDb(total=0),
+                package_name="com.example.app",
+                range_start=RANGE_END,
+                range_end=datetime(2026, 10, 2, 16, tzinfo=timezone.utc),
+                now=NOW,
+            )
+        )
+
+
 def test_serialize_parse_job_includes_snapshot_and_progress() -> None:
     from app.models.log_analysis import LogReparseJob
     from app.services.log_parse_job_service import serialize_parse_job
@@ -222,6 +237,42 @@ def test_failure_category_uses_reason_then_detail_then_navigation_result() -> No
     assert choose_failure_category({"navigation_code": 1, "reason": "ignored"}) is None
 
 
+def test_click_timestamp_is_converted_to_aware_datetime() -> None:
+    from app.models.event import SdkEvent
+    from app.services import log_parse_job_service as service
+
+    summary = service.parse_host_final_result_line("H1|i=GC|p=1")
+    summary.planned_click_attempts = [
+        {
+            "index": 1,
+            "target_kind": "banner",
+            "did_click": True,
+            "navigation_code": 1,
+            "reason": "",
+            "error_detail": "",
+            "navigation_result": "点击后跳转",
+            "click_timestamp": "2026-09-30T09:01:02+08:00",
+            "page_context": "home",
+        }
+    ]
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(service, "parse_host_final_result_line", lambda _record: summary)
+    try:
+        event = SdkEvent(
+            id=14,
+            event_type="log",
+            package_name="com.example.app",
+            server_ts=NOW,
+            payload={"extra": "H1|i=GC|p=1"},
+        )
+        _, click_rows, _ = service.build_h1_and_click_rows(event, 91)
+    finally:
+        monkeypatch.undo()
+
+    assert isinstance(click_rows[0]["click_timestamp"], datetime)
+    assert click_rows[0]["click_timestamp"].tzinfo is not None
+
+
 def test_parse_event_query_uses_snapshot_and_server_ts_event_id_cursor() -> None:
     from app.models.log_analysis import LogReparseJob
     from app.services.log_parse_job_service import build_parse_event_query
@@ -242,6 +293,43 @@ def test_parse_event_query_uses_snapshot_and_server_ts_event_id_cursor() -> None
     assert "sdk_events.id >" in compiled
     assert "ORDER BY sdk_events.server_ts, sdk_events.id" in compiled
     assert statement._limit_clause.value == 200
+
+
+def test_claim_reclaims_expired_running_job_without_resetting_progress() -> None:
+    from app.models.log_analysis import LogReparseJob
+    from app.services.log_parse_job_service import claim_parse_job
+
+    job = LogReparseJob(
+        id=91,
+        package_name="com.example.app",
+        range_start=RANGE_START,
+        range_end=RANGE_END,
+        snapshot_end=NOW,
+        status="running",
+        lease_owner="dead-worker",
+        lease_expires_at=NOW.replace(minute=59),
+        processed_count=37,
+        h1_count=40,
+        failed_h1_count=2,
+        no_h1_count=3,
+        cursor_server_ts=NOW,
+        cursor_event_id=44,
+    )
+    db = BatchDb(job)
+
+    claimed = asyncio.run(
+        claim_parse_job(
+            db,
+            worker_id="new-worker",
+            now=NOW,
+        )
+    )
+
+    assert claimed is job
+    assert job.lease_owner == "new-worker"
+    assert job.processed_count == 37
+    assert job.h1_count == 40
+    assert job.cursor_event_id == 44
 
 
 class BatchDb:
@@ -317,6 +405,227 @@ def test_process_batch_stages_rows_and_advances_stable_cursor() -> None:
     assert job.cursor_server_ts == NOW
     assert job.cursor_event_id == 21
     assert db.nested_commits == 2
+
+
+def test_parse_executor_is_bounded_and_receives_serializable_snapshots(monkeypatch) -> None:
+    from concurrent.futures import Future
+    import pickle
+
+    from app.models.event import SdkEvent
+    from app.models.log_analysis import LogReparseJob
+    from app.services import log_parse_job_service as service
+
+    job = LogReparseJob(
+        id=91,
+        package_name="com.example.app",
+        range_start=RANGE_START,
+        range_end=RANGE_END,
+        snapshot_end=NOW,
+        status="running",
+        lease_owner="worker-1",
+        lease_expires_at=NOW.replace(hour=2),
+        concurrency=99,
+    )
+    event = SdkEvent(
+        id=20,
+        event_type="log",
+        package_name="com.example.app",
+        server_ts=NOW,
+        device_id="device-1",
+        sdk_version="1.2.3",
+        payload={"extra": "raw"},
+    )
+    captured: dict[str, object] = {}
+
+    class RecordingExecutor:
+        def __init__(self, max_workers: int):
+            captured["max_workers"] = max_workers
+
+        def submit(self, function, *args):
+            captured["snapshot"] = args[0]
+            future = Future()
+            future.set_result(function(*args))
+            return future
+
+        def shutdown(self, *, wait: bool):
+            captured["wait"] = wait
+
+    monkeypatch.setattr(service, "PARSE_EXECUTOR_FACTORY", RecordingExecutor)
+    monkeypatch.setattr(service, "build_h1_and_click_rows_from_snapshot", lambda snapshot, job_id: ([], [], 1))
+
+    result = asyncio.run(
+        service.process_parse_job_batch(
+            BatchDb(job, [event]),
+            91,
+            worker_id="worker-1",
+            now=NOW,
+        )
+    )
+
+    assert result.scanned == 1
+    assert captured["max_workers"] == 3
+    assert captured["snapshot"] == {
+        "id": 20,
+        "event_type": "log",
+        "package_name": "com.example.app",
+        "device_id": "device-1",
+        "sdk_version": "1.2.3",
+        "server_ts": NOW,
+        "payload": {"extra": "raw"},
+    }
+    pickle.dumps(captured["snapshot"])
+    assert captured["wait"] is True
+
+
+def test_cancel_requested_between_batches_stops_before_scanning_or_publishing() -> None:
+    from app.models.log_analysis import LogReparseJob
+    from app.services.log_parse_job_service import process_parse_job_batch
+
+    job = LogReparseJob(
+        id=91,
+        package_name="com.example.app",
+        range_start=RANGE_START,
+        range_end=RANGE_END,
+        snapshot_end=NOW,
+        status="running",
+        lease_owner="worker-1",
+        lease_expires_at=NOW.replace(hour=2),
+        cancel_requested_at=NOW,
+    )
+    db = BatchDb(job, events=[object()])
+
+    result = asyncio.run(process_parse_job_batch(db, 91, worker_id="worker-1", now=NOW))
+
+    assert result.done is True
+    assert job.status == "cancelled"
+    assert job.finished_at == NOW
+    assert job.lease_owner is None
+    assert not any("sdk_events" in str(statement) for statement in db.statements)
+
+
+def test_ten_consecutive_timeouts_fail_the_job(monkeypatch) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.models.event import SdkEvent
+    from app.models.log_analysis import LogReparseJob
+    from app.services import log_parse_job_service as service
+
+    monkeypatch.setattr(service, "PARSE_EXECUTOR_FACTORY", ThreadPoolExecutor)
+
+    job = LogReparseJob(
+        id=91,
+        package_name="com.example.app",
+        range_start=RANGE_START,
+        range_end=RANGE_END,
+        snapshot_end=NOW,
+        status="running",
+        lease_owner="worker-1",
+        lease_expires_at=NOW.replace(hour=2),
+        consecutive_timeout_count=0,
+    )
+    events = [
+        SdkEvent(id=index, event_type="log", package_name="com.example.app", server_ts=NOW, payload={"extra": "H1|i=GC"})
+        for index in range(10)
+    ]
+
+    def timeout(_event, _job_id):
+        raise TimeoutError("secret payload")
+
+    monkeypatch.setattr(service, "build_h1_and_click_rows", timeout)
+
+    with pytest.raises(service.ParseJobFailure, match="连续超时"):
+        asyncio.run(
+            service.process_parse_job_batch(
+                BatchDb(job, events),
+                91,
+                worker_id="worker-1",
+                now=NOW,
+            )
+        )
+
+
+def test_mark_failed_cleans_lease_and_redacts_error() -> None:
+    from app.models.log_analysis import LogReparseJob
+    from app.services.log_parse_job_service import mark_parse_job_failed
+
+    job = LogReparseJob(
+        id=91,
+        package_name="com.example.app",
+        range_start=RANGE_START,
+        range_end=RANGE_END,
+        snapshot_end=NOW,
+        status="running",
+        lease_owner="worker-1",
+        lease_expires_at=NOW.replace(hour=2),
+    )
+    db = BatchDb(job)
+
+    asyncio.run(
+        mark_parse_job_failed(
+            db,
+            91,
+            RuntimeError("TOKEN postgres://admin:secret@example/db"),
+            now=NOW,
+        )
+    )
+
+    assert job.status == "failed"
+    assert job.finished_at == NOW
+    assert job.lease_owner is None
+    assert "TOKEN" not in job.error_summary
+    assert "postgres://" not in job.error_summary
+
+
+def test_failure_rate_over_twenty_percent_after_100_events_fails_job(monkeypatch) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.models.event import SdkEvent
+    from app.models.log_analysis import LogReparseJob
+    from app.services import log_parse_job_service as service
+
+    monkeypatch.setattr(service, "PARSE_EXECUTOR_FACTORY", ThreadPoolExecutor)
+
+    job = LogReparseJob(
+        id=91,
+        package_name="com.example.app",
+        range_start=RANGE_START,
+        range_end=RANGE_END,
+        snapshot_end=NOW,
+        status="running",
+        lease_owner="worker-1",
+        lease_expires_at=NOW.replace(hour=2),
+    )
+    events = [
+        SdkEvent(id=index, event_type="log", package_name="com.example.app", server_ts=NOW, payload={"extra": "H1|i=GC"})
+        for index in range(100)
+    ]
+
+    def failed_rows(event, job_id):
+        return [
+            {
+                "job_id": job_id,
+                "event_id": event.id,
+                "event_server_ts": event.server_ts,
+                "record_index": 1,
+                "package_name": event.package_name,
+                "status": "failed",
+                "decoder_version": "2.0.0",
+                "parsed_at": NOW,
+            }
+        ], [], 0
+
+    monkeypatch.setattr(service, "build_h1_and_click_rows", failed_rows)
+
+    with pytest.raises(service.ParseJobFailure, match="20%"):
+        asyncio.run(
+            service.process_parse_job_batch(
+                BatchDb(job, events),
+                91,
+                worker_id="worker-1",
+                now=NOW,
+                batch_size=200,
+            )
+        )
 
 
 def test_publish_replaces_only_job_scope_and_marks_success() -> None:

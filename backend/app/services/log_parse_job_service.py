@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import asyncio
+from concurrent.futures import ProcessPoolExecutor
+from datetime import datetime, timedelta, timezone
 from dataclasses import asdict, dataclass
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy import and_, delete, func, insert, or_, select
@@ -26,6 +29,9 @@ from app.services.h1_extractor import extract_h1_records
 PARSE_JOB_ADVISORY_LOCK_KEY = 20260930
 PARSE_BATCH_SIZE = 200
 PARSE_LEASE_SECONDS = 60
+PARSE_TIMEOUT_SECONDS = 1.0
+PARSE_EXECUTOR_FACTORY = ProcessPoolExecutor
+MAX_PARSE_CONCURRENCY = 3
 
 
 class ActiveParseJobError(RuntimeError):
@@ -34,6 +40,10 @@ class ActiveParseJobError(RuntimeError):
 
 class LeaseLostError(RuntimeError):
     """Raised when a worker no longer owns a parse job."""
+
+
+class ParseJobFailure(RuntimeError):
+    """Raised when a parse job must enter the failed terminal state."""
 
 
 @dataclass(frozen=True)
@@ -63,8 +73,45 @@ def _event_extra(event: SdkEvent) -> str:
     return extra if isinstance(extra, str) else ""
 
 
+def event_snapshot(event: SdkEvent) -> dict[str, object]:
+    """Return only serializable event data for the bounded decode executor."""
+    return {
+        "id": event.id,
+        "event_type": event.event_type,
+        "package_name": event.package_name,
+        "device_id": event.device_id,
+        "sdk_version": event.sdk_version,
+        "server_ts": event.server_ts,
+        "payload": event.payload if isinstance(event.payload, dict) else {},
+    }
+
+
+def build_h1_and_click_rows_from_snapshot(
+    snapshot: dict[str, object], job_id: int
+) -> tuple[list[dict[str, object]], list[dict[str, object]], int]:
+    return build_h1_and_click_rows(SimpleNamespace(**snapshot), job_id)
+
+
 def _parse_error(exc: BaseException) -> str:
     return f"{type(exc).__name__}: H1 parse failed"[:512]
+
+
+def _job_error(exc: BaseException) -> str:
+    if isinstance(exc, ParseJobFailure):
+        return str(exc)[:512]
+    return f"{type(exc).__name__}: parse job failed"[:512]
+
+
+def _parse_click_timestamp(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None and value.utcoffset() is not None else None
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None and parsed.utcoffset() is not None else None
 
 
 def build_h1_and_click_rows(
@@ -120,7 +167,7 @@ def build_h1_and_click_rows(
                         "error_detail": attempt.get("error_detail"),
                         "navigation_result": attempt.get("navigation_result"),
                         "failure_category": choose_failure_category(attempt),
-                        "click_timestamp": attempt.get("click_timestamp") or None,
+                        "click_timestamp": _parse_click_timestamp(attempt.get("click_timestamp")),
                         "page_context": attempt.get("page_context"),
                     }
                 )
@@ -143,6 +190,37 @@ def build_h1_and_click_rows(
                 }
             )
     return h1_rows, click_rows, 0 if records else 1
+
+
+def _timeout_rows(event: SdkEvent, job_id: int) -> tuple[list[dict[str, object]], list[dict[str, object]], int]:
+    records = extract_h1_records(_event_extra(event))
+    rows = []
+    for record_index, _record in enumerate(records, start=1):
+        rows.append(
+            {
+                "job_id": job_id,
+                "event_id": event.id,
+                "event_server_ts": event.server_ts,
+                "record_index": record_index,
+                "package_name": event.package_name,
+                "device_id": event.device_id,
+                "sdk_version": event.sdk_version,
+                "config_id": None,
+                "window": None,
+                "declared_click_count": None,
+                "interstitial_presentation_count": 0,
+                "interstitial_click_count": 0,
+                "interstitial_close_count": 0,
+                "flow_duration_ms": None,
+                "final_reason": None,
+                "status": "failed",
+                "parse_error": "TimeoutError: H1 parse timed out",
+                "decoder_version": DECODER_VERSION,
+                "parsed_at": datetime.now(timezone.utc),
+                "decoded_payload": None,
+            }
+        )
+    return rows, [], 0 if records else 1
 
 
 def build_parse_event_query(job: LogReparseJob, *, batch_size: int = PARSE_BATCH_SIZE):
@@ -188,7 +266,18 @@ async def claim_parse_job(
 ) -> LogReparseJob | None:
     result = await db.execute(
         select(LogReparseJob)
-        .where(LogReparseJob.status == "pending")
+        .where(
+            or_(
+                LogReparseJob.status == "pending",
+                and_(
+                    LogReparseJob.status == "running",
+                    or_(
+                        LogReparseJob.lease_expires_at.is_(None),
+                        LogReparseJob.lease_expires_at <= now,
+                    ),
+                ),
+            )
+        )
         .order_by(LogReparseJob.created_at, LogReparseJob.id)
         .limit(1)
         .with_for_update(skip_locked=True)
@@ -208,6 +297,30 @@ async def claim_parse_job(
     return job
 
 
+async def clear_parse_staging(db: AsyncSession, job_id: int) -> None:
+    await db.execute(delete(LogClickAttemptStage).where(LogClickAttemptStage.job_id == job_id))
+    await db.execute(delete(H1DeclarationStage).where(H1DeclarationStage.job_id == job_id))
+
+
+async def mark_parse_job_failed(
+    db: AsyncSession,
+    job_id: int,
+    error: BaseException,
+    *,
+    now: datetime,
+) -> None:
+    job = await get_parse_job(db, job_id)
+    if job is None:
+        return
+    job.status = "failed"
+    job.finished_at = now
+    job.error_summary = _job_error(error)
+    job.lease_owner = None
+    job.lease_expires_at = None
+    await clear_parse_staging(db, job.id)
+    await db.flush()
+
+
 async def process_parse_job_batch(
     db: AsyncSession,
     job_id: int,
@@ -222,12 +335,23 @@ async def process_parse_job_batch(
         raise ValueError("解析任务不存在")
     if not _lease_valid(job, worker_id, now):
         raise LeaseLostError("解析任务租约已失效")
+    if job.cancel_requested_at is not None:
+        job.status = "cancelled"
+        job.finished_at = now
+        job.lease_owner = None
+        job.lease_expires_at = None
+        await clear_parse_staging(db, job.id)
+        await db.flush()
+        return ParseBatchResult(done=True)
 
     events = (await db.execute(build_parse_event_query(job, batch_size=batch_size))).scalars().all()
     if not events:
         if job.cancel_requested_at is not None:
             job.status = "cancelled"
             job.finished_at = now
+            job.lease_owner = None
+            job.lease_expires_at = None
+            await clear_parse_staging(db, job.id)
             await db.flush()
             return ParseBatchResult(done=True)
         await publish_parse_job(db, job, now=now)
@@ -236,10 +360,49 @@ async def process_parse_job_batch(
     h1_count = 0
     failed_h1_count = 0
     no_h1_count = 0
-    for event in events:
+    executor = PARSE_EXECUTOR_FACTORY(
+        max_workers=min(max(int(job.concurrency or 1), 1), MAX_PARSE_CONCURRENCY)
+    )
+    timed_out_any = False
+
+    async def decode_event(event: SdkEvent):
+        nonlocal timed_out_any
+        loop = asyncio.get_running_loop()
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(
+                    executor,
+                    build_h1_and_click_rows_from_snapshot,
+                    event_snapshot(event),
+                    job.id,
+                ),
+                timeout=PARSE_TIMEOUT_SECONDS,
+            )
+        except (asyncio.TimeoutError, TimeoutError) as exc:
+            timed_out_any = True
+            return exc
+
+    try:
+        decoded_results = await asyncio.gather(*(decode_event(event) for event in events))
+    finally:
+        # A timed-out decoder may still be finishing in its worker thread. Do not
+        # block the DB worker on it, while normal batches shut down cleanly.
+        executor.shutdown(wait=not timed_out_any)
+
+    for event, decoded in zip(events, decoded_results, strict=True):
         if not _lease_valid(job, worker_id, now):
             raise LeaseLostError("解析任务租约已失效")
-        h1_rows, click_rows, event_no_h1 = build_h1_and_click_rows(event, job.id)
+        timed_out = isinstance(decoded, (asyncio.TimeoutError, TimeoutError))
+        if timed_out:
+            job.consecutive_timeout_count = (job.consecutive_timeout_count or 0) + 1
+            h1_rows, click_rows, event_no_h1 = _timeout_rows(event, job.id)
+            if job.consecutive_timeout_count >= 10:
+                raise ParseJobFailure("连续超时 10 条") from decoded
+        else:
+            if isinstance(decoded, BaseException):
+                raise decoded
+            h1_rows, click_rows, event_no_h1 = decoded
+            job.consecutive_timeout_count = 0
         h1_count += len(h1_rows)
         failed_h1_count += sum(row["status"] == "failed" for row in h1_rows)
         no_h1_count += event_no_h1
@@ -271,9 +434,11 @@ async def process_parse_job_batch(
     job.cursor_server_ts = last_event.server_ts
     job.cursor_event_id = last_event.id
     job.last_heartbeat_at = now
-    from datetime import timedelta
-
     job.lease_expires_at = now + timedelta(seconds=PARSE_LEASE_SECONDS)
+    next_processed = job.processed_count
+    next_failed_h1 = job.failed_h1_count
+    if next_processed >= 100 and next_failed_h1 / next_processed > 0.2:
+        raise ParseJobFailure("解析失败率超过 20%")
     await db.flush()
     return ParseBatchResult(
         scanned=len(events),
@@ -347,6 +512,8 @@ async def create_parse_job(
 
     settings = get_settings()
     snapshot_end = min(range_end, now)
+    if snapshot_end <= range_start:
+        raise ValueError("snapshot_end 必须晚于 range_start")
 
     await db.execute(select(func.pg_advisory_xact_lock(PARSE_JOB_ADVISORY_LOCK_KEY)))
     active = await db.execute(
@@ -381,6 +548,7 @@ async def create_parse_job(
         h1_count=0,
         failed_h1_count=0,
         no_h1_count=0,
+        consecutive_timeout_count=0,
         created_by=created_by,
     )
     db.add(job)
@@ -427,6 +595,7 @@ def serialize_parse_job(job: LogReparseJob) -> dict[str, object]:
         "h1_count": job.h1_count,
         "failed_h1_count": job.failed_h1_count,
         "no_h1_count": job.no_h1_count,
+        "consecutive_timeout_count": job.consecutive_timeout_count,
         "batch_size": job.batch_size,
         "concurrency": job.concurrency,
         "cursor_event_id": job.cursor_event_id,

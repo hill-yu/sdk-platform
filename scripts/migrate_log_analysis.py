@@ -225,6 +225,7 @@ CREATE_TABLE_STATEMENTS = [
     h1_count          BIGINT       NOT NULL DEFAULT 0,
     failed_h1_count   BIGINT       NOT NULL DEFAULT 0,
     no_h1_count       BIGINT       NOT NULL DEFAULT 0,
+    consecutive_timeout_count INTEGER NOT NULL DEFAULT 0,
     batch_size        INTEGER      NOT NULL DEFAULT 200,
     concurrency       INTEGER      NOT NULL DEFAULT 3,
     started_at        TIMESTAMPTZ,
@@ -434,6 +435,7 @@ def build_migration_statements(
             ("h1_count", "BIGINT", "0"),
             ("failed_h1_count", "BIGINT", "0"),
             ("no_h1_count", "BIGINT", "0"),
+            ("consecutive_timeout_count", "INTEGER", "0"),
             ("batch_size", "INTEGER", "200"),
             ("concurrency", "INTEGER", "3"),
         ):

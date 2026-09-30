@@ -11,6 +11,8 @@ from app.services.log_parse_job_service import (
     LeaseLostError,
     ParseBatchResult,
     claim_parse_job,
+    get_parse_job,
+    mark_parse_job_failed,
     process_parse_job_batch,
 )
 
@@ -20,13 +22,17 @@ MAX_CONCURRENCY = min(get_settings().LOG_PARSE_CONCURRENCY, 3)
 IDLE_SECONDS = 1.0
 
 
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 async def run_worker_once(
     db,
     *,
     worker_id: str,
     now: datetime | None = None,
 ) -> bool:
-    current = now or datetime.now(timezone.utc)
+    current = now or utc_now()
     job = await claim_parse_job(db, worker_id=worker_id, now=current)
     if job is None:
         return False
@@ -37,7 +43,7 @@ async def run_worker_once(
                 db,
                 job.id,
                 worker_id=worker_id,
-                now=current,
+                now=utc_now(),
                 batch_size=BATCH_SIZE,
             )
             await db.commit()
@@ -47,10 +53,15 @@ async def run_worker_once(
         except LeaseLostError:
             await db.rollback()
             return True
-        except Exception:
+        except Exception as error:
             await db.rollback()
-            raise
+            await mark_parse_job_failed(db, job.id, error, now=utc_now())
+            await db.commit()
+            return True
         if result.done:
+            return True
+        refreshed = await get_parse_job(db, job.id)
+        if refreshed is None or refreshed.status in {"cancelled", "failed", "success"}:
             return True
 
 

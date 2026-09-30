@@ -219,6 +219,7 @@ CREATE TABLE IF NOT EXISTS sdk_log_reparse_jobs (
     h1_count          BIGINT       NOT NULL DEFAULT 0,
     failed_h1_count   BIGINT       NOT NULL DEFAULT 0,
     no_h1_count       BIGINT       NOT NULL DEFAULT 0,
+    consecutive_timeout_count INTEGER NOT NULL DEFAULT 0,
     batch_size        INTEGER      NOT NULL DEFAULT 200,
     concurrency       INTEGER      NOT NULL DEFAULT 3,
     started_at        TIMESTAMPTZ,

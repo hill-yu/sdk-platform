@@ -94,6 +94,7 @@ class LogReparseJob(Base):
     h1_count = Column(BigInteger, nullable=False, default=0)
     failed_h1_count = Column(BigInteger, nullable=False, default=0)
     no_h1_count = Column(BigInteger, nullable=False, default=0)
+    consecutive_timeout_count = Column(Integer, nullable=False, default=0)
     batch_size = Column(Integer, nullable=False, default=200)
     concurrency = Column(Integer, nullable=False, default=3)
     started_at = Column(DateTime(timezone=True))

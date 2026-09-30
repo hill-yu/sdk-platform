@@ -283,21 +283,12 @@ def test_details_route_requires_group_key_and_detail_route_requires_composite_ke
     assert detail.json()["data"]["extra"] == "H1"
 
 
-def test_reparse_requires_scope_and_returns_pending_job_without_sync_processing(monkeypatch):
+def test_legacy_reparse_route_is_gone_and_does_not_create_a_job(monkeypatch):
     from app.admin_main import app
     from app.api.admin import log_analysis
 
-    calls = []
-
     async def fake_reparse(_db, **kwargs):
-        calls.append(kwargs)
-        return {
-            "id": 77,
-            "status": "pending",
-            "package_name": kwargs["package_name"],
-            "range_end": "2026-08-18T00:00:00+08:00",
-            "snapshot_end": "2026-08-18T00:00:00+08:00",
-        }
+        raise AssertionError("legacy reparse route must not create a job")
 
     monkeypatch.setattr(log_analysis.log_analysis_service, "create_reparse_job", fake_reparse)
     app.dependency_overrides[get_db_no_commit] = override_db()
@@ -317,7 +308,4 @@ def test_reparse_requires_scope_and_returns_pending_job_without_sync_processing(
         app.dependency_overrides.clear()
 
     assert unbounded.status_code == 422
-    assert valid.status_code == 200
-    assert valid.json()["data"]["status"] == "pending"
-    assert valid.json()["data"]["snapshot_end"] == valid.json()["data"]["range_end"]
-    assert calls[0]["package_name"] == "com.example.app"
+    assert valid.status_code == 410

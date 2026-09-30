@@ -21,6 +21,8 @@ BEGIN
         ALTER TABLE sdk_log_reparse_jobs
             ADD COLUMN IF NOT EXISTS no_h1_count BIGINT NOT NULL DEFAULT 0;
         ALTER TABLE sdk_log_reparse_jobs
+            ADD COLUMN IF NOT EXISTS consecutive_timeout_count INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE sdk_log_reparse_jobs
             ADD COLUMN IF NOT EXISTS batch_size INTEGER NOT NULL DEFAULT 200;
         ALTER TABLE sdk_log_reparse_jobs
             ADD COLUMN IF NOT EXISTS concurrency INTEGER NOT NULL DEFAULT 3;

@@ -206,6 +206,10 @@ async def create_log_reparse_job(
     admin_user: str = Depends(require_admin_token),
     db: AsyncSession = Depends(get_db_no_commit),
 ):
+    raise HTTPException(
+        status_code=410,
+        detail="旧重解析接口已停用，请使用 /api/admin/log-analysis/parse-jobs",
+    )
     try:
         data = await log_analysis_service.create_reparse_job(
             db,
