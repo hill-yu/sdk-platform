@@ -1,34 +1,40 @@
 -- Structured H1 declarations, click attempts, and explicit parse-job progress.
 -- This migration is additive and safe to run repeatedly.
 
-ALTER TABLE IF EXISTS sdk_log_reparse_jobs
-    ADD COLUMN IF NOT EXISTS snapshot_end TIMESTAMPTZ;
-UPDATE sdk_log_reparse_jobs
-SET snapshot_end = range_end
-WHERE snapshot_end IS NULL;
-ALTER TABLE IF EXISTS sdk_log_reparse_jobs
-    ALTER COLUMN snapshot_end SET NOT NULL;
+DO $$
+BEGIN
+    IF to_regclass('public.sdk_log_reparse_jobs') IS NOT NULL THEN
+        ALTER TABLE sdk_log_reparse_jobs
+            ADD COLUMN IF NOT EXISTS snapshot_end TIMESTAMPTZ;
+        UPDATE sdk_log_reparse_jobs
+        SET snapshot_end = range_end
+        WHERE snapshot_end IS NULL;
+        ALTER TABLE sdk_log_reparse_jobs
+            ALTER COLUMN snapshot_end SET NOT NULL;
 
-ALTER TABLE IF EXISTS sdk_log_reparse_jobs
-    ADD COLUMN IF NOT EXISTS total_count BIGINT NOT NULL DEFAULT 0;
-ALTER TABLE IF EXISTS sdk_log_reparse_jobs
-    ADD COLUMN IF NOT EXISTS h1_count BIGINT NOT NULL DEFAULT 0;
-ALTER TABLE IF EXISTS sdk_log_reparse_jobs
-    ADD COLUMN IF NOT EXISTS failed_h1_count BIGINT NOT NULL DEFAULT 0;
-ALTER TABLE IF EXISTS sdk_log_reparse_jobs
-    ADD COLUMN IF NOT EXISTS no_h1_count BIGINT NOT NULL DEFAULT 0;
-ALTER TABLE IF EXISTS sdk_log_reparse_jobs
-    ADD COLUMN IF NOT EXISTS batch_size INTEGER NOT NULL DEFAULT 200;
-ALTER TABLE IF EXISTS sdk_log_reparse_jobs
-    ADD COLUMN IF NOT EXISTS concurrency INTEGER NOT NULL DEFAULT 3;
-ALTER TABLE IF EXISTS sdk_log_reparse_jobs
-    ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
-ALTER TABLE IF EXISTS sdk_log_reparse_jobs
-    ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
-ALTER TABLE IF EXISTS sdk_log_reparse_jobs
-    ADD COLUMN IF NOT EXISTS last_heartbeat_at TIMESTAMPTZ;
-ALTER TABLE IF EXISTS sdk_log_reparse_jobs
-    ADD COLUMN IF NOT EXISTS cancel_requested_at TIMESTAMPTZ;
+        ALTER TABLE sdk_log_reparse_jobs
+            ADD COLUMN IF NOT EXISTS total_count BIGINT NOT NULL DEFAULT 0;
+        ALTER TABLE sdk_log_reparse_jobs
+            ADD COLUMN IF NOT EXISTS h1_count BIGINT NOT NULL DEFAULT 0;
+        ALTER TABLE sdk_log_reparse_jobs
+            ADD COLUMN IF NOT EXISTS failed_h1_count BIGINT NOT NULL DEFAULT 0;
+        ALTER TABLE sdk_log_reparse_jobs
+            ADD COLUMN IF NOT EXISTS no_h1_count BIGINT NOT NULL DEFAULT 0;
+        ALTER TABLE sdk_log_reparse_jobs
+            ADD COLUMN IF NOT EXISTS batch_size INTEGER NOT NULL DEFAULT 200;
+        ALTER TABLE sdk_log_reparse_jobs
+            ADD COLUMN IF NOT EXISTS concurrency INTEGER NOT NULL DEFAULT 3;
+        ALTER TABLE sdk_log_reparse_jobs
+            ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+        ALTER TABLE sdk_log_reparse_jobs
+            ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
+        ALTER TABLE sdk_log_reparse_jobs
+            ADD COLUMN IF NOT EXISTS last_heartbeat_at TIMESTAMPTZ;
+        ALTER TABLE sdk_log_reparse_jobs
+            ADD COLUMN IF NOT EXISTS cancel_requested_at TIMESTAMPTZ;
+    END IF;
+END
+$$;
 
 CREATE TABLE IF NOT EXISTS sdk_log_h1_declarations (
     event_id BIGINT NOT NULL,

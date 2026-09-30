@@ -10,7 +10,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional
 
-from app.services.h1_extractor import extract_h1_records
+from app.services.h1_extractor import extract_h1_records, remove_h1_records
 
 
 DECODER_VERSION = "2.0.0"
@@ -966,8 +966,7 @@ def decode_extra(extra: str) -> list[dict[str, object]]:
         raise ValueError("extra 超过解析长度限制")
     h1_records = extract_h1_records(extra)
     decoded = [parse_host_final_result_line(record) for record in h1_records]
-    if not h1_records:
-        decoded = decode_text(extra)
+    decoded.extend(decode_text(remove_h1_records(extra)))
     if len(decoded) > MAX_RECORDS_PER_EXTRA:
         raise ValueError("extra 中记录数超过限制")
     return [asdict(item) for item in decoded]

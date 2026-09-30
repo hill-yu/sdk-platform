@@ -454,8 +454,10 @@ def test_reparse_requires_scope_and_only_creates_pending_job():
     assert db.added[0].status == "pending"
     assert db.added[0].status_filter == "failed"
     assert db.added[0].decoder_version_before == "1.2.3"
+    assert db.added[0].snapshot_end == db.added[0].range_end
     assert db.added[0].package_name == "com.example.app"
     assert job["id"] == 77
     assert job["status"] == "pending"
     assert job["status_filter"] == "failed"
     assert job["decoder_version_before"] == "1.2.3"
+    assert job["snapshot_end"] == job["range_end"]

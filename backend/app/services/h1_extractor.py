@@ -8,16 +8,43 @@ import re
 H1_BOUNDARY = re.compile(r"(?:^|\|\||\r?\n)(H1\|)")
 
 
+def _h1_record_spans(extra: str) -> list[tuple[int, int]]:
+    starts = [match.start(1) for match in H1_BOUNDARY.finditer(extra)]
+    spans: list[tuple[int, int]] = []
+    for index, start in enumerate(starts):
+        if index + 1 == len(starts):
+            newline = re.search(r"\r?\n", extra[start:])
+            end = start + newline.start() if newline is not None else len(extra)
+        else:
+            next_start = starts[index + 1]
+            delimiter_start = next_start - 2 if extra[next_start - 2:next_start] == "||" else next_start - 1
+            if delimiter_start > 0 and extra[delimiter_start - 1:delimiter_start] == "\r":
+                delimiter_start -= 1
+            end = delimiter_start
+        spans.append((start, end))
+    return spans
+
+
 def extract_h1_records(extra: str) -> list[str]:
     """Extract every H1 record from one raw extra value."""
     if not isinstance(extra, str):
         raise TypeError("extra 必须是字符串")
 
-    starts = [match.start(1) for match in H1_BOUNDARY.finditer(extra)]
-    records: list[str] = []
-    for index, start in enumerate(starts):
-        end = starts[index + 1] if index + 1 < len(starts) else len(extra)
-        record = extra[start:end].rstrip("|\r\n")
-        if record.startswith("H1|"):
-            records.append(record)
-    return records
+    return [extra[start:end] for start, end in _h1_record_spans(extra)]
+
+
+def remove_h1_records(extra: str) -> str:
+    """Remove H1 records while retaining all non-H1 protocol text."""
+    if not isinstance(extra, str):
+        raise TypeError("extra 必须是字符串")
+
+    spans = _h1_record_spans(extra)
+    if not spans:
+        return extra
+    parts: list[str] = []
+    cursor = 0
+    for start, end in spans:
+        parts.append(extra[cursor:start])
+        cursor = end
+    parts.append(extra[cursor:])
+    return "".join(parts)

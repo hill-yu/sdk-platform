@@ -130,3 +130,55 @@ def test_init_db_contains_log_metrics_tables_and_indexes() -> None:
 
     assert "idx_log_h1_package_ts_config" in sql
     assert "idx_log_click_package_ts_config_target" in sql
+
+
+def test_unified_migration_requires_metric_tables_and_indexes() -> None:
+    from scripts import migrate_log_analysis
+
+    required_tables = {
+        "sdk_log_h1_declarations",
+        "sdk_log_click_attempts",
+        "sdk_log_h1_declaration_stage",
+        "sdk_log_click_attempt_stage",
+    }
+    required_indexes = {
+        "idx_log_h1_package_ts_config",
+        "idx_log_click_package_ts_config_target",
+        "idx_log_h1_stage_job",
+        "idx_log_click_stage_job",
+    }
+
+    assert required_tables <= set(migrate_log_analysis.REQUIRED_TABLES)
+    assert required_indexes <= set(migrate_log_analysis.REQUIRED_INDEXES)
+
+    statements = migrate_log_analysis.build_migration_statements(
+        existing_tables=set(),
+        existing_indexes=set(),
+        view_summaries={},
+    )
+    sql = "\n".join(statements)
+    assert all(f"CREATE TABLE IF NOT EXISTS {table}" in sql for table in required_tables)
+    assert all(f"CREATE INDEX IF NOT EXISTS {index}" in sql for index in required_indexes)
+
+
+def test_metrics_migration_plan_does_not_touch_missing_reparse_table() -> None:
+    from scripts import migrate_log_analysis
+
+    statements = migrate_log_analysis.build_log_metrics_migration_statements(
+        existing_tables=set(), existing_indexes=set(), existing_columns={}
+    )
+
+    assert not any("sdk_log_reparse_jobs" in statement for statement in statements)
+    assert any("sdk_log_h1_declarations" in statement for statement in statements)
+
+
+def test_metrics_migration_plan_is_empty_after_schema_is_present() -> None:
+    from scripts import migrate_log_analysis
+
+    statements = migrate_log_analysis.build_log_metrics_migration_statements(
+        existing_tables=set(migrate_log_analysis.LOG_METRICS_TABLES),
+        existing_indexes=set(migrate_log_analysis.LOG_METRICS_INDEX_NAMES),
+        existing_columns={},
+    )
+
+    assert statements == []

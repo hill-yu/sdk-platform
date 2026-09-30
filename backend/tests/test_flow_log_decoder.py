@@ -45,6 +45,16 @@ def test_decode_extra_does_not_overwrite_an_earlier_h1() -> None:
     assert [item["config_id"] for item in decoded] == [1004, 1005]
 
 
+def test_decode_extra_keeps_h1_and_legacy_records_in_a_mixed_extra() -> None:
+    extra = "H1|i=GC|p=1\nFINAL_FLOW_RESULT|ts=2026-08-17T12:34:56+08:00|url=u42"
+
+    decoded = decode_extra(extra)
+
+    assert len(decoded) == 2
+    assert decoded[0]["config_id"] == 1004
+    assert decoded[1]["source_type"] == "readable"
+
+
 def test_decode_extra_decodes_legacy_final_flow_result(vectors: dict[str, Any]) -> None:
     vector = vectors["legacy_final_flow_result"]
 

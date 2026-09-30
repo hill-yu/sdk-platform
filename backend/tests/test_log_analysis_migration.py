@@ -12,6 +12,10 @@ REQUIRED_LOG_ANALYSIS_INDEXES = {
     "idx_admin_preferences_updated",
     "idx_log_reparse_jobs_status",
     "idx_log_reparse_jobs_range",
+    "idx_log_h1_package_ts_config",
+    "idx_log_click_package_ts_config_target",
+    "idx_log_h1_stage_job",
+    "idx_log_click_stage_job",
 }
 
 
@@ -195,25 +199,11 @@ def test_hourly_view_uses_timezone_aware_beijing_bucket():
 
 
 def test_old_naive_hour_view_is_rebuilt_without_recreating_log_tables():
-    from scripts.migrate_log_analysis import build_migration_statements
+    from scripts.migrate_log_analysis import REQUIRED_TABLES, build_migration_statements
 
     statements = build_migration_statements(
-        existing_tables={
-            "sdk_log_decodes",
-            "sdk_package_profiles",
-            "sdk_admin_preferences",
-            "sdk_log_reparse_jobs",
-        },
-        existing_indexes={
-            "idx_log_decodes_package_ts",
-            "idx_log_decodes_status_ts",
-            "idx_log_decodes_decoder_status",
-            "idx_log_decodes_event_ts",
-            "idx_package_profiles_updated",
-            "idx_admin_preferences_updated",
-            "idx_log_reparse_jobs_status",
-            "idx_log_reparse_jobs_range",
-        },
+        existing_tables=set(REQUIRED_TABLES),
+        existing_indexes=set(REQUIRED_LOG_ANALYSIS_INDEXES),
         view_summaries={
             "mv_daily_event_stats": "sha256:existing|tz:Asia/Shanghai",
             "mv_hourly_trend": "sha256:existing|tz:Asia/Shanghai",

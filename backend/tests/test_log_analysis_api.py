@@ -291,7 +291,13 @@ def test_reparse_requires_scope_and_returns_pending_job_without_sync_processing(
 
     async def fake_reparse(_db, **kwargs):
         calls.append(kwargs)
-        return {"id": 77, "status": "pending", "package_name": kwargs["package_name"]}
+        return {
+            "id": 77,
+            "status": "pending",
+            "package_name": kwargs["package_name"],
+            "range_end": "2026-08-18T00:00:00+08:00",
+            "snapshot_end": "2026-08-18T00:00:00+08:00",
+        }
 
     monkeypatch.setattr(log_analysis.log_analysis_service, "create_reparse_job", fake_reparse)
     app.dependency_overrides[get_db_no_commit] = override_db()
@@ -313,4 +319,5 @@ def test_reparse_requires_scope_and_returns_pending_job_without_sync_processing(
     assert unbounded.status_code == 422
     assert valid.status_code == 200
     assert valid.json()["data"]["status"] == "pending"
+    assert valid.json()["data"]["snapshot_end"] == valid.json()["data"]["range_end"]
     assert calls[0]["package_name"] == "com.example.app"
