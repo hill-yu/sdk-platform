@@ -248,9 +248,8 @@ def test_log_rejects_legacy_app_id(client):
     assert response.status_code == 422
 
 
-def test_log_returns_quickly_after_returning_insert_and_creates_pending(client, monkeypatch):
+def test_log_returns_quickly_after_returning_insert_and_stores_only_event(client, monkeypatch):
     from app.api.sdk import log as log_api
-    from sqlalchemy.dialects import postgresql
 
     def fail_if_decoded(_extra):
         raise AssertionError("decode_extra must not run in the request")
@@ -273,16 +272,5 @@ def test_log_returns_quickly_after_returning_insert_and_creates_pending(client, 
     assert session.event_statement is not None
     returning = [column.name for column in session.event_statement._returning]
     assert returning == ["id", "server_ts"]
-    assert session.pending_statement is not None
-    params = session.pending_statement.compile(dialect=postgresql.dialect()).params
-    pending = {
-        key.removesuffix("_m0"): value
-        for key, value in params.items()
-        if key.endswith("_m0")
-    }
-    assert pending["event_id"] == 501
-    assert pending["record_index"] == -1
-    assert pending["status"] == "pending"
-    assert pending["package_name"] == "com.example.app"
-    assert pending["device_id"] == "device-1"
-    assert pending["decoder_version"] == "2.0.0"
+    assert session.pending_statement is None
+    assert [statement.table.name for statement in session.executed] == ["sdk_events"]

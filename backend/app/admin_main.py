@@ -14,11 +14,8 @@ from app.api.admin import config_mgr, dashboard, log_analysis, log_exports, usag
 from app.core.config import get_settings
 from app.core.database import async_session_factory
 from app.core.middleware import RequestSizeLimitMiddleware
-from app.services.log_parse_service import process_pending_batch
-from app.services.log_reparse_service import reparse_job_loop
 
 logger = logging.getLogger(__name__)
-PARSE_LOOP_INTERVAL_SECONDS = 1.0
 
 
 async def etl_refresh_loop() -> None:
@@ -45,26 +42,6 @@ async def etl_refresh_loop() -> None:
                 logger.exception("ETL 刷新失败")
 
 
-async def pending_log_parse_loop() -> None:
-    """Continuously parse pending logs using one fresh transaction per batch."""
-    while True:
-        try:
-            async with async_session_factory() as session:
-                try:
-                    await process_pending_batch(session)
-                    await session.commit()
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    await session.rollback()
-                    logger.exception("日志解析批次失败")
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("日志解析会话失败")
-        await asyncio.sleep(PARSE_LOOP_INTERVAL_SECONDS)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动：校验 ADMIN_TOKEN
@@ -87,17 +64,12 @@ async def lifespan(app: FastAPI):
     # 启动 ETL 定时刷新
     etl_task = asyncio.create_task(etl_refresh_loop())
     logger.info("ETL 定时刷新已启动")
-    parse_task = asyncio.create_task(pending_log_parse_loop())
-    logger.info("日志解析循环已启动")
-    reparse_task = asyncio.create_task(reparse_job_loop())
-    logger.info("日志重解析循环已启动")
 
     try:
         yield  # 应用运行中
     finally:
-        for task in (etl_task, parse_task, reparse_task):
-            task.cancel()
-        for task in (etl_task, parse_task, reparse_task):
+        etl_task.cancel()
+        for task in (etl_task,):
             try:
                 await task
             except asyncio.CancelledError:
