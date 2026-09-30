@@ -162,6 +162,29 @@ def test_config_and_failure_breakdowns_keep_unknown_and_failure_shares():
     ]
 
 
+def test_ad_area_failure_breakdown_uses_banner_and_anchored_target_kinds():
+    from app.services.log_metrics_service import get_failure_breakdown
+
+    failure_db = MetricsDb([
+        Result(mapping={"total_failures": 2}),
+        Result(rows=[SimpleNamespace(failure_category="timeout", failure_count=2)]),
+    ])
+
+    failures = asyncio.run(
+        get_failure_breakdown(
+            failure_db,
+            package_name="com.example.app",
+            range_start=START,
+            range_end=END,
+            target_kind="ad_area",
+        )
+    )
+
+    assert failures == [{"failure_category": "timeout", "failure_count": 2, "share": 1.0}]
+    sql = str(failure_db.statements[0].compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+    assert "target_kind IN ('banner', 'anchored')" in sql
+
+
 def test_h1_details_are_paginated_and_include_click_attempts():
     from app.services.log_metrics_service import get_h1_details
 

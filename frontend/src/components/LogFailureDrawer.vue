@@ -5,6 +5,7 @@
       <button data-testid="close-failure-drawer" class="ghost" type="button" @click="$emit('close')">关闭</button>
     </div>
     <p v-if="loading" class="muted">加载中…</p>
+    <p v-else-if="error" data-testid="failure-error" class="error">{{ error }}</p>
     <p v-else-if="!items.length" class="empty-state">暂无失败明细。</p>
     <div v-else class="table-scroll failure-scroll">
       <table class="table">
@@ -18,7 +19,6 @@
         </tbody>
       </table>
     </div>
-    <p v-if="error" class="error">{{ error }}</p>
   </aside>
 </template>
 

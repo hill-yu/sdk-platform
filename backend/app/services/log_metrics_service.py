@@ -229,7 +229,10 @@ async def get_failure_breakdown(
     filters = _click_filters(package_name=package_name, range_start=range_start, range_end=range_end)
     filters.append(LogClickAttempt.navigation_code.is_distinct_from(1))
     if target_kind:
-        filters.append(LogClickAttempt.target_kind == target_kind)
+        if target_kind == "ad_area":
+            filters.append(LogClickAttempt.target_kind.in_(("banner", "anchored")))
+        else:
+            filters.append(LogClickAttempt.target_kind == target_kind)
     if config_id is not None:
         filters.append(LogClickAttempt.config_id == config_id)
     total = int((await db.execute(select(func.count(LogClickAttempt.attempt_index)).where(*filters))).scalar_one() or 0)

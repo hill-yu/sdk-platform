@@ -7,7 +7,8 @@ export interface ParseJob extends LogMetricScope {
   total_count: number; processed_count: number; h1_count: number; failed_h1_count: number; no_h1_count: number;
   cursor_event_id?: number | null; cursor_server_ts?: string | null; error_summary?: string | null;
 }
-export interface TargetMetric { planned_count: number; actual_count: number; success_count: number; failure_count: number; actual_rate: number | null; success_rate: number | null; failure_rate: number | null; }
+export type RawTargetKind = "banner" | "anchored" | "web_element" | string;
+export interface TargetMetric { target_kind: RawTargetKind; planned_count: number; actual_count: number; success_count: number; failure_count: number; actual_rate: number | null; success_rate: number | null; failure_rate: number | null; }
 export interface MetricOverview {
   declaration_count: number; planned_click_count: number; actual_click_count: number; response_success_count: number;
   plan_mismatch_count: number; interstitial_presentation_count: number; interstitial_click_count: number;
@@ -25,6 +26,6 @@ export const getParseJob = (id: number) => request.get<ApiEnvelope<ParseJob>>(`/
 export const cancelParseJob = (id: number) => request.post<ApiEnvelope<ParseJob>>(`/log-analysis/parse-jobs/${id}/cancel`);
 export const getMetricOverview = (scope: LogMetricScope) => request.get<ApiEnvelope<MetricOverview>>("/log-analysis/metrics/overview", { params: scope });
 export const getMetricConfigs = (scope: LogMetricScope) => request.get<ApiEnvelope<{ total: number; items: ConfigMetricItem[] }>>("/log-analysis/metrics/configs", { params: scope });
-export const getMetricTargets = (scope: LogMetricScope & { target_kind?: string }) => request.get<ApiEnvelope<{ items: Array<TargetMetric & { target_kind: string }> }>>("/log-analysis/metrics/targets", { params: scope });
-export const getMetricFailures = (scope: LogMetricScope & { target_kind?: string; config_id?: number }) => request.get<ApiEnvelope<FailureBreakdownItem[]>>("/log-analysis/metrics/failures", { params: scope });
+export const getMetricTargets = (scope: LogMetricScope) => request.get<ApiEnvelope<{ items: TargetMetric[] }>>("/log-analysis/metrics/targets", { params: scope });
+export const getMetricFailures = (scope: LogMetricScope & { target_kind?: "web_element" | "ad_area"; config_id?: number }) => request.get<ApiEnvelope<FailureBreakdownItem[]>>("/log-analysis/metrics/failures", { params: scope });
 export const getH1Details = (scope: LogMetricScope & { page: number; page_size: number; sort_order?: "asc" | "desc" }) => request.get<ApiEnvelope<Paginated<H1Detail>>>("/log-analysis/metrics/h1", { params: scope });

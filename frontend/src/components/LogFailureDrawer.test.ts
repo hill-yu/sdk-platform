@@ -21,4 +21,10 @@ describe("LogFailureDrawer", () => {
     await wrapper.get("[data-testid='close-failure-drawer']").trigger("click");
     expect(wrapper.emitted("close")).toHaveLength(1);
   });
+
+  it("shows request errors instead of presenting them as an empty result", () => {
+    const wrapper = mount(LogFailureDrawer, { props: { open: true, items: [], error: "failure unavailable" } });
+    expect(wrapper.get("[data-testid='failure-error']").text()).toContain("failure unavailable");
+    expect(wrapper.find(".empty-state").exists()).toBe(false);
+  });
 });

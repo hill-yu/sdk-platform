@@ -178,7 +178,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 import { getEventFilterOptions, getEvents } from "@/api/dashboard";
 import type { EventFilterOptions, EventItem, EventQuery, LogLevel } from "@/api/dashboard";
@@ -237,6 +237,7 @@ let summaryRequestSequence = 0;
 let columnsRequestSequence = 0;
 let detailsRequestSequence = 0;
 let detailRequestSequence = 0;
+let failureRequestSequence = 0;
 
 function responseData<T>(response: unknown): T {
   let value = response && typeof response === "object" && "data" in response ? (response as { data?: unknown }).data : response;
@@ -282,18 +283,30 @@ function queryAnalysis(value: LogAnalysisFilterValues) { appliedFilters.value = 
 function refreshAnalysis(value?: LogAnalysisFilterValues) { if (value) setMetricScope(value); void loadSummary(); }
 function resetAnalysis(value: LogAnalysisFilterValues) { appliedFilters.value = { ...value }; metricScope.value = { package_name: "", date_from: value.date_from, hour_from: value.hour_from, date_to: value.date_to, hour_to: value.hour_to }; void loadSummary({ resetPage: true }); }
 function refreshMetrics() { metricScope.value = { ...metricScope.value }; }
-async function openFailureDrawer(selection: { target_kind: string }) {
-  failureDrawerOpen.value = true; failureLoading.value = true; failureError.value = "";
+async function openFailureDrawer(selection: { target_kind: "web_element" | "ad_area"; config_id?: number }) {
+  const requestSequence = ++failureRequestSequence;
+  const scope = { ...metricScope.value };
+  failureDrawerOpen.value = true; failureLoading.value = true; failureError.value = ""; failureItems.value = [];
   try {
-    const response = await getMetricFailures({ ...metricScope.value, ...selection });
+    const response = await getMetricFailures({ ...scope, ...selection });
+    if (requestSequence !== failureRequestSequence) return;
     let value: unknown = response;
     if (value && typeof value === "object" && "data" in value) value = (value as { data: unknown }).data;
     if (value && typeof value === "object" && "code" in value && "data" in value) value = (value as { data: unknown }).data;
     failureItems.value = value as FailureBreakdownItem[];
-  } catch (error) { failureError.value = error instanceof Error ? error.message : "失败明细读取失败"; }
-  finally { failureLoading.value = false; }
+  } catch (error) {
+    if (requestSequence === failureRequestSequence) { failureItems.value = []; failureError.value = error instanceof Error ? error.message : "失败明细读取失败"; }
+  }
+  finally { if (requestSequence === failureRequestSequence) failureLoading.value = false; }
 }
-function closeFailureDrawer() { failureDrawerOpen.value = false; }
+function closeFailureDrawer() { ++failureRequestSequence; failureDrawerOpen.value = false; failureLoading.value = false; }
+watch(metricScope, () => {
+  ++failureRequestSequence;
+  failureDrawerOpen.value = false;
+  failureLoading.value = false;
+  failureItems.value = [];
+  failureError.value = "";
+}, { deep: true });
 function sortAnalysis() { void loadSummary({ resetPage: true }); }
 function toggleSummarySort() { summarySortOrder.value = summarySortOrder.value === "desc" ? "asc" : "desc"; void loadSummary({ resetPage: true }); }
 
@@ -414,6 +427,7 @@ function switchView(nextView: View) { view.value = nextView; if (nextView === "r
 function showCopySuccess(): void { setFeedbackSuccess(feedback, "extra 复制成功"); }
 function showCopyError(message: string): void { setFeedbackError(feedback, message); }
 onMounted(loadAnalysisInitial);
+onBeforeUnmount(() => { ++failureRequestSequence; });
 </script>
 
 <style scoped>

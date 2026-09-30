@@ -122,7 +122,7 @@ function respondMetrics() {
     interstitial_close_count: 0, interstitial_close_rate: null, interstitial_non_close_click_rate: null,
     target_breakdown: {},
   } } });
-  getMetricConfigs.mockResolvedValue({ data: { code: 0, data: { total: 1, items: [{ config_id: "unknown", declaration_count: 2, share: null }] } } });
+  getMetricConfigs.mockResolvedValue({ data: { code: 0, data: { total: 2, items: [{ config_id: "unknown", declaration_count: 1, share: 0.5 }, { config_id: 8, declaration_count: 1, share: 0.5 }] } } });
   getMetricTargets.mockResolvedValue({ data: { code: 0, data: { items: [{ target_kind: "web_element", planned_count: 2, actual_count: 1, success_count: 1, failure_count: 0, actual_rate: 0.5, success_rate: 1, failure_rate: 0 }] } } });
   getMetricFailures.mockResolvedValue({ data: { code: 0, data: [{ failure_category: "timeout", failure_count: 1, share: 1 }] } });
   postParseJob.mockResolvedValue({ data: { code: 0, data: { id: 9, package_name: "com.example.app", date_from: "2026-09-28", hour_from: 0, date_to: "2026-09-30", hour_to: 23, status: "success", range_start: "", range_end: "", total_count: 1, processed_count: 1, h1_count: 1, failed_h1_count: 0, no_h1_count: 0 } } });
@@ -240,10 +240,27 @@ describe("LogViewer", () => {
 
     expect(getMetricOverview).toHaveBeenCalledWith(expect.objectContaining({ package_name: "com.example.app", hour_from: 0, hour_to: 23 }));
     expect(wrapper.get("[data-testid='planned-click-count']").text()).toBe("2");
+    await wrapper.get("[data-testid='config-select-8']").trigger("click");
     await wrapper.get("[data-testid='metric-failure-button']").trigger("click");
     await flushPromises();
-    expect(getMetricFailures).toHaveBeenCalledWith(expect.objectContaining({ package_name: "com.example.app", target_kind: "web_element" }));
+    expect(getMetricFailures).toHaveBeenCalledWith(expect.objectContaining({ package_name: "com.example.app", target_kind: "web_element", config_id: 8 }));
     expect(wrapper.get("[data-testid='failure-drawer']").text()).toContain("timeout");
+  });
+
+  it("ignores a late failure response from an older analysis scope", async () => {
+    const oldFailure = deferred<{ data: unknown }>();
+    getMetricFailures.mockReturnValueOnce(oldFailure.promise);
+    const wrapper = await mountAnalysisViewer();
+    await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
+    await wrapper.get("[data-testid='filter-query-existing']").trigger("click");
+    await flushPromises();
+    await wrapper.get("[data-testid='metric-failure-button']").trigger("click");
+    await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.next");
+    await wrapper.get("[data-testid='filter-query-existing']").trigger("click");
+    await flushPromises();
+    oldFailure.resolve({ data: { code: 0, data: [{ failure_category: "old", failure_count: 1, share: 1 }] } });
+    await flushPromises();
+    expect(wrapper.find("[data-testid='failure-drawer']").exists()).toBe(false);
   });
 
   it("saves column drafts globally only after the save request succeeds", async () => {

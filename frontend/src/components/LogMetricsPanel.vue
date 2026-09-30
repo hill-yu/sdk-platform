@@ -20,11 +20,17 @@
       <p v-if="overview.plan_mismatch_count > 0" data-testid="plan-mismatch-alert" class="mismatch-alert">计划与实际点击数存在 {{ overview.plan_mismatch_count }} 条不一致，请查看失败明细。</p>
 
       <div class="metric-section">
-        <div class="section-heading"><h4>配置分布</h4><span class="count">{{ configs.length }} 项</span></div>
+        <div class="section-heading"><h4>配置分布</h4><div class="config-tabs"><button data-testid="config-select-all" :class="{ active: selectedConfigId === null }" type="button" @click="selectConfig(null)">全部配置</button></div></div>
         <div class="table-scroll metric-table-scroll">
           <table class="table"><thead><tr><th>配置</th><th>声明数</th><th>占比</th></tr></thead>
             <tbody>
-              <tr v-for="item in configs" :key="String(item.config_id)"><td :data-testid="item.config_id === 'unknown' ? 'unknown-config' : undefined">{{ item.config_id }}</td><td>{{ item.declaration_count }}</td><td>{{ formatRate(item.share) }}</td></tr>
+              <tr v-for="item in configs" :key="String(item.config_id)">
+                <td>
+                  <button v-if="item.config_id !== 'unknown'" :data-testid="`config-select-${item.config_id}`" :class="{ active: selectedConfigId === item.config_id }" class="config-button" type="button" @click="selectConfig(item.config_id)">{{ item.config_id }}</button>
+                  <button v-else data-testid="config-select-unknown" class="config-button" type="button" disabled title="unknown 配置无法精确下钻，请选择全部配置"><span data-testid="unknown-config">unknown</span></button>
+                </td>
+                <td>{{ item.declaration_count }}</td><td>{{ formatRate(item.share) }}</td>
+              </tr>
               <tr v-if="!configs.length"><td colspan="3" class="empty-state">暂无配置分布。</td></tr>
             </tbody>
           </table>
@@ -34,8 +40,15 @@
       <div class="metric-section">
         <div class="section-heading"><h4>目标维度</h4><div class="tabs"><button data-testid="target-tab-web-element" :class="{ active: targetKind === 'web_element' }" type="button" @click="selectTarget('web_element')">网页元素</button><button data-testid="target-tab-ad-area" :class="{ active: targetKind === 'ad_area' }" type="button" @click="selectTarget('ad_area')">广告区域</button></div></div>
         <div class="table-scroll metric-table-scroll">
-          <table class="table"><thead><tr><th>计划</th><th>实际</th><th>成功</th><th>失败</th><th>实际率</th><th>成功率</th><th>失败率</th><th>操作</th></tr></thead>
-            <tbody><tr v-if="!targets.length"><td colspan="8" class="empty-state">暂无目标维度结果。</td></tr><tr v-for="item in targets" v-else :key="`${targetKind}-${item.planned_count}-${item.actual_count}`"><td>{{ item.planned_count }}</td><td>{{ item.actual_count }}</td><td>{{ item.success_count }}</td><td>{{ item.failure_count }}</td><td>{{ formatRate(item.actual_rate) }}</td><td>{{ formatRate(item.success_rate) }}</td><td>{{ formatRate(item.failure_rate) }}</td><td><button data-testid="metric-failure-button" class="ghost" type="button" @click="$emit('failure-select', { target_kind: targetKind })">失败明细</button></td></tr></tbody>
+          <table class="table"><thead><tr><th>计划</th><th>实际</th><th>成功</th><th>失败</th><th>实际率</th><th>成功率</th><th>失败率</th></tr></thead>
+            <tbody>
+              <tr v-if="!visibleTargets.length"><td colspan="7" class="empty-state">暂无目标维度结果。</td></tr>
+              <tr v-for="item in visibleTargets" v-else :key="targetKind" data-testid="target-row">
+                <td>{{ item.planned_count }}</td><td>{{ item.actual_count }}</td><td>{{ item.success_count }}</td>
+                <td><button data-testid="metric-failure-button" class="failure-count" type="button" @click="emitFailureSelection">{{ item.failure_count }}</button></td>
+                <td>{{ formatRate(item.actual_rate) }}</td><td>{{ formatRate(item.success_rate) }}</td><td>{{ formatRate(item.failure_rate) }}</td>
+              </tr>
+            </tbody>
           </table>
         </div>
       </div>
@@ -44,21 +57,42 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { getMetricConfigs, getMetricOverview, getMetricTargets } from "@/api/logMetrics";
 import type { ConfigMetricItem, LogMetricScope, MetricOverview, TargetMetric } from "@/api/logMetrics";
 
+type MetricViewKind = "web_element" | "ad_area";
+type VisibleTarget = Omit<TargetMetric, "target_kind">;
+
 const props = defineProps<{ scope: LogMetricScope }>();
-defineEmits<{ "failure-select": [value: { target_kind: string }] }>();
+const emit = defineEmits<{ "failure-select": [value: { target_kind: MetricViewKind; config_id?: number }] }>();
 
 const overview = ref<MetricOverview | null>(null);
 const configs = ref<ConfigMetricItem[]>([]);
-const targets = ref<Array<TargetMetric & { target_kind: string }>>([]);
-const targetKind = ref("web_element");
+const rawTargets = ref<TargetMetric[]>([]);
+const targetKind = ref<MetricViewKind>("web_element");
+const selectedConfigId = ref<number | null>(null);
 const loading = ref(false);
 const error = ref("");
 const disabled = ref(false);
+let disposed = false;
+let scopeRequestId = 0;
+let targetRequestId = 0;
+
+const visibleTargets = computed<VisibleTarget[]>(() => {
+  const allowed = targetKind.value === "web_element" ? rawTargets.value.filter((item) => item.target_kind === "web_element") : rawTargets.value.filter((item) => item.target_kind === "banner" || item.target_kind === "anchored");
+  if (!allowed.length) return [];
+  const totals = allowed.reduce((result, item) => ({
+    planned_count: result.planned_count + item.planned_count,
+    actual_count: result.actual_count + item.actual_count,
+    success_count: result.success_count + item.success_count,
+    failure_count: result.failure_count + item.failure_count,
+  }), { planned_count: 0, actual_count: 0, success_count: 0, failure_count: 0 });
+  return [{ ...totals, actual_rate: ratio(totals.actual_count, totals.planned_count), success_rate: ratio(totals.success_count, totals.planned_count), failure_rate: ratio(totals.failure_count, totals.planned_count) }];
+});
+
+function ratio(numerator: number, denominator: number) { return denominator ? numerator / denominator : null; }
 
 function unwrap<T>(response: unknown): T {
   let value = response && typeof response === "object" && "data" in response ? (response as { data?: unknown }).data : response;
@@ -66,38 +100,55 @@ function unwrap<T>(response: unknown): T {
   return value as T;
 }
 
-function validScope(scope: LogMetricScope) {
-  return Boolean(scope.package_name && scope.date_from && scope.date_to);
+function validScope(scope: LogMetricScope) { return Boolean(scope.package_name && scope.date_from && scope.date_to); }
+
+async function loadTargets(scope: LogMetricScope, requestId: number, kind: MetricViewKind) {
+  const targetRequest = ++targetRequestId;
+  const response = await getMetricTargets(scope);
+  if (disposed || requestId !== scopeRequestId || targetRequest !== targetRequestId || targetKind.value !== kind) return;
+  rawTargets.value = unwrap<{ items: TargetMetric[] }>(response).items;
 }
 
 async function load() {
-  if (!validScope(props.scope)) { disabled.value = true; overview.value = null; return; }
+  const requestId = ++scopeRequestId;
+  ++targetRequestId;
+  const scope = { ...props.scope };
+  selectedConfigId.value = null;
+  if (!validScope(scope)) { disabled.value = true; overview.value = null; rawTargets.value = []; return; }
   disabled.value = false; loading.value = true; error.value = "";
   try {
-    const [overviewResponse, configsResponse] = await Promise.all([getMetricOverview(props.scope), getMetricConfigs(props.scope)]);
+    const [overviewResponse, configsResponse] = await Promise.all([getMetricOverview(scope), getMetricConfigs(scope)]);
+    if (disposed || requestId !== scopeRequestId) return;
     overview.value = unwrap<MetricOverview>(overviewResponse);
     configs.value = unwrap<{ total: number; items: ConfigMetricItem[] }>(configsResponse).items;
-    await selectTarget(targetKind.value, false);
+    await loadTargets(scope, requestId, targetKind.value);
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "指标读取失败";
-  } finally { loading.value = false; }
-}
-
-async function selectTarget(kind: string, reloadOverview = true) {
-  targetKind.value = kind;
-  if (!validScope(props.scope)) return;
-  try {
-    const response = await getMetricTargets({ ...props.scope, target_kind: kind });
-    targets.value = unwrap<{ items: Array<TargetMetric & { target_kind: string }> }>(response).items;
-  } catch (cause) {
-    if (reloadOverview) error.value = cause instanceof Error ? cause.message : "目标指标读取失败";
+    if (!disposed && requestId === scopeRequestId) { error.value = cause instanceof Error ? cause.message : "指标读取失败"; rawTargets.value = []; }
+  } finally {
+    if (!disposed && requestId === scopeRequestId) loading.value = false;
   }
 }
 
+async function selectTarget(kind: MetricViewKind) {
+  targetKind.value = kind;
+  if (!validScope(props.scope)) return;
+  const requestId = scopeRequestId;
+  const scope = { ...props.scope };
+  error.value = "";
+  try {
+    await loadTargets(scope, requestId, kind);
+  } catch (cause) {
+    if (!disposed && requestId === scopeRequestId && targetKind.value === kind) { error.value = cause instanceof Error ? cause.message : "目标指标读取失败"; rawTargets.value = []; }
+  }
+}
+
+function selectConfig(configId: number | null) { selectedConfigId.value = configId; }
+function emitFailureSelection() { emit("failure-select", selectedConfigId.value === null ? { target_kind: targetKind.value } : { target_kind: targetKind.value, config_id: selectedConfigId.value }); }
 function formatRate(value: number | null) { return value === null ? "-" : `${Math.round(value * 100)}%`; }
 
 watch(() => props.scope, () => { void load(); }, { deep: true });
 onMounted(() => { void load(); });
+onBeforeUnmount(() => { disposed = true; ++scopeRequestId; ++targetRequestId; });
 </script>
 
 <style scoped>
@@ -112,9 +163,11 @@ onMounted(() => { void load(); });
 .metric-section { display: grid; gap: 10px; }
 .metric-table-scroll { max-height: 250px; overflow: auto; }
 .mismatch-alert { margin: 0; padding: 10px 12px; border: 1px solid rgba(217, 120, 93, .45); border-radius: 8px; color: var(--danger, #d9785d); }
-.tabs { display: flex; gap: 6px; }
-.tabs button, .ghost { border: 1px solid var(--border-soft); border-radius: 8px; background: transparent; color: var(--text-primary); padding: 6px 10px; cursor: pointer; }
-.tabs button.active { background: rgba(182, 98, 43, .22); }
+.tabs, .config-tabs { display: flex; gap: 6px; }
+.tabs button, .config-tabs button, .ghost, .config-button, .failure-count { border: 1px solid var(--border-soft); border-radius: 8px; background: transparent; color: var(--text-primary); padding: 6px 10px; cursor: pointer; }
+.tabs button.active, .config-tabs button.active, .config-button.active { background: rgba(182, 98, 43, .22); }
+.config-button:disabled { cursor: not-allowed; opacity: .6; }
+.failure-count { min-width: 34px; color: var(--text-primary); }
 .feedback.error { color: var(--danger, #d9785d); }
 .empty-state { color: var(--text-secondary); }
 </style>
