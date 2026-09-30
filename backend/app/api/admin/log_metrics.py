@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin.deps import require_admin_token
 from app.core.database import get_db_no_commit
+from app.core.timezone import business_hour_utc_range
 from app.schemas.log_metrics_schemas import LogParseJobCreateRequest
+from app.services.config_crypto import normalize_package_name
 
 
 router = APIRouter(
@@ -20,6 +22,43 @@ def _service():
     from app.services import log_parse_job_service
 
     return log_parse_job_service
+
+
+def _metrics_service():
+    from app.services import log_metrics_service
+
+    return log_metrics_service
+
+
+def _metric_scope(
+    package_name: str = Query(..., min_length=1, max_length=255),
+    date_from: date = Query(...),
+    hour_from: int = Query(..., ge=0, le=23),
+    date_to: date = Query(...),
+    hour_to: int = Query(..., ge=0, le=23),
+) -> dict[str, object]:
+    try:
+        normalized = normalize_package_name(package_name)
+        range_start, range_end = business_hour_utc_range(
+            date_from,
+            hour_from,
+            date_to,
+            hour_to,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "package_name": normalized,
+        "range_start": range_start,
+        "range_end": range_end,
+    }
+
+
+async def _call_metric(service_name: str, scope: dict[str, object], db: AsyncSession, **kwargs):
+    try:
+        return await getattr(_metrics_service(), service_name)(db, **scope, **kwargs)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/log-analysis/parse-jobs", response_model=dict)
@@ -82,4 +121,64 @@ async def cancel_parse_job(
 @router.get("/log-analysis/coverage", response_model=dict)
 async def get_parse_coverage(db: AsyncSession = Depends(get_db_no_commit)):
     data = await _service().get_parse_coverage(db)
+    return {"code": 0, "data": data}
+
+
+@router.get("/log-analysis/metrics/overview", response_model=dict)
+async def get_metrics_overview(
+    scope: dict[str, object] = Depends(_metric_scope),
+    db: AsyncSession = Depends(get_db_no_commit),
+):
+    return {"code": 0, "data": await _call_metric("get_overview", scope, db)}
+
+
+@router.get("/log-analysis/metrics/configs", response_model=dict)
+async def get_metrics_configs(
+    scope: dict[str, object] = Depends(_metric_scope),
+    db: AsyncSession = Depends(get_db_no_commit),
+):
+    return {"code": 0, "data": await _call_metric("get_config_breakdown", scope, db)}
+
+
+@router.get("/log-analysis/metrics/targets", response_model=dict)
+async def get_metrics_targets(
+    scope: dict[str, object] = Depends(_metric_scope),
+    db: AsyncSession = Depends(get_db_no_commit),
+):
+    return {"code": 0, "data": await _call_metric("get_target_breakdown", scope, db)}
+
+
+@router.get("/log-analysis/metrics/failures", response_model=dict)
+async def get_metrics_failures(
+    target_kind: str | None = Query(None, max_length=64),
+    config_id: int | None = Query(None, ge=0),
+    scope: dict[str, object] = Depends(_metric_scope),
+    db: AsyncSession = Depends(get_db_no_commit),
+):
+    data = await _call_metric(
+        "get_failure_breakdown",
+        scope,
+        db,
+        target_kind=target_kind,
+        config_id=config_id,
+    )
+    return {"code": 0, "data": data}
+
+
+@router.get("/log-analysis/metrics/h1", response_model=dict)
+async def get_metrics_h1(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
+    scope: dict[str, object] = Depends(_metric_scope),
+    db: AsyncSession = Depends(get_db_no_commit),
+):
+    data = await _call_metric(
+        "get_h1_details",
+        scope,
+        db,
+        page=page,
+        page_size=page_size,
+        sort_order=sort_order,
+    )
     return {"code": 0, "data": data}
