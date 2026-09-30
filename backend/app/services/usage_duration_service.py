@@ -69,8 +69,6 @@ def build_latest_usage_query(
     ]
     if package_name is not None:
         filters.append(SdkUsageDuration.package_name == package_name)
-    if device_model is not None:
-        filters.append(SdkUsageDuration.device_model == device_model)
     latest_rank = func.row_number().over(
         partition_by=(SdkUsageDuration.package_name, SdkUsageDuration.device_id),
         order_by=(SdkUsageDuration.server_ts.desc(), SdkUsageDuration.id.desc()),
@@ -156,7 +154,11 @@ async def get_usage_summary(
     ).group_by(latest_rows.c.package_name, latest_rows.c.device_model)
     total = int((await db.execute(select(func.count()).select_from(grouped.subquery()))).scalar_one() or 0)
     sort_expression = getattr(grouped.selected_columns, sort_by, grouped.selected_columns.package_name)
-    ordered = grouped.order_by(sort_expression.desc() if sort_order == "desc" else sort_expression.asc())
+    ordered = grouped.order_by(
+        (sort_expression.desc() if sort_order == "desc" else sort_expression.asc()).nulls_last(),
+        (grouped.selected_columns.package_name.desc() if sort_order == "desc" else grouped.selected_columns.package_name.asc()).nulls_last(),
+        (grouped.selected_columns.device_model.desc() if sort_order == "desc" else grouped.selected_columns.device_model.asc()).nulls_last(),
+    )
     rows = (await db.execute(ordered.limit(page_size).offset((page - 1) * page_size))).mappings().all()
     items = []
     for row in rows:
@@ -187,15 +189,22 @@ async def get_usage_devices(
         raise ValueError("分页参数无效")
     latest = build_latest_usage_query(
         package_name=package_name,
-        device_model=device_model,
+        device_model=None,
         range_start=range_start,
         range_end=range_end,
     ).subquery()
-    latest_rows = select(latest).where(latest.c.latest_rank == 1).subquery()
+    latest_rows = select(latest).where(
+        latest.c.latest_rank == 1,
+        latest.c.device_model == device_model,
+    ).subquery()
     total = int((await db.execute(select(func.count()).select_from(latest_rows))).scalar_one() or 0)
     rows = (await db.execute(
         select(latest_rows)
-        .order_by(latest_rows.c.server_ts.desc(), latest_rows.c.id.desc())
+        .order_by(
+            latest_rows.c.server_ts.desc(),
+            latest_rows.c.id.desc(),
+            latest_rows.c.device_id.asc().nulls_last(),
+        )
         .limit(page_size)
         .offset((page - 1) * page_size)
     )).mappings().all()

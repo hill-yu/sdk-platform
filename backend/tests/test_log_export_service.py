@@ -34,6 +34,12 @@ def test_log_export_job_model_has_required_columns():
     assert "chk_log_export_jobs_export_mode" in constraints
 
 
+def test_log_export_job_is_registered_in_model_exports():
+    from app.models import LogExportJob
+
+    assert LogExportJob.__tablename__ == "sdk_log_export_jobs"
+
+
 def test_log_export_migration_is_idempotent_and_indexed():
     sql = Path("scripts/migrate_log_export_jobs.sql").read_text(encoding="utf-8")
     assert "CREATE TABLE IF NOT EXISTS sdk_log_export_jobs" in sql

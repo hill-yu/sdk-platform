@@ -54,6 +54,40 @@ def test_latest_device_query_uses_partitioned_window_and_stable_tiebreaker():
     assert "sdk_usage_durations.server_ts <" in sql
 
 
+def test_latest_query_does_not_filter_device_model_before_partitioning():
+    from app.services.usage_duration_service import build_latest_usage_query
+
+    statement = build_latest_usage_query(
+        package_name="com.example.app",
+        device_model="A",
+        range_start=START,
+        range_end=END,
+    )
+    sql = str(statement.compile(dialect=postgresql.dialect()))
+    assert "WHERE sdk_usage_durations.device_model" not in sql
+
+
+def test_usage_devices_query_filters_model_after_latest_partition():
+    from app.services.usage_duration_service import get_usage_devices
+
+    db = Db([Result(scalar=0), Result(rows=[])])
+    asyncio.run(
+        get_usage_devices(
+            db,
+            package_name="com.example.app",
+            device_model="A",
+            range_start=START,
+            range_end=END,
+            page=1,
+            page_size=20,
+        )
+    )
+    sql = str(db.statements[1].compile(dialect=postgresql.dialect()))
+    assert "latest_rank =" in sql
+    assert "device_model" in sql
+    assert sql.index("latest_rank") < sql.rindex("device_model")
+
+
 def test_usage_summary_uses_only_latest_device_and_computes_four_buckets():
     from app.services.usage_duration_service import get_usage_summary
 
@@ -127,3 +161,37 @@ def test_usage_devices_returns_latest_rows_for_expanded_package_and_model():
     assert result["total"] == 1
     assert result["items"][0]["duration_s"] == 900
     assert result["items"][0]["app_version"] == "2.0"
+
+
+def test_usage_summary_and_devices_have_stable_tie_breakers():
+    from app.services.usage_duration_service import get_usage_devices, get_usage_summary
+
+    summary_db = Db([Result(scalar=0), Result(rows=[])])
+    asyncio.run(get_usage_summary(
+        summary_db,
+        package_name=None,
+        range_start=START,
+        range_end=END,
+        page=1,
+        page_size=20,
+        sort_by="device_count",
+        sort_order="desc",
+    ))
+    summary_sql = str(summary_db.statements[1].compile(dialect=postgresql.dialect()))
+    assert "package_name" in summary_sql
+    assert "device_model" in summary_sql
+
+    devices_db = Db([Result(scalar=0), Result(rows=[])])
+    asyncio.run(get_usage_devices(
+        devices_db,
+        package_name="com.example.app",
+        device_model="A",
+        range_start=START,
+        range_end=END,
+        page=1,
+        page_size=20,
+    ))
+    devices_sql = str(devices_db.statements[1].compile(dialect=postgresql.dialect()))
+    assert "server_ts DESC" in devices_sql
+    assert "id DESC" in devices_sql
+    assert "device_id ASC" in devices_sql

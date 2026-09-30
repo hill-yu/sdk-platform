@@ -199,3 +199,7 @@ def test_h1_details_are_paginated_and_include_click_attempts():
     )
     assert result["total"] == 1
     assert result["items"][0]["click_attempts"][0]["navigation_code"] == 1
+    h1_sql = str(db.statements[1].compile(dialect=postgresql.dialect()))
+    assert "event_server_ts" in h1_sql
+    assert "event_id" in h1_sql
+    assert "record_index" in h1_sql

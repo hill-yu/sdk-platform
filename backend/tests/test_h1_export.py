@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from uuid import uuid4
 
 
 def _event(extra):
@@ -70,3 +71,38 @@ def test_h1_csv_row_has_fixed_columns_and_formula_safe_content():
     csv.writer(output).writerow(csv_row_for_export(raw))
     parsed = next(csv.reader(io.StringIO(output.getvalue())))
     assert parsed[-1] == "'=SUM(A1:A2),\"quoted\"\nnext"
+
+
+def test_h1_write_job_csv_counts_expanded_rows_not_source_events(tmp_path):
+    import asyncio
+    from app.services.log_export_service import write_job_csv
+
+    events = [_event("H1|i=GC|p=1||H1|i=GD|p=2||H1|i=GE|p=3"), _event("ordinary raw")]
+    job = SimpleNamespace(
+        id=uuid4(), export_mode="h1", package_names=["com.example.app"], sdk_version=None,
+        device_id=None, log_level=None, date_from=None, date_to=None, hour_from=None, hour_to=None,
+    )
+
+    class Result:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return events
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def execute(self, _statement):
+            return Result()
+
+    def session_factory():
+        return Session()
+
+    path, row_count = asyncio.run(write_job_csv(job, session_factory, tmp_path))
+    assert path.is_file()
+    assert row_count == 4

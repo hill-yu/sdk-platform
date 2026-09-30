@@ -2,6 +2,7 @@
 from app.models.config import SdkConfig
 from app.models.event import SdkEvent
 from app.models.log_analysis import AdminPreference, LogDecode, LogReparseJob, PackageProfile
+from app.models.log_export_job import LogExportJob
 from app.models.log_metrics import (
     H1Declaration,
     H1DeclarationStage,
@@ -18,6 +19,7 @@ __all__ = [
     "LogClickAttempt",
     "LogClickAttemptStage",
     "LogDecode",
+    "LogExportJob",
     "LogReparseJob",
     "PackageProfile",
     "SdkConfig",

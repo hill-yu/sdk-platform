@@ -200,13 +200,17 @@ async def write_job_csv(job: LogExportJob, session_factory, export_dir: Path) ->
                 stmt = stmt.order_by(SdkEvent.server_ts, SdkEvent.id).limit(1000)
                 async with session_factory() as session:
                     rows = (await session.execute(stmt)).scalars().all()
+                written_rows = 0
                 for event in rows:
                     if export_mode == "h1":
-                        for row in export_rows_for_event(event, export_mode="h1"):
+                        export_rows = export_rows_for_event(event, export_mode="h1")
+                        for row in export_rows:
                             writer.writerow(csv_row_for_export(row))
+                        written_rows += len(export_rows)
                     else:
                         writer.writerow(csv_row_for_event(event))
-                row_count += len(rows)
+                        written_rows += 1
+                row_count += written_rows
                 if len(rows) < 1000:
                     break
                 last_server_ts, last_id = rows[-1].server_ts, rows[-1].id

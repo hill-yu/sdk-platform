@@ -293,9 +293,14 @@ async def get_h1_details(
         raise ValueError("分页或排序参数无效")
     filters = build_metric_filters(package_name=package_name, range_start=range_start, range_end=range_end)
     total = int((await db.execute(select(func.count()).select_from(select(H1Declaration.event_id).where(*filters).subquery()))).scalar_one() or 0)
-    order = H1Declaration.event_server_ts.asc() if sort_order == "asc" else H1Declaration.event_server_ts.desc()
+    direction = lambda column: column.asc() if sort_order == "asc" else column.desc()
+    order = (
+        direction(H1Declaration.event_server_ts),
+        direction(H1Declaration.event_id),
+        direction(H1Declaration.record_index),
+    )
     h1_rows = (await db.execute(
-        select(H1Declaration).where(*filters).order_by(order, H1Declaration.event_id).limit(page_size).offset((page - 1) * page_size)
+        select(H1Declaration).where(*filters).order_by(*order).limit(page_size).offset((page - 1) * page_size)
     )).scalars().all()
     clicks = []
     if h1_rows:
