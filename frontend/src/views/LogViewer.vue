@@ -6,6 +6,7 @@
     <div class="view-tabs" role="tablist" aria-label="日志视图">
       <button data-testid="analysis-view-tab" type="button" :class="{ active: view === 'analysis' }" @click="switchView('analysis')">解析统计</button>
       <button data-testid="raw-view-tab" type="button" :class="{ active: view === 'raw' }" @click="switchView('raw')">原始日志</button>
+      <button data-testid="usage-view-tab" type="button" :class="{ active: view === 'usage' }" @click="switchView('usage')">使用时长</button>
     </div>
 
     <template v-if="view === 'analysis'">
@@ -23,6 +24,10 @@
           @reset="resetAnalysis"
         />
       </section>
+
+      <LogParseTaskPanel :scope="metricScope" @refresh="refreshMetrics" />
+      <LogMetricsPanel :scope="metricScope" @failure-select="openFailureDrawer" />
+      <LogFailureDrawer :open="failureDrawerOpen" :items="failureItems" :loading="failureLoading" :error="failureError" @close="closeFailureDrawer" />
 
       <section class="panel analysis-panel" data-testid="analysis-view">
         <div class="panel-header"><h3>聚合结果</h3><span class="count">共 {{ summary.total }} 条</span></div>
@@ -103,7 +108,7 @@
       </div>
     </template>
 
-    <template v-else>
+    <template v-else-if="view === 'raw'">
       <section class="panel filters-panel">
         <div class="filters">
           <select v-model="rawFilters.package_name" data-testid="package-filter" :aria-busy="filterOptionsLoading" @change="changePackageFilter(rawFilters.package_name)">
@@ -165,6 +170,10 @@
         <section class="panel detail-panel"><div class="panel-header"><h3>日志详情</h3></div><LogDetail :item="selected" @copy-success="showCopySuccess" @copy-error="showCopyError" /></section>
       </div>
     </template>
+    <section v-else class="panel usage-placeholder" data-testid="usage-view">
+      <div class="panel-header"><h3>使用时长</h3></div>
+      <p class="empty-state">使用时长按设备维度的明细将在后续任务接入；本批次仅完成解析统计组合。</p>
+    </section>
   </div>
 </template>
 
@@ -173,20 +182,26 @@ import { computed, onMounted, reactive, ref } from "vue";
 
 import { getEventFilterOptions, getEvents } from "@/api/dashboard";
 import type { EventFilterOptions, EventItem, EventQuery, LogLevel } from "@/api/dashboard";
+import { getMetricFailures } from "@/api/logMetrics";
+import type { FailureBreakdownItem, LogMetricScope } from "@/api/logMetrics";
 import { getLogAnalysisColumns, getLogAnalysisDetail, getLogAnalysisDetails, getLogAnalysisSummary, putLogAnalysisColumns } from "@/api/logAnalysis";
 import type { DetailKey, DetailsQuery, LogAnalysisColumns, LogAnalysisSummaryItem, LogDecodeItem, SummaryQuery } from "@/api/logAnalysis";
 import LogAnalysisDetail from "@/components/LogAnalysisDetail.vue";
 import LogAnalysisFilters, { type LogAnalysisFilterValues } from "@/components/LogAnalysisFilters.vue";
 import LogColumnSettings from "@/components/LogColumnSettings.vue";
+import LogFailureDrawer from "@/components/LogFailureDrawer.vue";
 import PackageProfileCell, { type PackageProfileField } from "@/components/PackageProfileCell.vue";
 import LogDetail from "@/components/LogDetail.vue";
 import LogExportPanel from "@/components/LogExportPanel.vue";
+import LogMetricsPanel from "@/components/LogMetricsPanel.vue";
+import LogParseTaskPanel from "@/components/LogParseTaskPanel.vue";
 import { formatBusinessTime } from "@/utils/dateTime";
 import { beginFeedback, setFeedbackError, setFeedbackSuccess } from "@/utils/feedback";
+import { defaultRecentThreeDays } from "@/utils/logDateRange";
 
 type AnalysisList = { total: number; page: number; page_size: number; items: LogAnalysisSummaryItem[] };
 type DetailList = { total: number; page: number; page_size: number; items: LogDecodeItem[] };
-type View = "analysis" | "raw";
+type View = "analysis" | "raw" | "usage";
 
 const DEFAULT_COLUMNS = ["date", "package_name", "alias", "url", "company", "account", "user_count", "flow_count", "expected_click_count", "actual_click_count", "ad_click_count", "interstitial_presentation_count", "interstitial_click_count", "average_duration_ms", "success_rate", "parse_failure_count"];
 const columnLabels: Record<string, string> = { date: "日期", package_name: "包名", alias: "别名", url: "网页 URL", company: "公司", account: "账户", user_count: "用户数", flow_count: "流程日志数", expected_click_count: "计划点击数", actual_click_count: "实际点击数", ad_click_count: "广告区域点击数", interstitial_presentation_count: "插屏展示数", interstitial_click_count: "插屏点击数", average_duration_ms: "平均流程耗时", success_rate: "成功完成率", parse_failure_count: "解析失败数" };
@@ -194,8 +209,14 @@ const profileFields: Record<string, PackageProfileField> = { alias: "alias", com
 
 const view = ref<View>("analysis");
 const feedback = reactive({ error: "", success: "" });
-const draftFilters = ref<LogAnalysisFilterValues>({ date_from: "", hour_from: 0, date_to: "", hour_to: 23, package_name: "", device_id: "", log_level: "" });
+const recentAnalysisRange = defaultRecentThreeDays();
+const draftFilters = ref<LogAnalysisFilterValues>({ date_from: recentAnalysisRange.date_from, hour_from: recentAnalysisRange.hour_from, date_to: recentAnalysisRange.date_to, hour_to: recentAnalysisRange.hour_to, package_name: "", device_id: "", log_level: "" });
 const appliedFilters = ref<LogAnalysisFilterValues>({ ...draftFilters.value });
+const metricScope = ref<LogMetricScope>({ package_name: "", date_from: recentAnalysisRange.date_from, hour_from: recentAnalysisRange.hour_from, date_to: recentAnalysisRange.date_to, hour_to: recentAnalysisRange.hour_to });
+const failureDrawerOpen = ref(false);
+const failureItems = ref<FailureBreakdownItem[]>([]);
+const failureLoading = ref(false);
+const failureError = ref("");
 const summary = reactive<AnalysisList>({ total: 0, page: 1, page_size: 20, items: [] });
 const details = reactive<DetailList>({ total: 0, page: 1, page_size: 20, items: [] });
 const availableColumns = ref<string[]>(DEFAULT_COLUMNS);
@@ -253,9 +274,26 @@ async function loadColumns() {
 }
 
 function loadAnalysisInitial() { void Promise.all([loadColumns(), loadSummary({ resetPage: true })]); }
-function queryAnalysis(value: LogAnalysisFilterValues) { appliedFilters.value = { ...value }; void loadSummary({ resetPage: true }); }
-function refreshAnalysis() { void loadSummary(); }
-function resetAnalysis(value: LogAnalysisFilterValues) { appliedFilters.value = { ...value }; void loadSummary({ resetPage: true }); }
+function setMetricScope(value: LogAnalysisFilterValues) {
+  if (!value.package_name) return;
+  metricScope.value = { package_name: value.package_name, date_from: value.date_from, hour_from: value.hour_from, date_to: value.date_to, hour_to: value.hour_to };
+}
+function queryAnalysis(value: LogAnalysisFilterValues) { appliedFilters.value = { ...value }; setMetricScope(value); void loadSummary({ resetPage: true }); }
+function refreshAnalysis(value?: LogAnalysisFilterValues) { if (value) setMetricScope(value); void loadSummary(); }
+function resetAnalysis(value: LogAnalysisFilterValues) { appliedFilters.value = { ...value }; metricScope.value = { package_name: "", date_from: value.date_from, hour_from: value.hour_from, date_to: value.date_to, hour_to: value.hour_to }; void loadSummary({ resetPage: true }); }
+function refreshMetrics() { metricScope.value = { ...metricScope.value }; }
+async function openFailureDrawer(selection: { target_kind: string }) {
+  failureDrawerOpen.value = true; failureLoading.value = true; failureError.value = "";
+  try {
+    const response = await getMetricFailures({ ...metricScope.value, ...selection });
+    let value: unknown = response;
+    if (value && typeof value === "object" && "data" in value) value = (value as { data: unknown }).data;
+    if (value && typeof value === "object" && "code" in value && "data" in value) value = (value as { data: unknown }).data;
+    failureItems.value = value as FailureBreakdownItem[];
+  } catch (error) { failureError.value = error instanceof Error ? error.message : "失败明细读取失败"; }
+  finally { failureLoading.value = false; }
+}
+function closeFailureDrawer() { failureDrawerOpen.value = false; }
 function sortAnalysis() { void loadSummary({ resetPage: true }); }
 function toggleSummarySort() { summarySortOrder.value = summarySortOrder.value === "desc" ? "asc" : "desc"; void loadSummary({ resetPage: true }); }
 

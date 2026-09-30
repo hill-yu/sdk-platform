@@ -12,6 +12,13 @@ const {
   getLogAnalysisDetail,
   putLogAnalysisColumns,
   putPackageProfile,
+  getMetricOverview,
+  getMetricConfigs,
+  getMetricTargets,
+  getMetricFailures,
+  postParseJob,
+  getParseJob,
+  cancelParseJob,
 } = vi.hoisted(() => ({
   getEvents: vi.fn(),
   getEventFilterOptions: vi.fn(),
@@ -21,6 +28,13 @@ const {
   getLogAnalysisDetail: vi.fn(),
   putLogAnalysisColumns: vi.fn(),
   putPackageProfile: vi.fn(),
+  getMetricOverview: vi.fn(),
+  getMetricConfigs: vi.fn(),
+  getMetricTargets: vi.fn(),
+  getMetricFailures: vi.fn(),
+  postParseJob: vi.fn(),
+  getParseJob: vi.fn(),
+  cancelParseJob: vi.fn(),
 }));
 vi.mock("@/api/dashboard", async () => {
   const actual = await vi.importActual<typeof import("@/api/dashboard")>("@/api/dashboard");
@@ -33,6 +47,15 @@ vi.mock("@/api/logAnalysis", () => ({
   getLogAnalysisDetail,
   putLogAnalysisColumns,
   putPackageProfile,
+}));
+vi.mock("@/api/logMetrics", () => ({
+  getMetricOverview,
+  getMetricConfigs,
+  getMetricTargets,
+  getMetricFailures,
+  postParseJob,
+  getParseJob,
+  cancelParseJob,
 }));
 
 import LogViewer from "@/views/LogViewer.vue";
@@ -92,6 +115,21 @@ function respondAnalysis() {
   getLogAnalysisDetail.mockResolvedValue({ data: {} });
 }
 
+function respondMetrics() {
+  getMetricOverview.mockResolvedValue({ data: { code: 0, data: {
+    declaration_count: 2, planned_click_count: 2, actual_click_count: 1, response_success_count: 1,
+    plan_mismatch_count: 1, interstitial_presentation_count: 0, interstitial_click_count: 0,
+    interstitial_close_count: 0, interstitial_close_rate: null, interstitial_non_close_click_rate: null,
+    target_breakdown: {},
+  } } });
+  getMetricConfigs.mockResolvedValue({ data: { code: 0, data: { total: 1, items: [{ config_id: "unknown", declaration_count: 2, share: null }] } } });
+  getMetricTargets.mockResolvedValue({ data: { code: 0, data: { items: [{ target_kind: "web_element", planned_count: 2, actual_count: 1, success_count: 1, failure_count: 0, actual_rate: 0.5, success_rate: 1, failure_rate: 0 }] } } });
+  getMetricFailures.mockResolvedValue({ data: { code: 0, data: [{ failure_category: "timeout", failure_count: 1, share: 1 }] } });
+  postParseJob.mockResolvedValue({ data: { code: 0, data: { id: 9, package_name: "com.example.app", date_from: "2026-09-28", hour_from: 0, date_to: "2026-09-30", hour_to: 23, status: "success", range_start: "", range_end: "", total_count: 1, processed_count: 1, h1_count: 1, failed_h1_count: 0, no_h1_count: 0 } } });
+  getParseJob.mockResolvedValue({ data: { code: 0, data: { id: 9, status: "success" } } });
+  cancelParseJob.mockResolvedValue({ data: { code: 0, data: { id: 9, status: "cancelled" } } });
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -122,6 +160,7 @@ describe("LogViewer", () => {
     respond();
     respondFilterOptions();
     respondAnalysis();
+    respondMetrics();
   });
 
   afterEach(() => vi.restoreAllMocks());
@@ -191,6 +230,20 @@ describe("LogViewer", () => {
 
     expect(wrapper.get("[data-testid='summary-row']").text()).toContain("com.example.app");
     expect(wrapper.get("[data-testid='error-feedback']").text()).toContain("summary unavailable");
+  });
+
+  it("composes scoped metrics and failure details without clearing the legacy summary", async () => {
+    const wrapper = await mountAnalysisViewer();
+    await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
+    await wrapper.get("[data-testid='filter-query-existing']").trigger("click");
+    await flushPromises();
+
+    expect(getMetricOverview).toHaveBeenCalledWith(expect.objectContaining({ package_name: "com.example.app", hour_from: 0, hour_to: 23 }));
+    expect(wrapper.get("[data-testid='planned-click-count']").text()).toBe("2");
+    await wrapper.get("[data-testid='metric-failure-button']").trigger("click");
+    await flushPromises();
+    expect(getMetricFailures).toHaveBeenCalledWith(expect.objectContaining({ package_name: "com.example.app", target_kind: "web_element" }));
+    expect(wrapper.get("[data-testid='failure-drawer']").text()).toContain("timeout");
   });
 
   it("saves column drafts globally only after the save request succeeds", async () => {

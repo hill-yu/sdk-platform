@@ -155,7 +155,7 @@ function query() {
 }
 
 function refresh() {
-  if (validate()) emit("refresh", snapshot());
+  emit("refresh", snapshot());
 }
 
 function reset() {

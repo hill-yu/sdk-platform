@@ -25,6 +25,6 @@ export const getParseJob = (id: number) => request.get<ApiEnvelope<ParseJob>>(`/
 export const cancelParseJob = (id: number) => request.post<ApiEnvelope<ParseJob>>(`/log-analysis/parse-jobs/${id}/cancel`);
 export const getMetricOverview = (scope: LogMetricScope) => request.get<ApiEnvelope<MetricOverview>>("/log-analysis/metrics/overview", { params: scope });
 export const getMetricConfigs = (scope: LogMetricScope) => request.get<ApiEnvelope<{ total: number; items: ConfigMetricItem[] }>>("/log-analysis/metrics/configs", { params: scope });
-export const getMetricTargets = (scope: LogMetricScope) => request.get<ApiEnvelope<{ items: Array<TargetMetric & { target_kind: string }> }>>("/log-analysis/metrics/targets", { params: scope });
+export const getMetricTargets = (scope: LogMetricScope & { target_kind?: string }) => request.get<ApiEnvelope<{ items: Array<TargetMetric & { target_kind: string }> }>>("/log-analysis/metrics/targets", { params: scope });
 export const getMetricFailures = (scope: LogMetricScope & { target_kind?: string; config_id?: number }) => request.get<ApiEnvelope<FailureBreakdownItem[]>>("/log-analysis/metrics/failures", { params: scope });
 export const getH1Details = (scope: LogMetricScope & { page: number; page_size: number; sort_order?: "asc" | "desc" }) => request.get<ApiEnvelope<Paginated<H1Detail>>>("/log-analysis/metrics/h1", { params: scope });
