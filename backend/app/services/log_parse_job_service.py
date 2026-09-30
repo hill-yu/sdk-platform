@@ -28,7 +28,8 @@ from app.services.h1_extractor import extract_h1_records
 
 
 PARSE_JOB_ADVISORY_LOCK_KEY = 20260930
-PARSE_BATCH_SIZE = get_settings().LOG_PARSE_BATCH_SIZE
+MAX_PARSE_BATCH_SIZE = 200
+PARSE_BATCH_SIZE = min(get_settings().LOG_PARSE_BATCH_SIZE, MAX_PARSE_BATCH_SIZE)
 PARSE_LEASE_SECONDS = get_settings().LOG_PARSE_LEASE_SECONDS
 PARSE_TIMEOUT_SECONDS = 1.0
 PARSE_EXECUTOR_FACTORY = ProcessPoolExecutor
@@ -315,7 +316,7 @@ def build_parse_event_query(job: LogReparseJob, *, batch_size: int = PARSE_BATCH
         select(SdkEvent)
         .where(*conditions)
         .order_by(SdkEvent.server_ts, SdkEvent.id)
-        .limit(min(max(batch_size, 1), PARSE_BATCH_SIZE))
+        .limit(min(max(batch_size, 1), MAX_PARSE_BATCH_SIZE))
     )
 
 

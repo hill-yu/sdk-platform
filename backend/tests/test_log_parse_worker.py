@@ -106,7 +106,7 @@ def test_worker_commits_each_batch_and_resumes_until_done(monkeypatch) -> None:
             self.rollbacks += 1
 
     session = Session()
-    job = SimpleNamespace(id=91, status="running", cancel_requested_at=None)
+    job = SimpleNamespace(id=91, status="running", cancel_requested_at=None, batch_size=17)
     calls = []
 
     async def fake_claim(_db, **kwargs):
@@ -134,7 +134,7 @@ def test_worker_commits_each_batch_and_resumes_until_done(monkeypatch) -> None:
     assert handled is True
     assert session.commits == 3
     assert session.rollbacks == 0
-    assert calls[0][1]["batch_size"] == 200
+    assert calls[0][1]["batch_size"] == 17
 
 
 def test_worker_refreshes_real_time_before_each_batch(monkeypatch) -> None:

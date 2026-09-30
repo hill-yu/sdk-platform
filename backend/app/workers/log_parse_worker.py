@@ -10,6 +10,7 @@ from app.core.database import async_session_factory
 from app.services.log_parse_job_service import (
     LeaseLostError,
     MAX_PARSE_CONCURRENCY,
+    MAX_PARSE_BATCH_SIZE,
     PARSE_BATCH_SIZE,
     ParseBatchResult,
     ParseExecutorPool,
@@ -67,6 +68,10 @@ async def run_worker_once(
     claimed_job_id = job.id
     configured_concurrency = getattr(job, "concurrency", None) or MAX_CONCURRENCY
     executor_pool = ParseExecutorPool(min(max(int(configured_concurrency), 1), MAX_CONCURRENCY))
+    configured_batch_size = min(
+        max(int(getattr(job, "batch_size", BATCH_SIZE) or BATCH_SIZE), 1),
+        MAX_PARSE_BATCH_SIZE,
+    )
     try:
         await db.commit()
         if stop_event is not None and stop_event.is_set():
@@ -80,7 +85,7 @@ async def run_worker_once(
                     claimed_job_id,
                     worker_id=worker_id,
                     now=utc_now(),
-                    batch_size=BATCH_SIZE,
+                    batch_size=configured_batch_size,
                     executor_pool=executor_pool,
                 )
                 await db.commit()
