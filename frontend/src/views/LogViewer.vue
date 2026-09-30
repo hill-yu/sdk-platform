@@ -171,8 +171,7 @@
       </div>
     </template>
     <section v-else class="panel usage-placeholder" data-testid="usage-view">
-      <div class="panel-header"><h3>使用时长</h3></div>
-      <p class="empty-state">使用时长按设备维度的明细将在后续任务接入；本批次仅完成解析统计组合。</p>
+      <UsageDurationPanel />
     </section>
   </div>
 </template>
@@ -195,6 +194,7 @@ import LogDetail from "@/components/LogDetail.vue";
 import LogExportPanel from "@/components/LogExportPanel.vue";
 import LogMetricsPanel from "@/components/LogMetricsPanel.vue";
 import LogParseTaskPanel from "@/components/LogParseTaskPanel.vue";
+import UsageDurationPanel from "@/components/UsageDurationPanel.vue";
 import { formatBusinessTime } from "@/utils/dateTime";
 import { beginFeedback, setFeedbackError, setFeedbackSuccess } from "@/utils/feedback";
 import { defaultRecentThreeDays } from "@/utils/logDateRange";

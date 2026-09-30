@@ -19,6 +19,8 @@ const {
   postParseJob,
   getParseJob,
   cancelParseJob,
+  getUsageSummary,
+  getUsageDevices,
 } = vi.hoisted(() => ({
   getEvents: vi.fn(),
   getEventFilterOptions: vi.fn(),
@@ -35,6 +37,8 @@ const {
   postParseJob: vi.fn(),
   getParseJob: vi.fn(),
   cancelParseJob: vi.fn(),
+  getUsageSummary: vi.fn(),
+  getUsageDevices: vi.fn(),
 }));
 vi.mock("@/api/dashboard", async () => {
   const actual = await vi.importActual<typeof import("@/api/dashboard")>("@/api/dashboard");
@@ -57,6 +61,7 @@ vi.mock("@/api/logMetrics", () => ({
   getParseJob,
   cancelParseJob,
 }));
+vi.mock("@/api/usageDurations", () => ({ getUsageSummary, getUsageDevices }));
 
 import LogViewer from "@/views/LogViewer.vue";
 import LogExportPanel from "@/components/LogExportPanel.vue";
@@ -130,6 +135,11 @@ function respondMetrics() {
   cancelParseJob.mockResolvedValue({ data: { code: 0, data: { id: 9, status: "cancelled" } } });
 }
 
+function respondUsage() {
+  getUsageSummary.mockResolvedValue({ data: { code: 0, data: { total: 0, page: 1, page_size: 20, items: [] } } });
+  getUsageDevices.mockResolvedValue({ data: { code: 0, data: { total: 0, page: 1, page_size: 20, items: [] } } });
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -161,6 +171,7 @@ describe("LogViewer", () => {
     respondFilterOptions();
     respondAnalysis();
     respondMetrics();
+    respondUsage();
   });
 
   afterEach(() => vi.restoreAllMocks());
@@ -230,6 +241,16 @@ describe("LogViewer", () => {
 
     expect(wrapper.get("[data-testid='summary-row']").text()).toContain("com.example.app");
     expect(wrapper.get("[data-testid='error-feedback']").text()).toContain("summary unavailable");
+  });
+
+  it("connects the usage tab to the usage duration panel", async () => {
+    const wrapper = mount(LogViewer);
+    await flushPromises();
+    await wrapper.get("[data-testid='usage-view-tab']").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid='usage-duration-panel']").exists()).toBe(true);
+    expect(getUsageSummary).toHaveBeenCalledWith(expect.objectContaining({ date_from: expect.any(String), hour_from: 0, date_to: expect.any(String), hour_to: 23 }));
   });
 
   it("refreshes every analysis surface from applied A, not an unsubmitted draft B", async () => {
