@@ -21,6 +21,9 @@ const {
   cancelParseJob,
   getUsageSummary,
   getUsageDevices,
+  createLogExport,
+  getLogExport,
+  downloadLogExport,
 } = vi.hoisted(() => ({
   getEvents: vi.fn(),
   getEventFilterOptions: vi.fn(),
@@ -39,6 +42,9 @@ const {
   cancelParseJob: vi.fn(),
   getUsageSummary: vi.fn(),
   getUsageDevices: vi.fn(),
+  createLogExport: vi.fn(),
+  getLogExport: vi.fn(),
+  downloadLogExport: vi.fn(),
 }));
 vi.mock("@/api/dashboard", async () => {
   const actual = await vi.importActual<typeof import("@/api/dashboard")>("@/api/dashboard");
@@ -62,6 +68,7 @@ vi.mock("@/api/logMetrics", () => ({
   cancelParseJob,
 }));
 vi.mock("@/api/usageDurations", () => ({ getUsageSummary, getUsageDevices }));
+vi.mock("@/api/logExports", () => ({ createLogExport, getLogExport, downloadLogExport }));
 
 import LogViewer from "@/views/LogViewer.vue";
 import LogExportPanel from "@/components/LogExportPanel.vue";
@@ -138,6 +145,9 @@ function respondMetrics() {
 function respondUsage() {
   getUsageSummary.mockResolvedValue({ data: { code: 0, data: { total: 0, page: 1, page_size: 20, items: [] } } });
   getUsageDevices.mockResolvedValue({ data: { code: 0, data: { total: 0, page: 1, page_size: 20, items: [] } } });
+  createLogExport.mockResolvedValue({ data: { id: "job-1", status: "pending" } });
+  getLogExport.mockResolvedValue({ data: { id: "job-1", status: "success", row_count: 1 } });
+  downloadLogExport.mockResolvedValue(new Blob());
 }
 
 function deferred<T>() {
@@ -376,6 +386,27 @@ describe("LogViewer", () => {
     await wrapper.get("[data-testid='query-button']").trigger("click");
     await flushPromises();
     expect(wrapper.findComponent(LogExportPanel).props()).toMatchObject({ packageName: "com.example.app", sdkVersion: "1.4.0" });
+  });
+
+  it("sends only the applied raw filters to the export job", async () => {
+    const wrapper = await mountViewer();
+    await wrapper.get("[data-testid='package-filter']").setValue("com.example.app");
+    await wrapper.get("[data-testid='sdk-version-filter']").setValue("1.4.0");
+    await wrapper.get("[data-testid='device-filter']").setValue("applied-device");
+    await wrapper.get("[data-testid='date-from-filter']").setValue("2026-08-01");
+    await wrapper.get("[data-testid='hour-from-filter']").setValue("8");
+    await wrapper.get("[data-testid='date-to-filter']").setValue("2026-08-03");
+    await wrapper.get("[data-testid='hour-to-filter']").setValue("17");
+    await wrapper.get("[data-testid='query-button']").trigger("click");
+    await flushPromises();
+
+    await wrapper.get("[data-testid='device-filter']").setValue("draft-device");
+    await wrapper.get("[data-testid='date-from-filter']").setValue("2026-09-01");
+    await wrapper.findComponent(LogExportPanel).get("[data-testid='export-button']").trigger("click");
+    await flushPromises();
+    expect(createLogExport).toHaveBeenLastCalledWith(expect.objectContaining({
+      package_names: ["com.example.app"], sdk_version: "1.4.0", device_id: "applied-device", date_from: "2026-08-01", hour_from: 8, date_to: "2026-08-03", hour_to: 17,
+    }));
   });
 
   it("shows hour options, rejects a single hour, and resets draft and applied filters", async () => {

@@ -1,5 +1,12 @@
 <template>
   <section class="export-panel">
+    <label class="export-mode-label">导出模式
+      <select data-testid="export-mode" :value="exportMode" :disabled="modeLocked" @change="changeExportMode">
+        <option value="raw">原始日志</option>
+        <option value="h1">H1 结构化</option>
+      </select>
+    </label>
+    <span v-if="exportMode === 'h1'" data-testid="h1-export-note" class="export-note">有 H1 按条拆行，无 H1 保留原始 extra</span>
     <PackageMultiSelect v-if="!props.packageName" v-model="packageNames" />
     <span v-else data-testid="export-package">导出包名：{{ props.packageName }}</span>
     <button data-testid="export-button" class="primary" type="button" :disabled="!effectivePackageNames.length || submitting" @click="startExport">
@@ -33,15 +40,21 @@ const packageNames = ref<string[]>([]);
 const effectivePackageNames = computed(() => props.packageName ? [props.packageName] : packageNames.value);
 const currentJob = ref<LogExportJob | null>(null);
 const submitting = ref(false);
+const exportMode = ref<"raw" | "h1">("raw");
 const error = ref("");
 let timer: ReturnType<typeof setTimeout> | undefined;
 const statusText = computed(() => ({ pending: "等待处理", running: "生成中", success: "已完成", failed: "失败" }[currentJob.value?.status || "pending"]));
+const modeLocked = computed(() => submitting.value || currentJob.value?.status === "pending" || currentJob.value?.status === "running");
+function changeExportMode(event: Event) {
+  if (modeLocked.value) return;
+  exportMode.value = (event.target as HTMLSelectElement).value as "raw" | "h1";
+}
 
 async function pollJob() {
   if (!currentJob.value) return;
   try {
     const response = await getLogExport(currentJob.value.id);
-    currentJob.value = response.data;
+    currentJob.value = { ...response.data, export_mode: response.data.export_mode ?? currentJob.value.export_mode };
     if (response.data.status === "pending" || response.data.status === "running") timer = setTimeout(pollJob, 2000);
     else if (response.data.status === "failed") error.value = response.data.error_message || "导出失败";
   } catch (caught) {
@@ -54,6 +67,7 @@ async function startExport() {
   try {
     const response = await createLogExport({
       package_names: effectivePackageNames.value,
+      export_mode: exportMode.value,
       sdk_version: props.sdkVersion || undefined,
       device_id: props.deviceId || undefined,
       log_level: props.logLevel || undefined,
@@ -62,7 +76,7 @@ async function startExport() {
       date_to: props.dateTo || undefined,
       hour_to: props.hourTo ? Number(props.hourTo) : undefined,
     });
-    currentJob.value = { ...response.data, row_count: 0 };
+    currentJob.value = { ...response.data, row_count: 0, export_mode: exportMode.value };
     timer = setTimeout(pollJob, 2000);
   } catch (caught) { error.value = caught instanceof Error ? caught.message : "创建导出任务失败"; }
   finally { submitting.value = false; }
@@ -85,5 +99,9 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer); });
 
 <style scoped>
 .export-panel { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin-top: 14px; }
+.export-mode-label { display: grid; gap: 5px; color: var(--text-secondary); font-size: 12px; }
+.export-mode-label select { border: 1px solid var(--border-soft); border-radius: 8px; color: var(--text-primary); background: rgba(255, 255, 255, .05); padding: 8px 10px; }
+.export-mode-label select:disabled { cursor: not-allowed; opacity: .55; }
+.export-note { color: var(--text-secondary); font-size: 12px; }
 .export-error { color: #ffb0a8; }
 </style>

@@ -25,7 +25,7 @@ describe("LogExportPanel", () => {
     await wrapper.get("[data-testid='export-button']").trigger("click");
     await flushPromises();
     expect(api.createLogExport).toHaveBeenCalledWith({
-      package_names: ["com.a", "com.b"], device_id: "d1", log_level: "error",
+      package_names: ["com.a", "com.b"], export_mode: "raw", device_id: "d1", log_level: "error",
       date_from: "2026-08-01", date_to: "2026-08-28",
     });
     await vi.advanceTimersByTimeAsync(2000);
@@ -47,7 +47,7 @@ describe("LogExportPanel", () => {
     await flushPromises();
 
     expect(api.createLogExport).toHaveBeenCalledWith({
-      package_names: ["com.a"], sdk_version: "1.0.6", device_id: "d1", log_level: "error",
+      package_names: ["com.a"], export_mode: "raw", sdk_version: "1.0.6", device_id: "d1", log_level: "error",
       date_from: "2026-09-01", date_to: "2026-09-23",
     });
     wrapper.unmount();
@@ -96,9 +96,35 @@ describe("LogExportPanel", () => {
     await flushPromises();
 
     expect(api.createLogExport).toHaveBeenCalledWith({
-      package_names: ["com.a"], sdk_version: undefined, device_id: undefined, log_level: undefined,
+      package_names: ["com.a"], export_mode: "raw", sdk_version: undefined, device_id: undefined, log_level: undefined,
       date_from: "2026-09-20", hour_from: 8, date_to: "2026-09-22", hour_to: 17,
     });
+    wrapper.unmount();
+  });
+
+  it("defaults to raw, switches to h1 with an explicit fallback note, and sends the mode", async () => {
+    const wrapper = mount(LogExportPanel, { props: { packageName: "com.a", sdkVersion: "1.0.6", deviceId: "d1", logLevel: "", dateFrom: "2026-09-01", dateTo: "2026-09-03" } });
+
+    expect((wrapper.get("[data-testid='export-mode']").element as HTMLSelectElement).value).toBe("raw");
+    await wrapper.get("[data-testid='export-mode']").setValue("h1");
+    expect(wrapper.get("[data-testid='h1-export-note']").text()).toContain("有 H1 按条拆行，无 H1 保留原始 extra");
+    await wrapper.get("[data-testid='export-button']").trigger("click");
+    await flushPromises();
+
+    expect(api.createLogExport).toHaveBeenCalledWith(expect.objectContaining({ package_names: ["com.a"], export_mode: "h1" }));
+  });
+
+  it("binds the selected mode to the created job and disables switching while it is active", async () => {
+    api.createLogExport.mockResolvedValueOnce({ data: { id: "job-1", status: "pending" } });
+    const wrapper = mount(LogExportPanel, { props: { packageName: "com.a", sdkVersion: "", deviceId: "", logLevel: "", dateFrom: "", dateTo: "" } });
+    await wrapper.get("[data-testid='export-mode']").setValue("h1");
+    await wrapper.get("[data-testid='export-button']").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get("[data-testid='export-mode']").attributes("disabled")).toBeDefined();
+    expect((wrapper.get("[data-testid='export-mode']").element as HTMLSelectElement).value).toBe("h1");
+    await wrapper.get("[data-testid='export-mode']").trigger("change");
+    expect(wrapper.get("[data-testid='export-mode']").attributes("disabled")).toBeDefined();
     wrapper.unmount();
   });
 });

@@ -131,7 +131,7 @@ async def get_job(db: AsyncSession, job_id: UUID) -> LogExportJob | None:
 
 def serialize_job(job: LogExportJob) -> dict[str, Any]:
     return {
-        "id": str(job.id), "status": job.status, "row_count": int(job.row_count or 0),
+        "id": str(job.id), "status": job.status, "export_mode": getattr(job, "export_mode", "raw"), "row_count": int(job.row_count or 0),
         "error_message": job.error_message,
         "hour_from": getattr(job, "hour_from", None), "hour_to": getattr(job, "hour_to", None),
         "created_at": job.created_at.astimezone(SHANGHAI).isoformat(),

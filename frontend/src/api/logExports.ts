@@ -16,6 +16,7 @@ export type LogExportStatus = "pending" | "running" | "success" | "failed";
 export interface LogExportJob {
   id: string;
   status: LogExportStatus;
+  export_mode?: "raw" | "h1";
   row_count: number;
   error_message?: string | null;
 }
