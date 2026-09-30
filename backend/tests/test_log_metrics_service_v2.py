@@ -185,6 +185,28 @@ def test_ad_area_failure_breakdown_uses_banner_and_anchored_target_kinds():
     assert "target_kind IN ('banner', 'anchored')" in sql
 
 
+def test_failure_breakdown_reuses_coalesce_bind_for_group_by():
+    from app.services.log_metrics_service import get_failure_breakdown
+
+    failure_db = MetricsDb([
+        Result(mapping={"total_failures": 0}),
+        Result(rows=[]),
+    ])
+
+    asyncio.run(
+        get_failure_breakdown(
+            failure_db,
+            package_name="com.example.app",
+            range_start=START,
+            range_end=END,
+        )
+    )
+
+    compiled = failure_db.statements[1].compile(dialect=postgresql.dialect())
+    coalesce_params = [name for name in compiled.params if name.startswith("coalesce")]
+    assert coalesce_params == ["coalesce_1"]
+
+
 def test_h1_details_are_paginated_and_include_click_attempts():
     from app.services.log_metrics_service import get_h1_details
 

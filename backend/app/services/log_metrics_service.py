@@ -236,13 +236,14 @@ async def get_failure_breakdown(
     if config_id is not None:
         filters.append(LogClickAttempt.config_id == config_id)
     total = int((await db.execute(select(func.count(LogClickAttempt.attempt_index)).where(*filters))).scalar_one() or 0)
+    category_expr = func.coalesce(LogClickAttempt.failure_category, "未知原因")
     rows = (await db.execute(
         select(
-            func.coalesce(LogClickAttempt.failure_category, "未知原因").label("failure_category"),
+            category_expr.label("failure_category"),
             func.count(LogClickAttempt.attempt_index).label("failure_count"),
         )
         .where(*filters)
-        .group_by(func.coalesce(LogClickAttempt.failure_category, "未知原因"))
+        .group_by(category_expr)
         .order_by(func.count(LogClickAttempt.attempt_index).desc())
     )).all()
     return [
