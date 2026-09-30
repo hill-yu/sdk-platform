@@ -6,10 +6,11 @@ import asyncio
 import signal
 from datetime import datetime, timezone
 
-from app.core.config import get_settings
 from app.core.database import async_session_factory
 from app.services.log_parse_job_service import (
     LeaseLostError,
+    MAX_PARSE_CONCURRENCY,
+    PARSE_BATCH_SIZE,
     ParseBatchResult,
     ParseExecutorPool,
     claim_parse_job,
@@ -20,8 +21,8 @@ from app.services.log_parse_job_service import (
 )
 
 
-BATCH_SIZE = 200
-MAX_CONCURRENCY = min(get_settings().LOG_PARSE_CONCURRENCY, 3)
+BATCH_SIZE = PARSE_BATCH_SIZE
+MAX_CONCURRENCY = MAX_PARSE_CONCURRENCY
 IDLE_SECONDS = 1.0
 
 

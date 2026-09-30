@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.core.config import get_settings
 from app.core.timezone import business_hour_utc_range
 from app.services.config_crypto import normalize_package_name
 
@@ -25,7 +26,7 @@ class LogParseJobCreateRequest(BaseModel):
     @model_validator(mode="after")
     def validate_range(self) -> "LogParseJobCreateRequest":
         start, end = self.utc_range()
-        if end - start > timedelta(days=7):
+        if end - start > timedelta(days=get_settings().LOG_PARSE_MAX_DAYS):
             raise ValueError("解析范围不能超过 7 天")
         return self
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -93,6 +93,30 @@ def test_create_parse_job_uses_snapshot_and_counts_only_scoped_log_events() -> N
     assert job.no_h1_count == 0
     assert any("pg_advisory_xact_lock" in str(statement.compile(dialect=postgresql.dialect())) for statement in db.statements)
     assert db.flushed is True
+
+
+def test_create_parse_job_snapshots_configured_batch_and_concurrency(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from app.services import log_parse_job_service as service
+
+    monkeypatch.setattr(
+        service,
+        "get_settings",
+        lambda: SimpleNamespace(LOG_PARSE_BATCH_SIZE=17, LOG_PARSE_CONCURRENCY=2),
+    )
+    job = asyncio.run(
+        service.create_parse_job(
+            JobDb(total=1),
+            package_name="com.example.app",
+            range_start=RANGE_START,
+            range_end=RANGE_END,
+            now=NOW,
+        )
+    )
+
+    assert job.batch_size == 17
+    assert job.concurrency == 2
 
 
 def test_create_parse_job_rejects_an_existing_active_job() -> None:
@@ -336,6 +360,26 @@ def test_claim_reclaims_expired_running_job_without_resetting_progress() -> None
     assert job.processed_count == 37
     assert job.h1_count == 40
     assert job.cursor_event_id == 44
+
+
+def test_claim_uses_configured_lease_seconds(monkeypatch) -> None:
+    from app.models.log_analysis import LogReparseJob
+    from app.services import log_parse_job_service as service
+
+    monkeypatch.setattr(service, "PARSE_LEASE_SECONDS", 17)
+    job = LogReparseJob(
+        id=91,
+        package_name="com.example.app",
+        range_start=RANGE_START,
+        range_end=RANGE_END,
+        snapshot_end=NOW,
+        status="pending",
+    )
+
+    claimed = asyncio.run(service.claim_parse_job(BatchDb(job), worker_id="worker-1", now=NOW))
+
+    assert claimed is job
+    assert job.lease_expires_at == NOW + timedelta(seconds=17)
 
 
 def test_release_parse_job_is_owner_scoped_and_preserves_progress() -> None:

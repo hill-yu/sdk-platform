@@ -14,8 +14,10 @@ async def _job_for_test(job):
 
 def test_worker_limits_are_bounded() -> None:
     from app.workers import log_parse_worker
+    from app.services import log_parse_job_service
 
-    assert log_parse_worker.BATCH_SIZE == 200
+    assert log_parse_worker.BATCH_SIZE == log_parse_job_service.PARSE_BATCH_SIZE
+    assert log_parse_worker.MAX_CONCURRENCY == log_parse_job_service.MAX_PARSE_CONCURRENCY
     assert 1 <= log_parse_worker.MAX_CONCURRENCY <= 3
 
 
