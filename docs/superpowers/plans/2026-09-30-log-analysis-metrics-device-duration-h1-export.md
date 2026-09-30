@@ -895,6 +895,7 @@ git commit -m "docs: add log metric worker operations"
 - 临时 PostgreSQL 验收库的初始化与三项增量迁移均已各执行两次并通过。
 - P0 同一完整 H1+`pa` 样本耗时 75.023 秒；P1 任务级进程池复用后为 28.443 秒。最终结果为 `success`、10,000 条处理、19,000 条 H1、47,500 条点击、500 条无 H1 fallback、0 条失败 H1，60 秒门禁在该本地环境通过。
 - 上述基准运行于本地 PostgreSQL 14.22、UTF-8/C/Asia Shanghai、6-core 临时验收环境，不等同于生产同规格 4 vCPU 门禁；生产性能、API 健康检查和 SDK 日志上报验证仍待执行。
+- 最后复审确认 worker 续跑使用任务保存的 `batch_size` 快照而非当前全局配置；独立复测耗时 `34.538s`，受影响专项测试通过。
 
 - [x] **步骤 1：后端专项测试**
 
@@ -938,7 +939,7 @@ python scripts/benchmark_log_parse.py --events 10000 --max-seconds 60
 
 预期：退出 0，`passed=true`，同时健康检查和一笔 SDK 日志上报成功。未达到 60 秒时不得部署，先用基准输出定位解析、IPC 或数据库写入瓶颈。
 
-- [ ] **步骤 6：独立代码审查**
+- [x] **步骤 6：独立代码审查**
 
 使用 `superpowers:requesting-code-review`，至少审查：指标公式、边界拆分、范围删除条件、失败不污染正式结果、时长去重、导出不漏 raw、迁移无损和凭据泄露。
 
