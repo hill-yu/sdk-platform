@@ -194,7 +194,7 @@ const profileFields: Record<string, PackageProfileField> = { alias: "alias", com
 
 const view = ref<View>("analysis");
 const feedback = reactive({ error: "", success: "" });
-const draftFilters = ref<LogAnalysisFilterValues>({ date_from: "", date_to: "", package_name: "", device_id: "", log_level: "" });
+const draftFilters = ref<LogAnalysisFilterValues>({ date_from: "", hour_from: 0, date_to: "", hour_to: 23, package_name: "", device_id: "", log_level: "" });
 const appliedFilters = ref<LogAnalysisFilterValues>({ ...draftFilters.value });
 const summary = reactive<AnalysisList>({ total: 0, page: 1, page_size: 20, items: [] });
 const details = reactive<DetailList>({ total: 0, page: 1, page_size: 20, items: [] });
