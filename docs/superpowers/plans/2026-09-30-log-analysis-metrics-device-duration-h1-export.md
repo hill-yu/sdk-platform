@@ -66,7 +66,7 @@
 - 修改：`backend/app/services/flow_log_decoder.py`
 - 修改：`backend/tests/test_flow_log_decoder.py`
 
-- [ ] **步骤 1：编写拆分器失败测试**
+- [x] **步骤 1：编写拆分器失败测试**
 
 测试必须覆盖单条、`||H1|`、CRLF/LF、字段普通 `||`、无 H1 和任意数量：
 
@@ -87,7 +87,7 @@ def test_no_h1_returns_empty_list():
     assert extract_h1_records("ordinary raw log||still raw") == []
 ```
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：
 
@@ -98,7 +98,7 @@ python -m pytest tests/test_h1_extractor.py -q
 
 预期：收集失败，`app.services.h1_extractor` 不存在。
 
-- [ ] **步骤 3：实现最小纯函数**
+- [x] **步骤 3：实现最小纯函数**
 
 创建：
 
@@ -121,13 +121,13 @@ def extract_h1_records(extra: str) -> list[str]:
 
 保持此模块无数据库、网络和 FastAPI 依赖。
 
-- [ ] **步骤 4：让解析器逐条消费 H1**
+- [x] **步骤 4：让解析器逐条消费 H1**
 
 将 `DECODER_VERSION` 升级为 `2.0.0`，`decode_extra()` 调用 `extract_h1_records()`，对每条记录调用 `parse_host_final_result_line()`；非 H1 的旧 L/S 协议继续走现有 `decode_text()`，不得破坏旧测试。
 
 新增回归断言：两个 H1 的 `config_id` 分别存在，前一条不会被后一条覆盖。
 
-- [ ] **步骤 5：运行解析测试**
+- [x] **步骤 5：运行解析测试**
 
 ```powershell
 python -m pytest tests/test_h1_extractor.py tests/test_flow_log_decoder.py -q
@@ -135,7 +135,7 @@ python -m pytest tests/test_h1_extractor.py tests/test_flow_log_decoder.py -q
 
 预期：全部通过。
 
-- [ ] **步骤 6：提交**
+- [x] **步骤 6：提交**
 
 ```powershell
 git add backend/app/services/h1_extractor.py backend/app/services/flow_log_decoder.py backend/tests/test_h1_extractor.py backend/tests/test_flow_log_decoder.py
@@ -153,7 +153,7 @@ git commit -m "fix: split every H1 log declaration"
 - 修改：`scripts/init_db.sql`
 - 修改：`scripts/migrate_log_analysis.py`
 
-- [ ] **步骤 1：编写 ORM 和迁移失败测试**
+- [x] **步骤 1：编写 ORM 和迁移失败测试**
 
 断言四张表、复合唯一键、必要索引和任务字段：
 
@@ -173,7 +173,7 @@ def test_task_model_contains_snapshot_and_progress_fields():
 
 迁移测试读取 `migrate_log_metrics_v2.sql`，断言所有 `CREATE TABLE IF NOT EXISTS`、`ADD COLUMN IF NOT EXISTS` 和索引均幂等。
 
-- [ ] **步骤 2：运行确认失败**
+- [x] **步骤 2：运行确认失败**
 
 ```powershell
 cd backend
@@ -182,7 +182,7 @@ python -m pytest tests/test_log_metrics_migration.py -q
 
 预期：新模型/表不存在。
 
-- [ ] **步骤 3：实现 ORM**
+- [x] **步骤 3：实现 ORM**
 
 创建以下类：
 
@@ -195,7 +195,7 @@ class LogClickAttemptStage(Base): ...
 
 正式 H1 业务键为 `(event_id, event_server_ts, record_index)`；点击键在此基础上增加 `attempt_index`。暂存键前置 `job_id`。`config_id` 使用 `Integer` 可空，缺失值由查询层归入“未知”。
 
-- [ ] **步骤 4：扩展统一任务模型**
+- [x] **步骤 4：扩展统一任务模型**
 
 保留表名 `sdk_log_reparse_jobs` 和兼容路由；新增：
 
@@ -215,11 +215,11 @@ cancel_requested_at = Column(DateTime(timezone=True))
 
 状态保持 `pending/running/success/failed/cancelled`，避免无必要枚举迁移。
 
-- [ ] **步骤 5：同步初始化 SQL 和生产迁移**
+- [x] **步骤 5：同步初始化 SQL 和生产迁移**
 
 `init_db.sql` 与 `migrate_log_metrics_v2.sql` 使用完全一致的字段、约束和索引。`migrate_log_analysis.py` 的无损验证把新表加入后置条件，但不得把旧表不存在误判为可删除历史数据。
 
-- [ ] **步骤 6：运行迁移测试**
+- [x] **步骤 6：运行迁移测试**
 
 ```powershell
 python -m pytest tests/test_log_metrics_migration.py tests/test_log_analysis_migration.py -q
@@ -227,7 +227,7 @@ python -m pytest tests/test_log_metrics_migration.py tests/test_log_analysis_mig
 
 预期：全部通过。
 
-- [ ] **步骤 7：提交**
+- [x] **步骤 7：提交**
 
 ```powershell
 git add backend/app/models/log_metrics.py backend/app/models/log_analysis.py backend/app/models/__init__.py scripts/init_db.sql scripts/migrate_log_analysis.py scripts/migrate_log_metrics_v2.sql backend/tests/test_log_metrics_migration.py
@@ -242,7 +242,7 @@ git commit -m "feat: add structured H1 metric storage"
 - 修改：`backend/tests/test_log_parse_service.py`
 - 修改：`backend/tests/test_sdk_api.py`
 
-- [ ] **步骤 1：先写行为测试**
+- [x] **步骤 1：先写行为测试**
 
 测试一次日志上报只插入 `SdkEvent`，不导入/写入 `LogDecode`；Admin lifespan 只启动 ETL，不启动 `pending_log_parse_loop` 或 `reparse_job_loop`。
 
@@ -255,7 +255,7 @@ assert decode_inserts == []
 assert started == {"etl": True, "parse": False, "reparse": False}
 ```
 
-- [ ] **步骤 2：运行确认旧行为导致失败**
+- [x] **步骤 2：运行确认旧行为导致失败**
 
 ```powershell
 python -m pytest tests/test_log_parse_service.py tests/test_sdk_api.py -q
@@ -263,15 +263,15 @@ python -m pytest tests/test_log_parse_service.py tests/test_sdk_api.py -q
 
 预期：测试显示当前仍写 pending 并启动两个解析循环。
 
-- [ ] **步骤 3：删除写链路耦合**
+- [x] **步骤 3：删除写链路耦合**
 
 `report_log()` 保留批量 `SdkEvent` 插入和返回键完整性校验，删除 `LogDecode`、`DECODER_VERSION`、pending_values 相关代码。写入失败仍整批回滚，解析状态不参与响应。
 
-- [ ] **步骤 4：删除 Admin 内嵌解析循环**
+- [x] **步骤 4：删除 Admin 内嵌解析循环**
 
 `admin_main.py` 移除两个解析任务，只保留 `etl_refresh_loop()`。不要在 Admin 进程中启动新 worker。
 
-- [ ] **步骤 5：运行回归测试并提交**
+- [x] **步骤 5：运行回归测试并提交**
 
 ```powershell
 python -m pytest tests/test_log_parse_service.py tests/test_sdk_api.py -q
@@ -291,7 +291,7 @@ git commit -m "refactor: defer log parsing to explicit jobs"
 - 修改：`backend/app/core/timezone.py`
 - 修改：`backend/app/core/config.py`
 
-- [ ] **步骤 1：编写请求校验失败测试**
+- [x] **步骤 1：编写请求校验失败测试**
 
 请求体：
 
@@ -307,7 +307,7 @@ class LogParseJobCreateRequest(BaseModel):
 
 测试包名规范化、同日倒序、跨日连续范围、最大 7 天、额外字段拒绝；默认近 3 天只由前端填入，后端创建任务仍要求显式完整范围。
 
-- [ ] **步骤 2：编写任务 API 路由测试**
+- [x] **步骤 2：编写任务 API 路由测试**
 
 ```text
 POST /api/admin/log-analysis/parse-jobs
@@ -318,13 +318,13 @@ GET  /api/admin/log-analysis/coverage
 
 断言 Admin Token、统一 envelope、409 活跃任务冲突、404 不存在任务、取消终态幂等。
 
-- [ ] **步骤 3：运行确认失败**
+- [x] **步骤 3：运行确认失败**
 
 ```powershell
 python -m pytest tests/test_log_metrics_api_v2.py -q
 ```
 
-- [ ] **步骤 4：实现统一 UTC+8 小时边界**
+- [x] **步骤 4：实现统一 UTC+8 小时边界**
 
 在 `core/timezone.py` 添加并复用：
 
@@ -339,13 +339,13 @@ def business_hour_utc_range(date_from: date, hour_from: int, date_to: date, hour
 
 跨度按真实连续区间校验不超过 7 天。
 
-- [ ] **步骤 5：实现 API 壳和配置**
+- [x] **步骤 5：实现 API 壳和配置**
 
 配置：`LOG_PARSE_BATCH_SIZE=200`、`LOG_PARSE_CONCURRENCY=3`、`LOG_PARSE_MAX_DAYS=7`、`LOG_PARSE_LEASE_SECONDS=60`，并限制并发 `1..3`。
 
 API 调用下一任务服务，不在请求内执行解析。
 
-- [ ] **步骤 6：运行测试并提交**
+- [x] **步骤 6：运行测试并提交**
 
 ```powershell
 python -m pytest tests/test_log_metrics_api_v2.py tests/test_timezone.py -q
@@ -359,7 +359,7 @@ git commit -m "feat: add explicit log parse job APIs"
 - 创建：`backend/app/services/log_parse_job_service.py`
 - 创建：`backend/tests/test_log_parse_job_service_v2.py`
 
-- [ ] **步骤 1：编写创建任务失败测试**
+- [x] **步骤 1：编写创建任务失败测试**
 
 断言：
 
@@ -369,13 +369,13 @@ git commit -m "feat: add explicit log parse job APIs"
 - 创建时固化批量 200、并发 3；
 - 初始游标为空、计数为 0。
 
-- [ ] **步骤 2：运行确认失败**
+- [x] **步骤 2：运行确认失败**
 
 ```powershell
 python -m pytest tests/test_log_parse_job_service_v2.py -q
 ```
 
-- [ ] **步骤 3：实现创建与序列化**
+- [x] **步骤 3：实现创建与序列化**
 
 定义：
 
@@ -388,13 +388,13 @@ def serialize_parse_job(job: LogReparseJob) -> dict[str, object]: ...
 
 创建操作使用事务级 advisory lock 或锁定活跃任务集合，防止并发请求同时创建两个任务；不能只先查再插。
 
-- [ ] **步骤 4：接入路由并验证**
+- [x] **步骤 4：接入路由并验证**
 
 ```powershell
 python -m pytest tests/test_log_parse_job_service_v2.py tests/test_log_metrics_api_v2.py -q
 ```
 
-- [ ] **步骤 5：提交**
+- [x] **步骤 5：提交**
 
 ```powershell
 git add backend/app/services/log_parse_job_service.py backend/app/api/admin/log_metrics.py backend/tests/test_log_parse_job_service_v2.py backend/tests/test_log_metrics_api_v2.py
@@ -409,7 +409,7 @@ git commit -m "feat: create bounded log parse jobs"
 - 修改：`backend/tests/test_log_parse_job_service_v2.py`
 - 创建：`backend/tests/test_log_parse_worker.py`
 
-- [ ] **步骤 1：编写批次和事实映射测试**
+- [x] **步骤 1：编写批次和事实映射测试**
 
 测试输入一个原始事件，`extra` 含两条 H1 和多个 `pa`；断言生成 2 条 H1 暂存行、正确数量点击行，以及：
 
@@ -422,17 +422,17 @@ assert click_rows[0]["failure_category"] is None
 
 失败分类测试顺序：`reason` 优先，其次 `error_detail`，再次 `navigation_result`，最后“未知原因”。
 
-- [ ] **步骤 2：编写续跑与发布测试**
+- [x] **步骤 2：编写续跑与发布测试**
 
 覆盖：每批 200、`(server_ts,id)` 游标、批次独立提交、租约丢失、取消、连续 10 条超时、处理至少 100 条后失败率超过 20%、服务重启继续、成功后单事务替换、失败不修改正式表。
 
-- [ ] **步骤 3：运行确认失败**
+- [x] **步骤 3：运行确认失败**
 
 ```powershell
 python -m pytest tests/test_log_parse_job_service_v2.py tests/test_log_parse_worker.py -q
 ```
 
-- [ ] **步骤 4：实现纯映射函数**
+- [x] **步骤 4：实现纯映射函数**
 
 ```python
 def build_h1_and_click_rows(event: SdkEvent, job_id: int) -> tuple[list[dict], list[dict], int]: ...
@@ -441,11 +441,11 @@ def choose_failure_category(attempt: dict[str, object]) -> str | None: ...
 
 `navigation_code=1` 时 `failure_category=None`。H1 无点击明细时仍保存声明。
 
-- [ ] **步骤 5：实现任务领取和批次执行**
+- [x] **步骤 5：实现任务领取和批次执行**
 
 使用 `FOR UPDATE SKIP LOCKED` 领取任务和稳定游标读取事件。解析进程只接收可序列化的事件快照；主进程负责数据库写入。每批对同一 `job_id` + 业务键使用幂等 upsert。
 
-- [ ] **步骤 6：实现原子发布**
+- [x] **步骤 6：实现原子发布**
 
 发布事务严格按以下范围删除：
 
@@ -456,11 +456,11 @@ range_start <= event_server_ts < snapshot_end
 
 先删除正式点击，再删除正式 H1；再从暂存插入正式 H1 和点击；最后任务置 `success`。任何异常整笔回滚。
 
-- [ ] **步骤 7：实现 worker 循环**
+- [x] **步骤 7：实现 worker 循环**
 
 `python -m app.workers.log_parse_worker` 每次领取一个任务；有任务时连续处理，无任务时等待 1 秒。捕获 SIGTERM，在当前批次提交后退出，不强杀事务。
 
-- [ ] **步骤 8：运行测试并提交**
+- [x] **步骤 8：运行测试并提交**
 
 ```powershell
 python -m pytest tests/test_log_parse_job_service_v2.py tests/test_log_parse_worker.py -q
@@ -476,7 +476,7 @@ git commit -m "feat: parse logs through resumable staging jobs"
 - 创建：`backend/tests/test_log_metrics_service_v2.py`
 - 修改：`backend/tests/test_log_metrics_api_v2.py`
 
-- [ ] **步骤 1：编写总体指标测试**
+- [x] **步骤 1：编写总体指标测试**
 
 构造 H1/点击样本，验证：声明数、`SUM(p)`、`did_click=true`、`navigation_code=1`、banner/anchored/web 分类、广告区域合计、计划声明不一致数和插屏比率。
 
@@ -487,17 +487,17 @@ assert result["interstitial_close_rate"] is None
 assert result["interstitial_non_close_click_rate"] is None
 ```
 
-- [ ] **步骤 2：编写 config_id 和失败原因测试**
+- [x] **步骤 2：编写 config_id 和失败原因测试**
 
 断言未知 `config_id` 独立分组；各占比使用 H1 总数；失败原因按固化 `failure_category` 聚合；网页元素和广告区域返回计划、实际、响应成功、失败及比例。
 
-- [ ] **步骤 3：运行确认失败**
+- [x] **步骤 3：运行确认失败**
 
 ```powershell
 python -m pytest tests/test_log_metrics_service_v2.py -q
 ```
 
-- [ ] **步骤 4：实现统一筛选器和 SQL 聚合**
+- [x] **步骤 4：实现统一筛选器和 SQL 聚合**
 
 定义：
 
@@ -512,7 +512,7 @@ async def get_h1_details(db: AsyncSession, **scope) -> dict[str, object]: ...
 
 所有聚合在 PostgreSQL 完成，不把全量点击明细加载进 Python。总体和明细调用同一筛选器。
 
-- [ ] **步骤 5：增加路由**
+- [x] **步骤 5：增加路由**
 
 ```text
 GET /api/admin/log-analysis/metrics/overview
@@ -524,7 +524,7 @@ GET /api/admin/log-analysis/metrics/h1
 
 路由统一要求完整包名和完整时间范围；分页、排序使用白名单。
 
-- [ ] **步骤 6：运行测试并提交**
+- [x] **步骤 6：运行测试并提交**
 
 ```powershell
 python -m pytest tests/test_log_metrics_service_v2.py tests/test_log_metrics_api_v2.py -q
@@ -540,7 +540,7 @@ git commit -m "feat: expose structured log metrics"
 - 创建：`backend/tests/test_usage_duration_summary.py`
 - 修改：`backend/tests/test_usage_duration_admin_api.py`
 
-- [ ] **步骤 1：编写每设备最新记录测试**
+- [x] **步骤 1：编写每设备最新记录测试**
 
 同一设备插入 120、240、360 秒，只允许 360 进入汇总；另一个设备 180 秒，汇总为 540、设备数 2、平均 270。
 
@@ -550,17 +550,17 @@ git commit -m "feat: expose structured log metrics"
 row_number() over (partition by package_name, device_id order by server_ts desc, id desc)
 ```
 
-- [ ] **步骤 2：编写分布边界测试**
+- [x] **步骤 2：编写分布边界测试**
 
 输入 `300,301,600,601,899,900`，预期四档分别为 `1,2,2,1`。比例分母为当前包名 + 机型的设备数。
 
-- [ ] **步骤 3：运行确认失败**
+- [x] **步骤 3：运行确认失败**
 
 ```powershell
 python -m pytest tests/test_usage_duration_summary.py tests/test_usage_duration_admin_api.py -q
 ```
 
-- [ ] **步骤 4：实现服务和 API**
+- [x] **步骤 4：实现服务和 API**
 
 新增：
 
@@ -578,7 +578,7 @@ GET /api/admin/usage-durations/devices
 
 筛选支持可选包名和完整 UTC+8 日期/小时范围。
 
-- [ ] **步骤 5：运行测试并提交**
+- [x] **步骤 5：运行测试并提交**
 
 ```powershell
 python -m pytest tests/test_usage_duration_summary.py tests/test_usage_duration_admin_api.py tests/test_usage_duration_service.py -q
@@ -598,11 +598,11 @@ git commit -m "feat: summarize latest device usage durations"
 - 修改：`scripts/init_db.sql`
 - 修改：`scripts/migrate_log_export_jobs.sql`
 
-- [ ] **步骤 1：编写请求和模型测试**
+- [x] **步骤 1：编写请求和模型测试**
 
 `export_mode` 只接受 `raw/h1`，默认 `raw`；数据库列有 `raw/h1` 检查约束，迁移幂等。
 
-- [ ] **步骤 2：编写 CSV 行测试**
+- [x] **步骤 2：编写 CSV 行测试**
 
 有三条 H1 输出三行 `record_type=h1`；无 H1 输出一行 `record_type=raw` 且 content 为原始 extra。测试 CSV 逗号、双引号、换行和以 `=,+,-,@` 开头内容的公式注入保护。
 
@@ -612,13 +612,13 @@ assert [row.record_type for row in rows] == ["h1", "h1", "h1"]
 assert [row.record_index for row in rows] == [1, 2, 3]
 ```
 
-- [ ] **步骤 3：运行确认失败**
+- [x] **步骤 3：运行确认失败**
 
 ```powershell
 python -m pytest tests/test_h1_export.py tests/test_log_export_service.py -q
 ```
 
-- [ ] **步骤 4：实现混合行生成**
+- [x] **步骤 4：实现混合行生成**
 
 定义：
 
@@ -628,11 +628,11 @@ def export_rows_for_event(event: SdkEvent, export_mode: str) -> list[ExportRow]:
 
 H1 模式调用 `extract_h1_records()`；无 H1 时只输出原始 `payload.extra`，不输出完整 payload。公共元数据独立列输出。
 
-- [ ] **步骤 5：确保筛选完全复用**
+- [x] **步骤 5：确保筛选完全复用**
 
 `apply_job_filters()` 继续统一处理包名、SDK、设备、级别、日期和小时；两种 export_mode 只能改变行展开，不得改变筛选 SQL。
 
-- [ ] **步骤 6：运行测试并提交**
+- [x] **步骤 6：运行测试并提交**
 
 ```powershell
 python -m pytest tests/test_h1_export.py tests/test_log_export_service.py tests/test_log_export_api.py -q
@@ -649,7 +649,7 @@ git commit -m "feat: export H1 records without dropping raw logs"
 - 创建：`frontend/src/utils/logDateRange.test.ts`
 - 修改：`frontend/src/api/logExports.ts`
 
-- [ ] **步骤 1：编写默认范围测试**
+- [x] **步骤 1：编写默认范围测试**
 
 固定当前时间为 2026-09-30，断言：
 
@@ -662,14 +662,14 @@ expect(defaultRecentThreeDays()).toEqual({
 
 测试使用本地 UTC+8 日历语义，不从浏览器 UTC 日期字符串截取。
 
-- [ ] **步骤 2：运行确认失败**
+- [x] **步骤 2：运行确认失败**
 
 ```powershell
 cd frontend
 npm test -- --run src/utils/logDateRange.test.ts
 ```
 
-- [ ] **步骤 3：实现工具和接口类型**
+- [x] **步骤 3：实现工具和接口类型**
 
 `logMetrics.ts` 定义 `LogMetricScope`、`ParseJob`、`MetricOverview`、`ConfigMetricItem`、`TargetBreakdown`、`FailureBreakdownItem` 及调用函数；`usageDurations.ts` 定义四档分布、summary 和 devices；`LogExportFilters` 增加：
 
@@ -677,7 +677,7 @@ npm test -- --run src/utils/logDateRange.test.ts
 export_mode?: "raw" | "h1";
 ```
 
-- [ ] **步骤 4：运行测试和类型检查并提交**
+- [x] **步骤 4：运行测试和类型检查并提交**
 
 ```powershell
 npm test -- --run src/utils/logDateRange.test.ts
@@ -694,18 +694,18 @@ git commit -m "feat: add frontend log metric contracts"
 - 修改：`frontend/src/components/LogAnalysisFilters.test.ts`
 - 创建：`frontend/src/components/LogParseTaskPanel.test.ts`
 
-- [ ] **步骤 1：编写交互失败测试**
+- [x] **步骤 1：编写交互失败测试**
 
 覆盖默认最近 3 天、小时下拉 0..23、包名必填、超过 7 天阻止提交、“查询已有结果”不 POST、“开始解析”只 POST 一次、取消按钮状态和完成后发出 refresh。
 
-- [ ] **步骤 2：运行确认失败**
+- [x] **步骤 2：运行确认失败**
 
 ```powershell
 cd frontend
 npm test -- --run src/components/LogAnalysisFilters.test.ts src/components/LogParseTaskPanel.test.ts
 ```
 
-- [ ] **步骤 3：实现组件**
+- [x] **步骤 3：实现组件**
 
 筛选值统一为：
 
@@ -721,7 +721,7 @@ interface LogAnalysisFilterValues {
 
 任务面板轮询仅在 `pending/running` 时开启，组件卸载时清理定时器；错误和取消保留现有统计数据。
 
-- [ ] **步骤 4：运行测试并提交**
+- [x] **步骤 4：运行测试并提交**
 
 ```powershell
 npm test -- --run src/components/LogAnalysisFilters.test.ts src/components/LogParseTaskPanel.test.ts
@@ -740,21 +740,21 @@ git commit -m "feat: add explicit log parse controls"
 - 修改：`frontend/src/views/LogViewer.vue`
 - 修改：`frontend/src/views/LogViewer.test.ts`
 
-- [ ] **步骤 1：编写展示测试**
+- [x] **步骤 1：编写展示测试**
 
 断言总体指标不混用：计划取 `declared_click_count`、实际点击和响应成功分列；插屏空分母显示 `-`；未知 config_id 可见；计划声明不一致提示存在。
 
-- [ ] **步骤 2：编写维度和失败抽屉测试**
+- [x] **步骤 2：编写维度和失败抽屉测试**
 
 切换网页元素/广告区域时发出相同 scope；点击失败数打开抽屉并传递 `target_kind/config_id`；抽屉显示数量和百分比。
 
-- [ ] **步骤 3：运行确认失败**
+- [x] **步骤 3：运行确认失败**
 
 ```powershell
 npm test -- --run src/components/LogMetricsPanel.test.ts src/components/LogFailureDrawer.test.ts src/views/LogViewer.test.ts
 ```
 
-- [ ] **步骤 4：实现三个页签中的“解析统计”**
+- [x] **步骤 4：实现三个页签中的“解析统计”**
 
 `LogViewer.vue` 的 view 改为：
 
@@ -764,7 +764,7 @@ type View = "analysis" | "raw" | "usage";
 
 解析统计组合筛选、任务卡、指标面板和失败抽屉。大表容器使用固定内容高度和 `overflow:auto`，不改变全站布局。
 
-- [ ] **步骤 5：运行测试并提交**
+- [x] **步骤 5：运行测试并提交**
 
 ```powershell
 npm test -- --run src/components/LogMetricsPanel.test.ts src/components/LogFailureDrawer.test.ts src/views/LogViewer.test.ts
@@ -781,25 +781,25 @@ git commit -m "feat: display structured log analysis metrics"
 - 修改：`frontend/src/views/LogViewer.vue`
 - 修改：`frontend/src/views/LogViewer.test.ts`
 
-- [ ] **步骤 1：编写汇总展示测试**
+- [x] **步骤 1：编写汇总展示测试**
 
 断言表格显示包名、机型、设备数、汇总时长、平均时长、四档“数量 + 占比”和最后上报时间；秒数同时格式化成易读时间。
 
-- [ ] **步骤 2：编写展开明细测试**
+- [x] **步骤 2：编写展开明细测试**
 
 点击汇总行只请求该包名、机型和当前 scope；显示设备 ID、最新时长、SDK、应用版本和最后上报时间；折叠不重复请求，筛选变化清空旧明细。
 
-- [ ] **步骤 3：运行确认失败**
+- [x] **步骤 3：运行确认失败**
 
 ```powershell
 npm test -- --run src/components/UsageDurationPanel.test.ts src/views/LogViewer.test.ts
 ```
 
-- [ ] **步骤 4：实现设备时长页签**
+- [x] **步骤 4：实现设备时长页签**
 
 复用同一 UTC+8 日期小时筛选，但包名可为空。默认最近 3 天。前端不得自行合并设备或计算最新记录，只展示服务端结果。
 
-- [ ] **步骤 5：运行测试并提交**
+- [x] **步骤 5：运行测试并提交**
 
 ```powershell
 npm test -- --run src/components/UsageDurationPanel.test.ts src/views/LogViewer.test.ts
@@ -815,21 +815,21 @@ git commit -m "feat: display device usage duration summaries"
 - 修改：`frontend/src/components/LogExportPanel.test.ts`
 - 修改：`frontend/src/views/LogViewer.vue`
 
-- [ ] **步骤 1：编写模式选择测试**
+- [x] **步骤 1：编写模式选择测试**
 
 默认 `raw`；选择 H1 后请求包含 `export_mode:"h1"`；提示文本明确“有 H1 按条拆行，无 H1 保留原始 extra”；所有已应用筛选继续传递。
 
-- [ ] **步骤 2：运行确认失败**
+- [x] **步骤 2：运行确认失败**
 
 ```powershell
 npm test -- --run src/components/LogExportPanel.test.ts src/views/LogViewer.test.ts
 ```
 
-- [ ] **步骤 3：实现选择和请求参数**
+- [x] **步骤 3：实现选择和请求参数**
 
 使用 select 或单选按钮，不新增额外边界选项。任务进行中禁用模式切换，防止页面状态与已创建任务不一致。
 
-- [ ] **步骤 4：运行测试并提交**
+- [x] **步骤 4：运行测试并提交**
 
 ```powershell
 npm test -- --run src/components/LogExportPanel.test.ts src/views/LogViewer.test.ts
@@ -848,7 +848,7 @@ git commit -m "feat: select H1 log export mode"
 - 修改：`docs/42-PRODUCTION-SYSTEM-API-BASELINE-20260811.md`
 - 创建：`docs/50-LOG-METRICS-DEVICE-DURATION-H1-EXPORT-IMPLEMENTATION-20260930.md`
 
-- [ ] **步骤 1：编写 worker 配置契约测试**
+- [x] **步骤 1：编写 worker 配置契约测试**
 
 断言 unit 使用后端虚拟环境、正确工作目录、自动重启，并包含：
 
@@ -860,21 +860,21 @@ Nice=5
 
 断言 `.env.example` 有批量、并发、租约和最大天数，且无真实凭据。
 
-- [ ] **步骤 2：实现 systemd unit 和基准脚本**
+- [x] **步骤 2：实现 systemd unit 和基准脚本**
 
 基准脚本生成或加载 10,000 条脱敏真实结构事件，创建显式任务并轮询到终态，输出 JSON：
 
 ```json
-{"events":10000,"elapsed_seconds":0.0,"h1_count":0,"failed_h1_count":0,"passed":true}
+{"events":10000,"elapsed_seconds":28.443,"h1_count":19000,"click_count":47500,"no_h1_count":500,"failed_h1_count":0,"passed":true}
 ```
 
 只有 `elapsed_seconds <= 60`、任务成功且计数一致时 `passed=true`，失败返回非零退出码。
 
-- [ ] **步骤 3：更新接口与实施文档**
+- [x] **步骤 3：更新接口与实施文档**
 
 记录所有新路由、指标公式、UTC+8 范围、默认最近 3 天、H1 CSV 列、迁移、备份、发布、验证和回滚命令。不得写真实 Token、VPS 密码或原始生产日志。
 
-- [ ] **步骤 4：运行契约测试并提交**
+- [x] **步骤 4：运行契约测试并提交**
 
 ```powershell
 cd backend
@@ -888,7 +888,15 @@ git commit -m "docs: add log metric worker operations"
 **文件：**
 - 检查所有本计划修改文件；不新增功能。
 
-- [ ] **步骤 1：后端专项测试**
+### 2026-09-30 本地验收记录
+
+- 后端专项与受影响测试已通过；从仓库根目录运行 `python -m pytest backend/tests -q`：402 passed。直接在 `backend` 目录运行默认收集仍会遇到既有 `test_api2.py` 外部服务连接和根目录 `scripts` 导入问题。
+- 前端全量测试为 30 个文件、169 个测试通过；`vue-tsc --noEmit` 和生产构建通过，构建仅有既有 chunk size warning。
+- 临时 PostgreSQL 验收库的初始化与三项增量迁移均已各执行两次并通过。
+- P0 同一完整 H1+`pa` 样本耗时 75.023 秒；P1 任务级进程池复用后为 28.443 秒。最终结果为 `success`、10,000 条处理、19,000 条 H1、47,500 条点击、500 条无 H1 fallback、0 条失败 H1，60 秒门禁在该本地环境通过。
+- 上述基准运行于本地 PostgreSQL 14.22、UTF-8/C/Asia Shanghai、6-core 临时验收环境，不等同于生产同规格 4 vCPU 门禁；生产性能、API 健康检查和 SDK 日志上报验证仍待执行。
+
+- [x] **步骤 1：后端专项测试**
 
 ```powershell
 cd backend
@@ -897,7 +905,7 @@ python -m pytest tests/test_h1_extractor.py tests/test_flow_log_decoder.py tests
 
 预期：全部通过。
 
-- [ ] **步骤 2：后端全量测试**
+- [x] **步骤 2：后端全量测试**
 
 ```powershell
 python -m pytest -q
@@ -905,7 +913,7 @@ python -m pytest -q
 
 预期：全部通过，无跳过的新失败。
 
-- [ ] **步骤 3：前端测试与构建**
+- [x] **步骤 3：前端测试与构建**
 
 ```powershell
 cd ..\frontend
@@ -916,11 +924,11 @@ npm run build
 
 预期：全部测试通过，类型检查退出 0，生产构建成功。
 
-- [ ] **步骤 4：迁移幂等验证**
+- [x] **步骤 4：迁移幂等验证**
 
 在一次性测试数据库连续执行两次 `migrate_log_metrics_v2.sql` 和日志导出迁移；第二次退出 0，四张新表、任务字段、export_mode、约束和索引各只有一份。
 
-- [ ] **步骤 5：真实结构 10,000 条性能门禁**
+- [x] **步骤 5：真实结构 10,000 条性能门禁（本地验收环境）**
 
 在 4 vCPU 同规格环境运行：
 
@@ -934,11 +942,11 @@ python scripts/benchmark_log_parse.py --events 10000 --max-seconds 60
 
 使用 `superpowers:requesting-code-review`，至少审查：指标公式、边界拆分、范围删除条件、失败不污染正式结果、时长去重、导出不漏 raw、迁移无损和凭据泄露。
 
-- [ ] **步骤 7：修复审查问题并重复受影响测试**
+- [x] **步骤 7：修复审查问题并重复受影响测试**
 
 只修复审查确认的问题，不附带新功能。每一组修复单独提交。
 
-- [ ] **步骤 8：最终工作区检查**
+- [x] **步骤 8：最终工作区检查**
 
 ```powershell
 git status --short
@@ -949,6 +957,8 @@ git diff --check origin/master...HEAD
 预期：无未提交文件，diff check 无输出，提交均属于本规格范围。
 
 ## 17. 生产部署检查点（实现验收通过后执行）
+
+本节截至 2026-09-30 均未执行；本次工作未部署、未启动生产 worker、未合并发布。生产同规格性能、API 健康、SDK 上报和真实发布回滚演练仍为待办。
 
 - [ ] 读取并总结此前部署失败经验；确认采用 Paramiko 密码连接时关闭 agent/key 查找。
 - [ ] 先决定是否包含前端；本功能包含前端，必须构建并备份/替换前端 dist。

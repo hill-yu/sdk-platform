@@ -108,13 +108,17 @@ worker 收到 `SIGTERM` 后在当前批次提交/释放租约后退出；异常�
 
 `scripts/benchmark_log_parse.py` 使用独立的 `__sdk_parse_benchmark__...` 包名，写入受控原始事件，调用真实 `create_parse_job()` 创建显式任务，启动真实 `run_worker_once()`，并轮询持久化任务直到 `success/failed/cancelled`。计时覆盖任务创建后的数据库读取、进程间解析、暂存写入、游标推进和正式结果替换；不是纯函数计时或伪造状态。
 
-在与生产相同的 4 vCPU 环境执行：
+在临时 PostgreSQL 14.22 UTF-8/C/Asia Shanghai、6-core 本地验收环境执行：
 
 ```bash
 python scripts/benchmark_log_parse.py --events 10000 --max-seconds 60
 ```
 
-只有同时满足以下条件才会输出 `"passed": true` 并返回 0：任务状态为 `success`、`processed_count=10000`、失败 H1 数为 0、无 H1 事件数与输入一致、计时不超过 60 秒。超时、失败或计数不一致返回非零退出码。默认 finally 清理基准包名下的事件、任务和暂存/正式结果；需要调查时可显式使用 `--keep-data`，完成后应手工清理该独立包名。
+只有同时满足以下条件才会输出 `"passed": true` 并返回 0：任务状态为 `success`、`processed_count=10000`、失败 H1 数为 0、无 H1 事件数与输入一致、计时不超过 60 秒。超时、失败或计数不一致返回非零退出码。默认 finally 清理本次运行生成的唯一 benchmark 包名下的事件、任务和暂存/正式结果；需要调查时可显式使用 `--keep-data`，完成后应手工清理该独立包名。
+
+本地实测记录：P0 批量写入优化后的同样本耗时 `75.023s`；P1 任务级进程池复用后耗时 `28.443s`。最终任务为 `success`，处理 `10000` 条原始事件，正式表核对得到 `19000` 条 H1、`47500` 条点击、`500` 条无 H1 fallback、`0` 条失败 H1，输出 `passed=true`。该结果仅代表上述本地 6-core 临时库，不代表生产同规格 4 vCPU 门禁已通过；生产性能、API 健康检查和 SDK 日志上报验证仍待执行。
+
+同一收口批次的本地验证还包括：后端根目录限定测试集 `402 passed`，前端全量 `30 files / 169 tests`，`vue-tsc --noEmit`、生产构建和迁移双执行幂等检查通过。默认从 `backend` 目录运行的 pytest 收集仍受既有外部 `test_api2.py` 和根目录 `scripts` 导入问题影响，未将该命令误报为全量通过。
 
 脚本不会自动部署、重启服务或写入业务包名。性能门禁应同时人工确认 SDK 健康接口和一笔测试日志上报成功。
 
