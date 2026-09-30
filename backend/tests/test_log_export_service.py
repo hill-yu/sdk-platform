@@ -16,7 +16,7 @@ def test_log_export_job_model_has_required_columns():
     assert set(columns.keys()) == {
         "id", "status", "package_names", "device_id", "log_level",
         "sdk_version", "date_from", "hour_from", "date_to", "hour_to", "file_path", "row_count", "error_message",
-        "created_at", "started_at", "finished_at",
+        "created_at", "started_at", "finished_at", "export_mode",
     }
     assert columns["package_names"].nullable is False
     assert columns["sdk_version"].nullable is True
@@ -31,6 +31,7 @@ def test_log_export_job_model_has_required_columns():
     }
     assert "chk_log_export_jobs_hour_bounds" in constraints
     assert "chk_log_export_jobs_hour_pair" in constraints
+    assert "chk_log_export_jobs_export_mode" in constraints
 
 
 def test_log_export_migration_is_idempotent_and_indexed():
@@ -43,11 +44,13 @@ def test_log_export_migration_is_idempotent_and_indexed():
     assert "ADD COLUMN IF NOT EXISTS hour_to SMALLINT" in sql
     assert "chk_log_export_jobs_hour_bounds" in sql
     assert "chk_log_export_jobs_hour_pair" in sql
+    assert "ADD COLUMN IF NOT EXISTS export_mode VARCHAR(10)" in sql
 
     init_sql = Path("scripts/init_db.sql").read_text(encoding="utf-8")
     assert "sdk_version VARCHAR(20)" in init_sql
     assert "hour_from SMALLINT" in init_sql
     assert "hour_to SMALLINT" in init_sql
+    assert "export_mode VARCHAR(10)" in init_sql
 
 
 def test_create_request_trims_and_deduplicates_packages():

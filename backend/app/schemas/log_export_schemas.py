@@ -8,6 +8,7 @@ from app.core.timezone import business_hour_utc_range
 
 class LogExportCreateRequest(BaseModel):
     package_names: list[str] = Field(min_length=1, max_length=50)
+    export_mode: Literal["raw", "h1"] = "raw"
     sdk_version: str | None = Field(default=None, max_length=20)
     device_id: str | None = Field(default=None, max_length=64)
     log_level: Literal["debug", "info", "warn", "error"] | None = None

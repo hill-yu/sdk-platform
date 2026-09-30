@@ -342,6 +342,7 @@ COMMENT ON TABLE sdk_log_reparse_jobs IS '日志重新解析作业，不保存�
 CREATE TABLE IF NOT EXISTS sdk_log_export_jobs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    export_mode VARCHAR(10) NOT NULL DEFAULT 'raw',
     package_names JSONB NOT NULL,
       sdk_version VARCHAR(20),
       device_id VARCHAR(64),
@@ -357,6 +358,7 @@ CREATE TABLE IF NOT EXISTS sdk_log_export_jobs (
     started_at TIMESTAMPTZ,
     finished_at TIMESTAMPTZ,
       CONSTRAINT chk_log_export_jobs_status CHECK (status IN ('pending', 'running', 'success', 'failed')),
+      CONSTRAINT chk_log_export_jobs_export_mode CHECK (export_mode IN ('raw', 'h1')),
       CONSTRAINT chk_log_export_jobs_hour_pair CHECK (
           (hour_from IS NULL AND hour_to IS NULL) OR
           (hour_from IS NOT NULL AND hour_to IS NOT NULL)

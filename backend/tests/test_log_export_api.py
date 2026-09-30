@@ -30,6 +30,7 @@ def test_search_and_create_export(monkeypatch):
         assert body.package_names == ["com.a", "com.b"]
         assert body.sdk_version == "1.0.6"
         assert body.log_level == "info"
+        assert body.export_mode == "h1"
         assert body.hour_from == 8
         assert body.hour_to == 17
         return {"id": str(JOB_ID), "status": "pending"}
@@ -39,7 +40,7 @@ def test_search_and_create_export(monkeypatch):
     with TestClient(app) as client:
         result = client.get("/api/admin/log-packages?keyword=tech", headers=HEADERS)
         created = client.post("/api/admin/log-exports", headers=HEADERS, json={
-            "package_names": ["com.a", "com.b"], "sdk_version": "1.0.6", "log_level": "info",
+            "package_names": ["com.a", "com.b"], "sdk_version": "1.0.6", "log_level": "info", "export_mode": "h1",
             "date_from": "2026-09-20", "hour_from": 8, "date_to": "2026-09-22", "hour_to": 17,
         })
     assert result.json()["data"]["items"] == ["com.tech.a", "com.tech.b"]

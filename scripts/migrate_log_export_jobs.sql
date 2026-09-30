@@ -3,6 +3,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE IF NOT EXISTS sdk_log_export_jobs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    export_mode VARCHAR(10) NOT NULL DEFAULT 'raw',
     package_names JSONB NOT NULL,
     device_id VARCHAR(64),
     log_level VARCHAR(10),
@@ -17,6 +18,7 @@ CREATE TABLE IF NOT EXISTS sdk_log_export_jobs (
     started_at TIMESTAMPTZ,
     finished_at TIMESTAMPTZ,
     CONSTRAINT chk_log_export_jobs_status CHECK (status IN ('pending', 'running', 'success', 'failed')),
+    CONSTRAINT chk_log_export_jobs_export_mode CHECK (export_mode IN ('raw', 'h1')),
     CONSTRAINT chk_log_export_jobs_hour_pair CHECK (
         (hour_from IS NULL AND hour_to IS NULL) OR
         (hour_from IS NOT NULL AND hour_to IS NOT NULL)
@@ -34,6 +36,9 @@ ALTER TABLE sdk_log_export_jobs
     ADD COLUMN IF NOT EXISTS sdk_version VARCHAR(20);
 
 ALTER TABLE sdk_log_export_jobs
+    ADD COLUMN IF NOT EXISTS export_mode VARCHAR(10) NOT NULL DEFAULT 'raw';
+
+ALTER TABLE sdk_log_export_jobs
     ADD COLUMN IF NOT EXISTS hour_from SMALLINT;
 
 ALTER TABLE sdk_log_export_jobs
@@ -41,6 +46,16 @@ ALTER TABLE sdk_log_export_jobs
 
 DO $$
 BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_log_export_jobs_export_mode'
+          AND conrelid = 'sdk_log_export_jobs'::regclass
+    ) THEN
+        ALTER TABLE sdk_log_export_jobs
+            ADD CONSTRAINT chk_log_export_jobs_export_mode CHECK (export_mode IN ('raw', 'h1'));
+    END IF;
+
     IF NOT EXISTS (
         SELECT 1
         FROM pg_constraint

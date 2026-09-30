@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,10 +17,31 @@ from app.core.timezone import business_day_utc_range, business_hour_utc_range
 from app.models.event import SdkEvent
 from app.models.log_export_job import LogExportJob
 from app.schemas.log_export_schemas import LogExportCreateRequest
+from app.services.h1_extractor import extract_h1_records
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 CSV_HEADER = ["id", "package_name", "device_id", "sdk_version", "level", "tag", "message", "extra", "client_ts", "server_ts"]
+H1_CSV_HEADER = [
+    "event_id", "server_time", "package_name", "device_id", "device_model", "os", "ver",
+    "sdk_version", "level", "record_type", "record_index", "content",
+]
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ExportRow:
+    event_id: int
+    server_time: str
+    package_name: str | None
+    device_id: str | None
+    device_model: str | None
+    os: str | None
+    ver: str | None
+    sdk_version: str | None
+    level: str | None
+    record_type: str
+    record_index: int | None
+    content: str
 
 
 def _csv_text(value: Any) -> str:
@@ -39,6 +61,52 @@ def csv_row_for_event(event: SdkEvent) -> list[str]:
         str(event.id), _csv_text(event.package_name), _csv_text(event.device_id), _csv_text(event.sdk_version),
         _csv_text(payload.get("level")), _csv_text(payload.get("tag")), _csv_text(payload.get("message")),
         _csv_text(payload.get("extra")), _local_time(event.client_ts), _local_time(event.server_ts),
+    ]
+
+
+def export_rows_for_event(event: SdkEvent, export_mode: str = "raw") -> list[ExportRow]:
+    if export_mode not in {"raw", "h1"}:
+        raise ValueError("export_mode 必须是 raw 或 h1")
+    payload = event.payload if isinstance(event.payload, dict) else {}
+    extra = payload.get("extra")
+    if not isinstance(extra, str):
+        extra = json.dumps(extra, ensure_ascii=False, separators=(",", ":")) if extra is not None else ""
+    base = {
+        "event_id": event.id,
+        "server_time": _local_time(event.server_ts),
+        "package_name": event.package_name,
+        "device_id": event.device_id,
+        "device_model": payload.get("device_model") or payload.get("model"),
+        "os": payload.get("os"),
+        "ver": payload.get("ver") or payload.get("app_version"),
+        "sdk_version": event.sdk_version,
+        "level": payload.get("level"),
+    }
+    if export_mode == "raw":
+        return [ExportRow(**base, record_type="raw", record_index=None, content=extra)]
+    records = extract_h1_records(extra)
+    if not records:
+        return [ExportRow(**base, record_type="raw", record_index=None, content=extra)]
+    return [
+        ExportRow(**base, record_type="h1", record_index=index, content=record)
+        for index, record in enumerate(records, start=1)
+    ]
+
+
+def csv_row_for_export(row: ExportRow) -> list[str]:
+    return [
+        _csv_text(row.event_id),
+        _csv_text(row.server_time),
+        _csv_text(row.package_name),
+        _csv_text(row.device_id),
+        _csv_text(row.device_model),
+        _csv_text(row.os),
+        _csv_text(row.ver),
+        _csv_text(row.sdk_version),
+        _csv_text(row.level),
+        _csv_text(row.record_type),
+        _csv_text(row.record_index),
+        _csv_text(row.content),
     ]
 
 
@@ -120,7 +188,8 @@ async def write_job_csv(job: LogExportJob, session_factory, export_dir: Path) ->
     try:
         with temp_path.open("w", encoding="utf-8-sig", newline="") as handle:
             writer = csv.writer(handle)
-            writer.writerow(CSV_HEADER)
+            export_mode = getattr(job, "export_mode", "raw")
+            writer.writerow(H1_CSV_HEADER if export_mode == "h1" else CSV_HEADER)
             while True:
                 stmt = apply_job_filters(select(SdkEvent), job)
                 if last_server_ts is not None:
@@ -132,7 +201,11 @@ async def write_job_csv(job: LogExportJob, session_factory, export_dir: Path) ->
                 async with session_factory() as session:
                     rows = (await session.execute(stmt)).scalars().all()
                 for event in rows:
-                    writer.writerow(csv_row_for_event(event))
+                    if export_mode == "h1":
+                        for row in export_rows_for_event(event, export_mode="h1"):
+                            writer.writerow(csv_row_for_export(row))
+                    else:
+                        writer.writerow(csv_row_for_event(event))
                 row_count += len(rows)
                 if len(rows) < 1000:
                     break

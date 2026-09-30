@@ -15,6 +15,10 @@ class LogExportJob(Base):
             name="chk_log_export_jobs_status",
         ),
         CheckConstraint(
+            "export_mode IN ('raw', 'h1')",
+            name="chk_log_export_jobs_export_mode",
+        ),
+        CheckConstraint(
             "(hour_from IS NULL AND hour_to IS NULL) OR (hour_from IS NOT NULL AND hour_to IS NOT NULL)",
             name="chk_log_export_jobs_hour_pair",
         ),
@@ -26,6 +30,7 @@ class LogExportJob(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     status = Column(String(20), nullable=False, default="pending")
+    export_mode = Column(String(10), nullable=False, default="raw")
     package_names = Column(JSONB, nullable=False)
     sdk_version = Column(String(20))
     device_id = Column(String(64))
