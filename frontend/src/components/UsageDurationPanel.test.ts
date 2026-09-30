@@ -87,4 +87,41 @@ describe("UsageDurationPanel", () => {
     expect(wrapper.find("[data-testid='usage-device-row']").exists()).toBe(false);
     expect(getUsageSummary).toHaveBeenLastCalledWith({ ...summaryScope, package_name: "com.next" });
   });
+
+  it("keeps only the newest summary scope when date/package queries resolve out of order", async () => {
+    let resolveA!: (value: unknown) => void;
+    let resolveB!: (value: unknown) => void;
+    vi.mocked(getUsageSummary)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveA = resolve; }) as never)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveB = resolve; }) as never);
+    const wrapper = mount(UsageDurationPanel);
+    await wrapper.get("[data-testid='usage-package-name']").setValue("com.b");
+    await wrapper.get("form").trigger("submit");
+    resolveB({ data: { code: 0, data: { ...summary, items: [summary.items[1]] } } });
+    await flushPromises();
+    resolveA({ data: { code: 0, data: { ...summary, items: [summary.items[0]] } } });
+    await flushPromises();
+    expect(wrapper.get("[data-testid='usage-summary-row']").text()).toContain("com.b");
+    expect(wrapper.get("[data-testid='usage-summary-row']").text()).not.toContain("com.a");
+    wrapper.unmount();
+  });
+
+  it("shows summary request errors instead of an empty state", async () => {
+    vi.mocked(getUsageSummary).mockRejectedValueOnce(new Error("usage unavailable"));
+    const wrapper = mount(UsageDurationPanel);
+    await flushPromises();
+    expect(wrapper.get("[data-testid='usage-error']").text()).toContain("usage unavailable");
+    expect(wrapper.find("[data-testid='usage-empty']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("ignores an in-flight summary response after unmount", async () => {
+    let resolve!: (value: unknown) => void;
+    vi.mocked(getUsageSummary).mockReturnValueOnce(new Promise((nextResolve) => { resolve = nextResolve; }) as never);
+    const wrapper = mount(UsageDurationPanel);
+    wrapper.unmount();
+    resolve({ data: { code: 0, data: summary } });
+    await flushPromises();
+    expect(wrapper.find("[data-testid='usage-summary-row']").exists()).toBe(false);
+  });
 });

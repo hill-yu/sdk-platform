@@ -9,7 +9,7 @@
     <span v-if="exportMode === 'h1'" data-testid="h1-export-note" class="export-note">有 H1 按条拆行，无 H1 保留原始 extra</span>
     <PackageMultiSelect v-if="!props.packageName" v-model="packageNames" />
     <span v-else data-testid="export-package">导出包名：{{ props.packageName }}</span>
-    <button data-testid="export-button" class="primary" type="button" :disabled="!effectivePackageNames.length || submitting" @click="startExport">
+    <button data-testid="export-button" class="primary" type="button" :disabled="!effectivePackageNames.length || modeLocked" @click="startExport">
       {{ submitting ? "正在创建任务" : "批量导出 CSV" }}
     </button>
     <span v-if="currentJob">状态：{{ statusText }}</span>
@@ -43,6 +43,8 @@ const submitting = ref(false);
 const exportMode = ref<"raw" | "h1">("raw");
 const error = ref("");
 let timer: ReturnType<typeof setTimeout> | undefined;
+let disposed = false;
+let generation = 0;
 const statusText = computed(() => ({ pending: "等待处理", running: "生成中", success: "已完成", failed: "失败" }[currentJob.value?.status || "pending"]));
 const modeLocked = computed(() => submitting.value || currentJob.value?.status === "pending" || currentJob.value?.status === "running");
 function changeExportMode(event: Event) {
@@ -50,24 +52,56 @@ function changeExportMode(event: Event) {
   exportMode.value = (event.target as HTMLSelectElement).value as "raw" | "h1";
 }
 
-async function pollJob() {
-  if (!currentJob.value) return;
+function clearPollTimer() {
+  if (timer) {
+    clearTimeout(timer);
+    timer = undefined;
+  }
+}
+
+function isCurrent(requestGeneration: number, expectedJobId?: string) {
+  return !disposed
+    && generation === requestGeneration
+    && (expectedJobId === undefined || currentJob.value?.id === expectedJobId);
+}
+
+function schedulePoll(requestGeneration: number, expectedJobId: string) {
+  clearPollTimer();
+  if (!isCurrent(requestGeneration, expectedJobId)) return;
+  if (currentJob.value?.status !== "pending" && currentJob.value?.status !== "running") return;
+  timer = setTimeout(() => {
+    timer = undefined;
+    if (isCurrent(requestGeneration, expectedJobId)) void pollJob(requestGeneration, expectedJobId);
+  }, 2000);
+}
+
+async function pollJob(requestGeneration: number, expectedJobId: string) {
+  if (!isCurrent(requestGeneration, expectedJobId)) return;
   try {
-    const response = await getLogExport(currentJob.value.id);
-    currentJob.value = { ...response.data, export_mode: response.data.export_mode ?? currentJob.value.export_mode };
-    if (response.data.status === "pending" || response.data.status === "running") timer = setTimeout(pollJob, 2000);
-    else if (response.data.status === "failed") error.value = response.data.error_message || "导出失败";
+    const response = await getLogExport(expectedJobId);
+    if (!isCurrent(requestGeneration, expectedJobId) || response.data.id !== expectedJobId) return;
+    const previousMode = currentJob.value?.export_mode;
+    currentJob.value = { ...response.data, export_mode: response.data.export_mode ?? previousMode };
+    if (response.data.status === "failed") error.value = response.data.error_message || "导出失败";
+    else if (response.data.status === "success") error.value = "";
+    schedulePoll(requestGeneration, expectedJobId);
   } catch (caught) {
+    if (!isCurrent(requestGeneration, expectedJobId)) return;
     error.value = caught instanceof Error ? caught.message : "查询导出状态失败";
-    if (currentJob.value?.status === "pending" || currentJob.value?.status === "running") timer = setTimeout(pollJob, 2000);
+    schedulePoll(requestGeneration, expectedJobId);
   }
 }
 async function startExport() {
+  if (disposed || submitting.value || modeLocked.value) return;
+  const requestGeneration = ++generation;
+  clearPollTimer();
+  const selectedPackageNames = [...effectivePackageNames.value];
+  const selectedMode = exportMode.value;
   submitting.value = true; error.value = "";
   try {
     const response = await createLogExport({
-      package_names: effectivePackageNames.value,
-      export_mode: exportMode.value,
+      package_names: selectedPackageNames,
+      export_mode: selectedMode,
       sdk_version: props.sdkVersion || undefined,
       device_id: props.deviceId || undefined,
       log_level: props.logLevel || undefined,
@@ -76,25 +110,37 @@ async function startExport() {
       date_to: props.dateTo || undefined,
       hour_to: props.hourTo ? Number(props.hourTo) : undefined,
     });
-    currentJob.value = { ...response.data, row_count: 0, export_mode: exportMode.value };
-    timer = setTimeout(pollJob, 2000);
-  } catch (caught) { error.value = caught instanceof Error ? caught.message : "创建导出任务失败"; }
-  finally { submitting.value = false; }
-}
-async function download() {
-  if (!currentJob.value) return;
-  try {
-    error.value = "";
-    const response = await downloadLogExport(currentJob.value.id);
-    const url = URL.createObjectURL(response as unknown as Blob);
-    const anchor = document.createElement("a");
-    anchor.href = url; anchor.download = `sdk-logs-${currentJob.value.id}.csv`; anchor.click();
-    URL.revokeObjectURL(url);
+    if (!isCurrent(requestGeneration)) return;
+    currentJob.value = { ...response.data, row_count: 0, export_mode: selectedMode };
+    schedulePoll(requestGeneration, response.data.id);
   } catch (caught) {
-    error.value = caught instanceof Error ? caught.message : "下载导出文件失败";
+    if (isCurrent(requestGeneration)) error.value = caught instanceof Error ? caught.message : "创建导出任务失败";
+  } finally {
+    if (!disposed && generation === requestGeneration) submitting.value = false;
   }
 }
-onBeforeUnmount(() => { if (timer) clearTimeout(timer); });
+async function download() {
+  const job = currentJob.value;
+  if (!job) return;
+  const requestGeneration = generation;
+  const expectedJobId = job.id;
+  try {
+    error.value = "";
+    const response = await downloadLogExport(expectedJobId);
+    if (!isCurrent(requestGeneration, expectedJobId)) return;
+    const url = URL.createObjectURL(response as unknown as Blob);
+    const anchor = document.createElement("a");
+    anchor.href = url; anchor.download = `sdk-logs-${expectedJobId}.csv`; anchor.click();
+    URL.revokeObjectURL(url);
+  } catch (caught) {
+    if (isCurrent(requestGeneration, expectedJobId)) error.value = caught instanceof Error ? caught.message : "下载导出文件失败";
+  }
+}
+onBeforeUnmount(() => {
+  disposed = true;
+  generation += 1;
+  clearPollTimer();
+});
 </script>
 
 <style scoped>

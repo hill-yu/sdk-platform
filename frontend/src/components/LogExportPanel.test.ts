@@ -1,5 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({ createLogExport: vi.fn(), getLogExport: vi.fn(), downloadLogExport: vi.fn() }));
 vi.mock("@/api/logExports", () => api);
@@ -14,6 +14,11 @@ describe("LogExportPanel", () => {
     vi.clearAllMocks();
     api.createLogExport.mockResolvedValue({ data: { id: "job-1", status: "pending" } });
     api.getLogExport.mockResolvedValue({ data: { id: "job-1", status: "success", row_count: 12 } });
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
   });
 
   it("creates with selected packages and current filters then polls to success", async () => {
@@ -84,6 +89,7 @@ describe("LogExportPanel", () => {
     await vi.advanceTimersByTimeAsync(2000);
     await flushPromises();
     expect(wrapper.text()).toContain("5 条");
+    wrapper.unmount();
   });
 
   it("sends the applied hour filters as numbers", async () => {
@@ -126,5 +132,90 @@ describe("LogExportPanel", () => {
     await wrapper.get("[data-testid='export-mode']").trigger("change");
     expect(wrapper.get("[data-testid='export-mode']").attributes("disabled")).toBeDefined();
     wrapper.unmount();
+  });
+
+  it("keeps the created request snapshot when filters change while creation is pending", async () => {
+    let resolveCreate!: (value: unknown) => void;
+    api.createLogExport.mockReturnValueOnce(new Promise((resolve) => { resolveCreate = resolve; }));
+    const wrapper = mount(LogExportPanel, { props: {
+      packageName: "com.a", sdkVersion: "1.0.6", deviceId: "d1", logLevel: "error",
+      dateFrom: "2026-09-01", dateTo: "2026-09-03",
+    }});
+    await wrapper.get("[data-testid='export-mode']").setValue("h1");
+    await wrapper.get("[data-testid='export-button']").trigger("click");
+    await wrapper.setProps({ packageName: "com.b", dateTo: "2026-09-30" });
+    resolveCreate({ data: { id: "job-1", status: "pending" } });
+    await flushPromises();
+
+    expect(api.createLogExport).toHaveBeenCalledWith({
+      package_names: ["com.a"], export_mode: "h1", sdk_version: "1.0.6", device_id: "d1", log_level: "error",
+      date_from: "2026-09-01", date_to: "2026-09-03",
+    });
+    expect(wrapper.get("[data-testid='export-mode']").attributes("disabled")).toBeDefined();
+    wrapper.unmount();
+  });
+
+  it("ignores a poll response for an unexpected job id and does not reschedule it", async () => {
+    api.createLogExport.mockResolvedValueOnce({ data: { id: "job-1", status: "running" } });
+    api.getLogExport.mockResolvedValueOnce({ data: { id: "job-other", status: "success", row_count: 99 } });
+    const wrapper = mount(LogExportPanel, { props: { packageName: "com.a", sdkVersion: "", deviceId: "", logLevel: "", dateFrom: "", dateTo: "" } });
+    await wrapper.get("[data-testid='export-button']").trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(2000);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("生成中");
+    expect(wrapper.text()).not.toContain("99 条");
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(api.getLogExport).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
+  it("does not show an old download error after a newer export starts", async () => {
+    let rejectDownload!: (reason: unknown) => void;
+    api.createLogExport
+      .mockResolvedValueOnce({ data: { id: "job-a", status: "success", row_count: 1 } })
+      .mockResolvedValueOnce({ data: { id: "job-b", status: "pending" } });
+    api.downloadLogExport.mockReturnValueOnce(new Promise((_, reject) => { rejectDownload = reject; }));
+    const wrapper = mount(LogExportPanel, { props: { packageName: "com.a", sdkVersion: "", deviceId: "", logLevel: "", dateFrom: "", dateTo: "" } });
+    await wrapper.get("[data-testid='export-button']").trigger("click");
+    await flushPromises();
+    await wrapper.get("[data-testid='download-button']").trigger("click");
+    await wrapper.get("[data-testid='export-button']").trigger("click");
+    await flushPromises();
+    rejectDownload(new Error("old download failed"));
+    await flushPromises();
+
+    expect(wrapper.find(".export-error").exists()).toBe(false);
+    expect(wrapper.text()).toContain("等待处理");
+    wrapper.unmount();
+  });
+
+  it("does not POST twice when the export button is clicked while create is pending", async () => {
+    let resolveCreate!: (value: unknown) => void;
+    api.createLogExport.mockReturnValueOnce(new Promise((resolve) => { resolveCreate = resolve; }));
+    const wrapper = mount(LogExportPanel, { props: { packageName: "com.a", sdkVersion: "", deviceId: "", logLevel: "", dateFrom: "", dateTo: "" } });
+    await wrapper.get("[data-testid='export-button']").trigger("click");
+    await wrapper.get("[data-testid='export-button']").trigger("click");
+    expect(api.createLogExport).toHaveBeenCalledTimes(1);
+    resolveCreate({ data: { id: "job-1", status: "pending" } });
+    await flushPromises();
+    wrapper.unmount();
+  });
+
+  it("does not reschedule or write an in-flight poll after unmount", async () => {
+    let resolvePoll!: (value: unknown) => void;
+    api.createLogExport.mockResolvedValueOnce({ data: { id: "job-1", status: "running" } });
+    api.getLogExport.mockReturnValueOnce(new Promise((resolve) => { resolvePoll = resolve; }));
+    const wrapper = mount(LogExportPanel, { props: { packageName: "com.a", sdkVersion: "", deviceId: "", logLevel: "", dateFrom: "", dateTo: "" } });
+    await wrapper.get("[data-testid='export-button']").trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(api.getLogExport).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+    resolvePoll({ data: { id: "job-1", status: "running", row_count: 0 } });
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(api.getLogExport).toHaveBeenCalledTimes(1);
   });
 });
