@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -12,6 +13,11 @@ from sqlalchemy.sql import Select
 RANGE_START = datetime(2026, 9, 28, 16, tzinfo=timezone.utc)
 RANGE_END = datetime(2026, 10, 1, 16, tzinfo=timezone.utc)
 NOW = datetime(2026, 9, 30, 1, tzinfo=timezone.utc)
+
+
+def sleeping_decode_for_process_test(snapshot, _job_id):
+    time.sleep(float(snapshot["payload"].get("sleep_seconds", 0)))
+    return [], [], 1, 0.0
 
 
 class Result:
@@ -461,23 +467,27 @@ def test_parse_executor_is_bounded_and_receives_serializable_snapshots(monkeypat
         lease_expires_at=NOW.replace(hour=2),
         concurrency=99,
     )
-    event = SdkEvent(
-        id=20,
-        event_type="log",
-        package_name="com.example.app",
-        server_ts=NOW,
-        device_id="device-1",
-        sdk_version="1.2.3",
-        payload={"extra": "raw"},
-    )
+    events = [
+        SdkEvent(
+            id=20 + index,
+            event_type="log",
+            package_name="com.example.app",
+            server_ts=NOW,
+            device_id="device-1",
+            sdk_version="1.2.3",
+            payload={"extra": "raw"},
+        )
+        for index in range(3)
+    ]
     captured: dict[str, object] = {}
 
     class RecordingExecutor:
         def __init__(self, max_workers: int):
-            captured["max_workers"] = max_workers
+            captured.setdefault("max_workers", []).append(max_workers)
 
         def submit(self, function, *args):
-            captured["snapshot"] = args[0]
+            if args:
+                captured.setdefault("snapshots", []).append(args[0])
             future = Future()
             future.set_result(function(*args))
             return future
@@ -491,16 +501,16 @@ def test_parse_executor_is_bounded_and_receives_serializable_snapshots(monkeypat
 
     result = asyncio.run(
         service.process_parse_job_batch(
-            BatchDb(job, [event]),
+            BatchDb(job, events),
             91,
             worker_id="worker-1",
             now=NOW,
         )
     )
 
-    assert result.scanned == 1
-    assert captured["max_workers"] == 3
-    assert captured["snapshot"] == {
+    assert result.scanned == 3
+    assert captured["max_workers"] == [1, 1, 1]
+    assert captured["snapshots"][0] == {
         "id": 20,
         "event_type": "log",
         "package_name": "com.example.app",
@@ -509,7 +519,7 @@ def test_parse_executor_is_bounded_and_receives_serializable_snapshots(monkeypat
         "server_ts": NOW,
         "payload": {"extra": "raw"},
     }
-    pickle.dumps(captured["snapshot"])
+    pickle.dumps(captured["snapshots"][0])
     assert captured["wait"] is True
     assert captured["cancel_futures"] is True
 
@@ -562,6 +572,77 @@ def test_parse_executor_uses_bounded_waves_so_queue_wait_is_not_a_timeout(monkey
 
     assert result.scanned == 2
     assert job.consecutive_timeout_count == 0
+
+
+def test_real_process_timeout_restarts_lane_and_preserves_other_lane(monkeypatch) -> None:
+    from concurrent.futures import ProcessPoolExecutor
+
+    from app.models.event import SdkEvent
+    from app.models.log_analysis import LogReparseJob
+    from app.services import log_parse_job_service as service
+
+    class TrackingProcessPool(ProcessPoolExecutor):
+        instances = []
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.processes_seen = []
+            self.instances.append(self)
+
+        def shutdown(self, *args, **kwargs):
+            self.processes_seen.extend((getattr(self, "_processes", {}) or {}).values())
+            return super().shutdown(*args, **kwargs)
+
+    monkeypatch.setattr(service, "PARSE_EXECUTOR_FACTORY", TrackingProcessPool)
+    monkeypatch.setattr(service, "PARSE_DECODE_FUNCTION", sleeping_decode_for_process_test)
+    monkeypatch.setattr(service, "PARSE_TIMEOUT_SECONDS", 0.5)
+    job = LogReparseJob(
+        id=91,
+        package_name="com.example.app",
+        range_start=RANGE_START,
+        range_end=RANGE_END,
+        snapshot_end=NOW,
+        status="running",
+        lease_owner="worker-1",
+        lease_expires_at=NOW.replace(hour=2),
+        concurrency=2,
+    )
+    events = [
+        SdkEvent(
+            id=20,
+            event_type="log",
+            package_name="com.example.app",
+            server_ts=NOW,
+            payload={"extra": "H1|i=GC", "sleep_seconds": 1.0},
+        ),
+        SdkEvent(
+            id=21,
+            event_type="log",
+            package_name="com.example.app",
+            server_ts=NOW,
+            payload={"extra": "raw", "sleep_seconds": 0},
+        ),
+    ]
+
+    started = time.perf_counter()
+    result = asyncio.run(
+        service.process_parse_job_batch(
+            BatchDb(job, events),
+            91,
+            worker_id="worker-1",
+            now=NOW,
+        )
+    )
+    elapsed = time.perf_counter() - started
+
+    assert elapsed < 3
+    assert result.scanned == 2
+    assert result.h1_count == 1
+    assert result.failed_h1_count == 1
+    assert job.cursor_event_id == 21
+    assert len(TrackingProcessPool.instances) == 3
+    assert all(pool._max_workers == 1 for pool in TrackingProcessPool.instances)
+    assert all(not process.is_alive() for pool in TrackingProcessPool.instances for process in pool.processes_seen)
 
 
 def test_cancel_requested_between_batches_stops_before_scanning_or_publishing() -> None:

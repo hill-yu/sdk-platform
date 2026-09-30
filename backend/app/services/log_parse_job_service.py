@@ -33,6 +33,7 @@ PARSE_LEASE_SECONDS = 60
 PARSE_TIMEOUT_SECONDS = 1.0
 PARSE_EXECUTOR_FACTORY = ProcessPoolExecutor
 MAX_PARSE_CONCURRENCY = 3
+PARSE_DECODE_FUNCTION = None
 
 
 class ActiveParseJobError(RuntimeError):
@@ -102,12 +103,35 @@ def decode_snapshot_with_elapsed(
     return h1_rows, click_rows, no_h1_count, perf_counter() - started
 
 
+PARSE_DECODE_FUNCTION = decode_snapshot_with_elapsed
+
+
+def parse_worker_ready() -> bool:
+    """Warm a lane process before starting the per-event timeout clock."""
+    return True
+
+
 def shutdown_parse_executor(executor: Any) -> None:
     """Always reap worker processes, including queued work on older runtimes."""
     try:
         executor.shutdown(wait=True, cancel_futures=True)
     except TypeError:
         executor.shutdown(wait=True)
+
+
+def terminate_parse_executor(executor: Any) -> None:
+    """Kill and join a timed-out single-worker pool before it is replaced."""
+    processes = list((getattr(executor, "_processes", {}) or {}).values())
+    for process in processes:
+        if process.is_alive():
+            killer = getattr(process, "kill", process.terminate)
+            killer()
+    for process in processes:
+        process.join(timeout=1)
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=1)
+    shutdown_parse_executor(executor)
 
 
 def _parse_error(exc: BaseException) -> str:
@@ -403,32 +427,51 @@ async def process_parse_job_batch(
     h1_count = 0
     failed_h1_count = 0
     no_h1_count = 0
-    executor = PARSE_EXECUTOR_FACTORY(
-        max_workers=min(max(int(job.concurrency or 1), 1), MAX_PARSE_CONCURRENCY)
-    )
-
-    decoded_results = []
+    lane_count = min(max(int(job.concurrency or 1), 1), MAX_PARSE_CONCURRENCY, len(events))
+    executors = []
     try:
+        executors = [PARSE_EXECUTOR_FACTORY(max_workers=1) for _ in range(lane_count)]
+    except BaseException:
+        for executor in executors:
+            shutdown_parse_executor(executor)
+        raise
+
+    decoded_results: list[Any] = [None] * len(events)
+
+    async def run_lane(lane_index: int) -> None:
+        executor = executors[lane_index]
         loop = asyncio.get_running_loop()
-        max_workers = min(max(int(job.concurrency or 1), 1), MAX_PARSE_CONCURRENCY)
-        for offset in range(0, len(events), max_workers):
-            wave = events[offset : offset + max_workers]
-            decoded_results.extend(
-                await asyncio.gather(
-                    *(
+        try:
+            await loop.run_in_executor(executor, parse_worker_ready)
+            for event_index in range(lane_index, len(events), lane_count):
+                event = events[event_index]
+                try:
+                    decoded_results[event_index] = await asyncio.wait_for(
                         loop.run_in_executor(
                             executor,
-                            decode_snapshot_with_elapsed,
+                            PARSE_DECODE_FUNCTION,
                             event_snapshot(event),
                             job.id,
-                        )
-                        for event in wave
-                    ),
-                    return_exceptions=True,
-                )
-            )
-    finally:
-        shutdown_parse_executor(executor)
+                        ),
+                        timeout=PARSE_TIMEOUT_SECONDS,
+                    )
+                except (asyncio.TimeoutError, TimeoutError) as exc:
+                    decoded_results[event_index] = exc
+                    terminate_parse_executor(executor)
+                    executor = PARSE_EXECUTOR_FACTORY(max_workers=1)
+                    await loop.run_in_executor(executor, parse_worker_ready)
+                except Exception as exc:
+                    decoded_results[event_index] = exc
+        finally:
+            shutdown_parse_executor(executor)
+
+    lane_results = await asyncio.gather(
+        *(run_lane(lane_index) for lane_index in range(lane_count)),
+        return_exceptions=True,
+    )
+    for lane_result in lane_results:
+        if isinstance(lane_result, BaseException):
+            raise lane_result
 
     for event, decoded in zip(events, decoded_results, strict=True):
         if not _lease_valid(job, worker_id, now):
