@@ -6,14 +6,14 @@
 
 ## 当前状态与部署事实
 
-截至本文日期，仓库包含显式解析任务、结构化 H1/点击指标、设备时长查询和 H1 混合导出实现，以及对应迁移和测试。现有生产部署基线仍以 `docs/42-PRODUCTION-SYSTEM-API-BASELINE-20260811.md` 和既有 systemd 配置为准；本次新增的解析 worker、字段和前端构建在完成正式发布前均视为“待部署”，不能据此推断服务器已经运行新版本。
+截至 2026-09-30，仓库包含显式解析任务、结构化 H1/点击指标、设备时长查询和 H1 混合导出实现，以及对应迁移和测试；代码已合并并推送到 `origin/master` 的 `21be0ad0a93e094208e24ed0dfcb74f4f4a71cd0`，并部署到生产独立 release。部署健康检查通过，但受控生产解析验收、H1/时长/导出业务验收和 10,000 条同规格性能门禁仍由独立验收窗口执行，不能因部署成功而提前标记为通过。
 
 当前仓库事实：
 
-- API 进程仍分别使用 SDK API `8100` 和 Admin API `8101` 的部署拓扑。
-- 既有导出 worker 的部署路径是 `/www/wwwroot/sdk-api/backend`，虚拟环境解释器是 `/www/wwwroot/sdk-api/backend/venv/bin/python`。
-- 新解析 worker unit 位于 `deploy/systemd/sdk-log-parse-worker.service`，沿用上述路径和 `www` 用户示例；安装前必须按服务器实际路径、用户和 `.env` 调整。
-- 新 worker 未在本次变更中启动、部署或合并。
+- API 进程仍分别使用 SDK API `8100` 和 Admin API `8101`；生产 release 根目录为 `/www/releases/sdk-platform`。
+- 当前 release 为 `/www/releases/sdk-platform/21be0ad0a93e094208e24ed0dfcb74f4f4a71cd0`，旧 release `/www/releases/sdk-platform/f863887a345294d47021e90afbbdee243578c25d` 保留，可作为回滚指针。
+- `sdk-api.service`、`sdk-admin.service`、`sdk-log-export-worker.service` 和 `sdk-log-parse-worker.service` 均使用 `www-data`；新解析 worker 使用真实 release 路径和该 release 的 `.env`/venv 链接。
+- 宝塔 Nginx 静态 root 已切到当前 release 的 `frontend/dist`；API/Admin/export/parse 四个服务均为 enabled/active。
 
 ## API
 
@@ -123,6 +123,15 @@ python scripts/benchmark_log_parse.py --events 10000 --max-seconds 60
 最后的任务快照复审修复后，独立复测耗时为 `34.538s`；该结果仍来自上述本地临时验收环境，不代表生产同规格门禁。
 
 脚本不会自动部署、重启服务或写入业务包名。性能门禁应同时人工确认 SDK 健康接口和一笔测试日志上报成功。
+
+### 2026-09-30 生产部署记录
+
+- 远端代码：`origin/master=21be0ad0a93e094208e24ed0dfcb74f4f4a71cd0`；本地 `D:\code\SDK` 的用户脏改动未纳入发布提交。
+- 备份目录：`/root/sdk-deploy-backups/20260930_150746_21be0ad`。已保存 PostgreSQL 自定义格式 dump（`103423086` bytes）、旧 release 归档（`1431696` bytes）、旧 frontend dist（`248808` bytes）、systemd 主 unit 与 drop-in、宝塔 Nginx 配置；`pg_restore -l` 检出 `29` 个条目，SHA256 清单含 `3` 行。
+- 数据库：PostgreSQL `16.14`；`migrate_log_export_jobs.sql`、`migrate_usage_durations.sql` 各执行两轮并通过；`migrate_log_analysis.py --apply` 首轮通过，第二轮的无损校验出现事件计数瞬时不一致并回滚该轮，随后只读 dry-run 为 `statements=0`，确认没有待执行 DDL。迁移对象齐全，未删除原始事件或历史时长数据。
+- 服务与网络：直连 `8100/8101` 为 `200/200`；带 `Host/SNI` 的本机 HTTPS 为 `200/200`；公网 API/Admin health 为 `200/200`，公网静态首页为 `200`；parse worker `active`、`NRestarts=0`、`ExecMainStatus=0`。
+- 失败经验已固化：`pg_dump` 由 `postgres` 执行时改用 root 接收重定向；tar 前缀与 `--strip-components` 只选一套并先预检；systemd `.env` 不用 shell `source`，改为键值解析；systemd drop-in 必须和主 unit 一起备份并核对最终生效路径；宝塔 Nginx 使用 `/www/server/nginx/sbin/nginx -s reload`，不能依赖 inactive 的 systemd unit。
+- 尚未完成：独立受控包名的一小时解析/H1 指标原子发布、设备时长边界、H1 混合导出清理，以及生产 10,000 条/60 秒性能门禁。部署完成不等于生产功能验收通过。
 
 ## 迁移、发布、验收和回滚
 

@@ -959,15 +959,15 @@ git diff --check origin/master...HEAD
 
 ## 17. 生产部署检查点（实现验收通过后执行）
 
-本节截至 2026-09-30 均未执行；本次工作未部署、未启动生产 worker、未合并发布。生产同规格性能、API 健康、SDK 上报和真实发布回滚演练仍为待办。
+本节截至 2026-09-30 已完成代码合并、生产发布和基础健康检查；受控业务验收、SDK 上报、回滚演练和生产同规格性能仍为待办。部署不等于功能验收通过。
 
-- [ ] 读取并总结此前部署失败经验；确认采用 Paramiko 密码连接时关闭 agent/key 查找。
-- [ ] 先决定是否包含前端；本功能包含前端，必须构建并备份/替换前端 dist。
-- [ ] 备份 PostgreSQL、当前 release、前端 dist、systemd 和宝塔 Nginx 配置，记录文件大小和路径。
-- [ ] 上传新的 release，不覆盖旧 release；执行迁移 dry-run/对象检查后再 apply。
-- [ ] 安装并 daemon-reload `sdk-log-parse-worker.service`，启动 API、Admin 和 worker。
-- [ ] 按最多 30 秒轮询 8100/8101 和 worker 状态，不因服务启动瞬间未就绪误回滚。
-- [ ] 验证内部端口、带 Host/SNI 的本机 Nginx HTTPS 和公网边缘；公网临时 403 必须与内部/旧基线对比，不单独作为回滚依据。
+- [x] 读取并总结此前部署失败经验；Paramiko 连接关闭 agent/key 查找，并设置连接、认证和 banner 超时。
+- [x] 本功能包含前端；已构建、备份并替换生产 frontend dist。
+- [x] 备份 PostgreSQL、当前 release、前端 dist、systemd 和宝塔 Nginx 配置；记录路径和大小见 `docs/50-LOG-METRICS-DEVICE-DURATION-H1-EXPORT-IMPLEMENTATION-20260930.md`。
+- [x] 上传新的独立 release，不覆盖旧 release；完成对象检查、SQL 双轮迁移、Python 迁移和只读 dry-run。
+- [x] 安装并 daemon-reload `sdk-log-parse-worker.service`，启动 API、Admin、export worker 和 parse worker。
+- [x] 按最多 30 秒轮询 8100/8101 和 worker 状态；第 4 次轮询健康通过。
+- [x] 验证内部端口、带 Host/SNI 的本机 Nginx HTTPS 和公网边缘；本次 API/Admin health 与静态首页均为 `200`。
 - [ ] 使用一个包名、一小时范围创建小任务，核对 H1 数、config_id、点击指标和任务原子发布。
 - [ ] 验证设备时长最新值、平均值和四档边界。
 - [ ] 验证 H1 导出既拆出 H1，也保留无 H1 原始 extra。
