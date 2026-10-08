@@ -144,6 +144,7 @@ snapshot_end_utc
 | 无任务 | 提示尚未对该 exact scope 执行显式解析，不展示 formal metrics |
 | `pending/running` | 展示任务范围、UTC/北京时间快照、进度和等待状态，不把旧正式行显示为此次成功 |
 | `failed/cancelled` | 展示失败/取消原因和失败计数，不把旧正式结果标记为此次成功 |
+| `success` 且 `total_count = 0` | `no_source`，明确提示范围内没有源事件 |
 | `success` 且有成功 H1 | 继续区分 `true_zero` 与 `success_nonzero`，并显示任务 snapshot 信息 |
 | `success` 且成功 H1 为 0、失败 H1 大于 0 | `all_failed_h1`，同时展示 `no_h1_count` |
 | `success` 且成功 H1 为 0、失败 H1 为 0、有原始事件 | `no_h1` |
