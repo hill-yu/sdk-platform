@@ -359,11 +359,14 @@ psql -U sdk_admin sdk_platform < /backup/sdk_platform_20260630.sql
 # 设置定时备份（crontab）
 0 2 * * * pg_dump -U sdk_admin sdk_platform > /backup/sdk_platform_$(date +\%Y\%m\%d).sql
 
-# 清理过期分区（保留 90 天数据）
+# LEGACY：清理过期分区（保留 90 天数据）；本次分区缺口恢复不允许调用
 psql -U sdk_admin -d sdk_platform -c "SELECT cleanup_old_partitions(90);"
 
-# 创建下月分区（每月 25 号执行）
+# LEGACY：旧函数只面向 NOW()+2 months，不能修复已缺失月份；不要用于生产补洞
 psql -U sdk_admin -d sdk_platform -c "SELECT create_next_partition();"
+
+# 新的受控入口见 docs/51-SDK-EVENT-PARTITION-RECOVERY-20261008.md；
+# 需先完成独立维护目录安装和代码审查，再启用 sdk-event-partition-maintenance.timer。
 ```
 
 ---

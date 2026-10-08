@@ -1,0 +1,18 @@
+[Unit]
+Description=SDK event partition maintenance
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/sdk-platform-maintenance/current/scripts
+EnvironmentFile=/www/releases/sdk-platform/current/backend/.env
+Environment=PYTHONPATH=/www/releases/sdk-platform/current/backend
+ExecStart=/www/releases/sdk-platform/current/backend/venv/bin/python /opt/sdk-platform-maintenance/current/scripts/ensure_sdk_event_partitions.py --apply --confirm ENSURE_SDK_EVENT_PARTITIONS
+TimeoutStartSec=30s
+TimeoutStopSec=10s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true

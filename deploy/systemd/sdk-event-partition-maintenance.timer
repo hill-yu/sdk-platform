@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily SDK event partition maintenance
+
+[Timer]
+OnCalendar=*-*-* 00:15:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+Unit=sdk-event-partition-maintenance.service
+
+[Install]
+WantedBy=timers.target
