@@ -1,7 +1,16 @@
 <template>
   <section class="metrics-panel" data-testid="metrics-panel">
     <div class="panel-header">
-      <div><h3>结构化指标</h3><p class="scope-note">{{ scope.package_name }} · {{ scope.date_from }} {{ scope.hour_from }}:00 至 {{ scope.date_to }} {{ scope.hour_to }}:00（北京时间）</p></div>
+      <div>
+        <h3>结构化指标</h3>
+        <p class="scope-note">{{ scope.package_name }} · {{ scope.date_from }} {{ scope.hour_from }}:00 至 {{ scope.date_to }} {{ scope.hour_to }}:00（北京时间）</p>
+        <div v-if="scope.package_name" class="package-profile" data-testid="formal-package-profile">
+          <span>别名</span><PackageProfileCell :package-name="scope.package_name" field="alias" :profile="profile ?? undefined" @saved="emitProfileUpdate" @save-error="emitProfileError" />
+          <span>公司</span><PackageProfileCell :package-name="scope.package_name" field="company" :profile="profile ?? undefined" @saved="emitProfileUpdate" @save-error="emitProfileError" />
+          <span>账户</span><PackageProfileCell :package-name="scope.package_name" field="account" :profile="profile ?? undefined" @saved="emitProfileUpdate" @save-error="emitProfileError" />
+        </div>
+      </div>
+      <button data-testid="configure-columns" class="ghost" type="button" @click="emit('configure-columns')">配置指标</button>
       <span v-if="loading" class="count">加载中…</span>
     </div>
 
@@ -12,12 +21,12 @@
     <template v-else-if="overview">
       <p v-if="jobStatusMessage" data-testid="metrics-status" class="mismatch-alert">{{ jobStatusMessage }}</p>
       <div class="metric-cards">
-        <article><span>声明点击数</span><strong data-testid="declaration-count">{{ overview.declaration_count }}</strong></article>
-        <article><span>计划点击数</span><strong data-testid="planned-click-count">{{ overview.planned_click_count }}</strong></article>
-        <article><span>实际点击数</span><strong data-testid="actual-click-count">{{ overview.actual_click_count }}</strong></article>
-        <article><span>响应成功数</span><strong data-testid="response-success-count">{{ overview.response_success_count }}</strong></article>
-        <article><span>插屏关闭率</span><strong data-testid="interstitial-close-rate">{{ formatRate(overview.interstitial_close_rate) }}</strong></article>
-        <article><span>非关闭点击率</span><strong>{{ formatRate(overview.interstitial_non_close_click_rate) }}</strong></article>
+        <article v-if="showColumn('expected_click_count')"><span>声明点击数</span><strong data-testid="declaration-count">{{ overview.declaration_count }}</strong></article>
+        <article v-if="showColumn('expected_click_count')"><span>计划点击数</span><strong data-testid="planned-click-count">{{ overview.planned_click_count }}</strong></article>
+        <article v-if="showColumn('actual_click_count')"><span>实际点击数</span><strong data-testid="actual-click-count">{{ overview.actual_click_count }}</strong></article>
+        <article v-if="showColumn('actual_click_count')"><span>响应成功数</span><strong data-testid="response-success-count">{{ overview.response_success_count }}</strong></article>
+        <article v-if="showColumn('interstitial_presentation_count')"><span>插屏关闭率</span><strong data-testid="interstitial-close-rate">{{ formatRate(overview.interstitial_close_rate) }}</strong></article>
+        <article v-if="showColumn('interstitial_click_count')"><span>非关闭点击率</span><strong>{{ formatRate(overview.interstitial_non_close_click_rate) }}</strong></article>
       </div>
       <p v-if="overview.plan_mismatch_count > 0" data-testid="plan-mismatch-alert" class="mismatch-alert">计划与实际点击数存在 {{ overview.plan_mismatch_count }} 条不一致，请查看失败明细。</p>
 
@@ -63,13 +72,20 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { getMetricConfigs, getMetricOverview, getMetricTargets } from "@/api/logMetrics";
 import type { ConfigMetricItem, LogMetricScope, MetricOverview, ParseJob, TargetMetric } from "@/api/logMetrics";
+import type { PackageProfile } from "@/api/logAnalysis";
+import PackageProfileCell, { type PackageProfileField } from "@/components/PackageProfileCell.vue";
 import { analysisScopeUtcRange } from "@/utils/logAnalysisScope";
 
 type MetricViewKind = "web_element" | "ad_area";
 type VisibleTarget = Omit<TargetMetric, "target_kind">;
 
-const props = defineProps<{ scope: LogMetricScope; job?: ParseJob | null }>();
-const emit = defineEmits<{ "failure-select": [value: { target_kind: MetricViewKind; config_id?: number }] }>();
+const props = withDefaults(defineProps<{ scope: LogMetricScope; job?: ParseJob | null; profile?: PackageProfile | null; visibleColumns?: string[] }>(), { job: null, profile: null, visibleColumns: () => [] });
+const emit = defineEmits<{
+  "failure-select": [value: { target_kind: MetricViewKind; config_id?: number }];
+  "configure-columns": [];
+  "profile-update": [value: { field: PackageProfileField; value: string; profile: Partial<PackageProfile> }];
+  "profile-error": [message: string];
+}>();
 
 const overview = ref<MetricOverview | null>(null);
 const configs = ref<ConfigMetricItem[]>([]);
@@ -180,6 +196,9 @@ async function selectTarget(kind: MetricViewKind) {
 function selectConfig(configId: number | null) { selectedConfigId.value = configId; }
 function emitFailureSelection() { emit("failure-select", selectedConfigId.value === null ? { target_kind: targetKind.value } : { target_kind: targetKind.value, config_id: selectedConfigId.value }); }
 function formatRate(value: number | null) { return value === null ? "-" : `${Math.round(value * 100)}%`; }
+function showColumn(column: string) { return !props.visibleColumns.length || props.visibleColumns.includes(column); }
+function emitProfileUpdate(payload: { field: PackageProfileField; value: string; profile: Partial<PackageProfile> }) { emit("profile-update", payload); }
+function emitProfileError(message: string) { emit("profile-error", message); }
 
 watch(() => [props.scope, props.job], () => { void load(); }, { deep: true });
 onMounted(() => { void load(); });
@@ -191,6 +210,7 @@ onBeforeUnmount(() => { disposed = true; ++scopeRequestId; ++targetRequestId; })
 .panel-header, .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .panel-header h3, .section-heading h4 { margin: 0; }
 .scope-note { margin: 4px 0 0; color: var(--text-secondary); font-size: 12px; }
+.package-profile { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; color: var(--text-secondary); font-size: 12px; }
 .metric-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
 .metric-cards article { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--border-soft); border-radius: 10px; background: rgba(8, 13, 13, .35); }
 .metric-cards span { color: var(--text-secondary); font-size: 12px; }

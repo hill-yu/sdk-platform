@@ -95,7 +95,7 @@ async def get_usage_duration_summary(
 @router.get("/usage-durations/devices")
 async def get_usage_duration_devices(
     package_name: str = Query(..., min_length=1, max_length=255),
-    device_model: str = Query(..., min_length=1, max_length=100),
+    device_model: str | None = Query(None, min_length=1, max_length=100),
     date_from: date | None = Query(None),
     hour_from: int | None = Query(None, ge=0, le=23),
     date_to: date | None = Query(None),

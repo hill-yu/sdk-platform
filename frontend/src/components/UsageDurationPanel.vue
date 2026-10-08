@@ -21,23 +21,23 @@
     <div v-else-if="summary" class="table-scroll usage-table-scroll">
       <table class="table usage-summary-table">
         <caption class="sr-only">使用时长汇总</caption>
-        <thead><tr><th>包名</th><th>机型</th><th>设备数</th><th>总时长</th><th>平均时长</th><th>≤300 秒</th><th>301–600 秒</th><th>601–899 秒</th><th>≥900 秒</th><th>最后上报</th><th>明细</th></tr></thead>
+        <thead><tr><th>包名</th><th>设备数</th><th>总时长</th><th>平均时长</th><th>≤300 秒</th><th>301–600 秒</th><th>601–899 秒</th><th>≥900 秒</th><th>最后上报</th><th>明细</th></tr></thead>
         <tbody>
           <template v-for="(item, index) in summary.items" :key="`${item.package_name}-${item.device_model}`">
             <tr data-testid="usage-summary-row">
-              <td>{{ item.package_name }}</td><td>{{ item.device_model }}</td><td>{{ item.device_count }}</td>
+              <td>{{ item.package_name }}</td><td>{{ item.device_count }}</td>
               <td>{{ formatDuration(item.total_duration_s) }}</td><td>{{ formatDuration(item.average_duration_s) }}</td>
               <td v-for="bucket in item.buckets" :key="bucket.key" :data-testid="`usage-bucket-${bucket.key}`">{{ bucket.count }}（{{ formatShare(bucket.share) }}）</td>
               <td>{{ item.last_report_at ?? "-" }}</td>
               <td><button :data-testid="`usage-expand-${index}`" class="ghost" type="button" :aria-expanded="expandedKey === rowKey(item)" @click="toggleRow(item)">{{ expandedKey === rowKey(item) ? "收起" : "展开" }}</button></td>
             </tr>
-            <tr v-if="expandedKey === rowKey(item)" data-testid="usage-detail-container"><td colspan="11">
+            <tr v-if="expandedKey === rowKey(item)" data-testid="usage-detail-container"><td colspan="10">
               <p v-if="detailCache[rowKey(item)]?.loading" class="muted">设备明细加载中…</p>
               <p v-else-if="detailCache[rowKey(item)]?.error" class="error">{{ detailCache[rowKey(item)]?.error }}</p>
               <p v-else-if="!detailCache[rowKey(item)]?.items.length" class="empty-state">暂无设备明细。</p>
               <div v-else class="table-scroll usage-detail-scroll">
-                <table class="table"><caption class="sr-only">{{ item.package_name }} {{ item.device_model }} 设备明细</caption><thead><tr><th>设备 ID</th><th>最新时长</th><th>SDK 版本</th><th>应用版本 ver</th><th>最后上报</th></tr></thead>
-                  <tbody><tr v-for="device in detailCache[rowKey(item)]?.items" :key="device.device_id" data-testid="usage-device-row"><td>{{ device.device_id }}</td><td>{{ formatDuration(device.duration_s) }}</td><td>{{ device.sdk_version || "-" }}</td><td>{{ device.app_version || "-" }}</td><td>{{ device.last_report_at ?? "-" }}</td></tr></tbody>
+                <table class="table"><caption class="sr-only">{{ item.package_name }} 设备明细</caption><thead><tr><th>设备 ID</th><th>机型</th><th>最新时长</th><th>SDK 版本</th><th>应用版本 ver</th><th>最后上报</th></tr></thead>
+                  <tbody><tr v-for="device in detailCache[rowKey(item)]?.items" :key="device.device_id" data-testid="usage-device-row"><td>{{ device.device_id }}</td><td>{{ device.device_model || "-" }}</td><td>{{ formatDuration(device.duration_s) }}</td><td>{{ device.sdk_version || "-" }}</td><td>{{ device.app_version || "-" }}</td><td>{{ device.last_report_at ?? "-" }}</td></tr></tbody>
                 </table>
               </div>
             </td></tr>
@@ -77,7 +77,7 @@ function unwrap<T>(response: unknown): T {
 }
 
 function scopeKey(scope: UsageScope) { return `${scope.package_name ?? ""}|${scope.date_from}|${scope.hour_from}|${scope.date_to}|${scope.hour_to}`; }
-function rowKey(item: UsageSummaryItem) { return `${scopeKey(appliedScope.value)}|${item.package_name}|${item.device_model}`; }
+function rowKey(item: UsageSummaryItem) { return `${scopeKey(appliedScope.value)}|${item.package_name}`; }
 function validate(scope: UsageScope) {
   if (scope.date_to < scope.date_from) return "结束日期不能早于开始日期。";
   if (scope.date_to === scope.date_from && scope.hour_to < scope.hour_from) return "结束小时不能早于开始小时。";
@@ -115,7 +115,7 @@ function refresh() { if (!props.disabled) void load({ ...appliedScope.value }); 
 
 async function loadDetails(item: UsageSummaryItem, key: string) {
   const requestId = ++detailRequestId;
-  const scope = { ...appliedScope.value, package_name: item.package_name, device_model: item.device_model, page: 1, page_size: 20 };
+  const scope = { ...appliedScope.value, package_name: item.package_name, page: 1, page_size: 20 };
   detailCache.value[key] = { loading: true, error: "", items: [] };
   try {
     const response = await getUsageDevices(scope);

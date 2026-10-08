@@ -8,11 +8,8 @@ const {
   getEvents,
   getEventFilterOptions,
   getLogAnalysisColumns,
-  getLogAnalysisSummary,
-  getLogAnalysisDetails,
-  getLogAnalysisDetail,
+  getPackageProfile,
   putLogAnalysisColumns,
-  putPackageProfile,
   getMetricOverview,
   getMetricConfigs,
   getMetricTargets,
@@ -30,11 +27,8 @@ const {
   getEvents: vi.fn(),
   getEventFilterOptions: vi.fn(),
   getLogAnalysisColumns: vi.fn(),
-  getLogAnalysisSummary: vi.fn(),
-  getLogAnalysisDetails: vi.fn(),
-  getLogAnalysisDetail: vi.fn(),
+  getPackageProfile: vi.fn(),
   putLogAnalysisColumns: vi.fn(),
-  putPackageProfile: vi.fn(),
   getMetricOverview: vi.fn(),
   getMetricConfigs: vi.fn(),
   getMetricTargets: vi.fn(),
@@ -55,11 +49,8 @@ vi.mock("@/api/dashboard", async () => {
 });
 vi.mock("@/api/logAnalysis", () => ({
   getLogAnalysisColumns,
-  getLogAnalysisSummary,
-  getLogAnalysisDetails,
-  getLogAnalysisDetail,
+  getPackageProfile,
   putLogAnalysisColumns,
-  putPackageProfile,
 }));
 vi.mock("@/api/logMetrics", () => ({
   getMetricOverview,
@@ -114,21 +105,12 @@ function respondFilterOptions() {
 function respondAnalysis() {
   getLogAnalysisColumns.mockResolvedValue({
     data: {
-      available_columns: ["date", "package_name", "alias", "user_count"],
-      default_columns: ["date", "package_name", "alias", "user_count"],
-      columns: ["date", "package_name", "alias", "user_count"],
+      available_columns: ["date", "package_name", "alias", "user_count", "expected_click_count", "actual_click_count", "interstitial_presentation_count", "interstitial_click_count"],
+      default_columns: ["date", "package_name", "alias", "user_count", "expected_click_count", "actual_click_count", "interstitial_presentation_count", "interstitial_click_count"],
+      columns: ["date", "package_name", "alias", "user_count", "expected_click_count", "actual_click_count", "interstitial_presentation_count", "interstitial_click_count"],
     },
   });
-  getLogAnalysisSummary.mockResolvedValue({
-    data: {
-      total: 1,
-      page: 1,
-      page_size: 20,
-      items: [{ date: "2026-08-13", package_name: "com.example.app", alias: "示例", company: "公司", account: "account-1", primary_url: null, url_count: 0, user_count: 2, flow_count: 1, expected_click_count: 2, actual_click_count: 1, ad_click_count: 0, interstitial_presentation_count: 0, interstitial_click_count: 0, average_duration_ms: null, duration_sample_count: 0, success_rate: null, success_sample_count: 0, failed_count: 0, unsupported_count: 0, parse_failure_count: 0 }],
-    },
-  });
-  getLogAnalysisDetails.mockResolvedValue({ data: { total: 0, page: 1, page_size: 20, items: [] } });
-  getLogAnalysisDetail.mockResolvedValue({ data: {} });
+  getPackageProfile.mockResolvedValue({ data: { code: 0, data: { package_name: "com.example.app", alias: "示例", company: "公司", account: "account-1" } } });
 }
 
 function respondMetrics() {
@@ -191,72 +173,44 @@ describe("LogViewer", () => {
 
   afterEach(() => vi.restoreAllMocks());
 
-  it("defaults to analysis view and starts summary and columns requests together", async () => {
-    const summary = deferred<{ data: unknown }>();
-    const columns = deferred<{ data: unknown }>();
-    getLogAnalysisSummary.mockReturnValueOnce(summary.promise);
-    getLogAnalysisColumns.mockReturnValueOnce(columns.promise);
+  it("defaults to the formal analysis view without legacy summary or detail requests", async () => {
     const wrapper = await mountAnalysisViewer();
 
     expect(wrapper.get("[data-testid='analysis-view-tab']").classes()).toContain("active");
-    expect(wrapper.findAll("[data-testid='analysis-view']")).toHaveLength(1);
-    expect(getLogAnalysisSummary).toHaveBeenCalledTimes(1);
+    expect(wrapper.findAll("[data-testid='metrics-panel']")).toHaveLength(1);
     expect(getLogAnalysisColumns).toHaveBeenCalledTimes(1);
-    expect(wrapper.findAll("[data-testid='log-list']")).toHaveLength(0);
-
-    columns.resolve({ data: { available_columns: ["date", "package_name"], default_columns: ["date", "package_name"], columns: ["package_name", "date"] } });
-    summary.resolve({ data: { total: 0, page: 1, page_size: 20, items: [] } });
-    await flushPromises();
-    expect(wrapper.findAll(".summary-table th").map((node) => node.text())).toEqual(["包名", "日期"]);
+    expect(getPackageProfile).not.toHaveBeenCalled();
+    expect(wrapper.findAll(".summary-table")).toHaveLength(0);
   });
 
-  it("renders dynamic columns, null metrics, samples, and percentage values", async () => {
-    getLogAnalysisColumns.mockResolvedValueOnce({ data: { available_columns: ["date", "package_name", "url", "average_duration_ms", "success_rate"], default_columns: ["date", "package_name"], columns: ["date", "package_name", "url", "average_duration_ms", "success_rate"] } });
-    getLogAnalysisSummary.mockResolvedValueOnce({ data: { total: 1, page: 1, page_size: 20, items: [{ date: "2026-08-13", package_name: "com.example.app", alias: "", company: "", account: "", primary_url: "https://example.test", url_count: 1, user_count: 0, flow_count: 0, expected_click_count: 0, actual_click_count: 0, ad_click_count: 0, interstitial_presentation_count: 0, interstitial_click_count: 0, average_duration_ms: null, duration_sample_count: 0, success_rate: 0.5, success_sample_count: 2, failed_count: 0, unsupported_count: 0, parse_failure_count: 0 }] } });
-    const wrapper = await mountAnalysisViewer();
-
-    expect(wrapper.get("[data-testid='summary-row']").text()).toContain("https://example.test");
-    expect(wrapper.get("[data-testid='summary-row']").text()).toContain("-（0 个样本）");
-    expect(wrapper.get("[data-testid='summary-row']").text()).toContain("50%（2 个样本）");
-  });
-
-  it("loads details by date and package, then loads the full record by its composite key", async () => {
-    const decoded = { event_id: 7, event_server_ts: "2026-08-13T10:00:00Z", record_index: 1, package_name: "com.example.app", device_id: "device-1", status: "success", decoder_version: "1.0.0", decoded_timestamp: null, url: null, config_id: null, window: null, expected_click_count: 2, actual_click_count: 1, ad_click_count: 0, interstitial_presentation_count: 0, interstitial_click_count: 0, interstitial_close_count: 0, duration_ms: 12, final_reason: "done", is_success: true, decoded_payload: { ok: true }, parse_error: null, parsed_at: null, extra: "original-extra" };
-    getLogAnalysisDetails.mockResolvedValueOnce({ data: { total: 1, page: 1, page_size: 20, items: [decoded] } });
-    getLogAnalysisDetail.mockResolvedValueOnce({ data: decoded });
-    const wrapper = await mountAnalysisViewer();
-
-    await wrapper.get("[data-testid='summary-row']").trigger("click");
-    await flushPromises();
-    expect(getLogAnalysisDetails).toHaveBeenCalledWith(expect.objectContaining({ date: "2026-08-13", package_name: "com.example.app", page: 1, page_size: 20 }));
-    await wrapper.get("[data-testid='analysis-detail-row']").trigger("click");
-    await flushPromises();
-    expect(getLogAnalysisDetail).toHaveBeenCalledWith(7, { event_server_ts: "2026-08-13T10:00:00Z", record_index: 1 });
-    expect(wrapper.get("[data-testid='raw-extra']").text()).toBe("original-extra");
-  });
-
-  it("keeps the previous summary and synchronizes a saved profile across same-package rows", async () => {
-    getLogAnalysisSummary.mockResolvedValueOnce({ data: { total: 2, page: 1, page_size: 20, items: [{ date: "2026-08-12", package_name: "com.example.app", alias: "", company: "", account: "", primary_url: null, url_count: 0, user_count: 1, flow_count: 0, expected_click_count: 0, actual_click_count: 0, ad_click_count: 0, interstitial_presentation_count: 0, interstitial_click_count: 0, average_duration_ms: null, duration_sample_count: 0, success_rate: null, success_sample_count: 0, failed_count: 0, unsupported_count: 0, parse_failure_count: 0 }, { date: "2026-08-13", package_name: "com.example.app", alias: "", company: "", account: "", primary_url: null, url_count: 0, user_count: 1, flow_count: 0, expected_click_count: 0, actual_click_count: 0, ad_click_count: 0, interstitial_presentation_count: 0, interstitial_click_count: 0, average_duration_ms: null, duration_sample_count: 0, success_rate: null, success_sample_count: 0, failed_count: 0, unsupported_count: 0, parse_failure_count: 0 }] } });
-    putPackageProfile.mockResolvedValueOnce({ data: { package_name: "com.example.app", alias: "Shared", company: "", account: "" } });
-    const wrapper = await mountAnalysisViewer();
-    const cells = wrapper.findAll("[data-testid='profile-edit']");
-    await cells[0].trigger("click");
-    await wrapper.get("[data-testid='profile-input']").setValue("Shared");
-    await wrapper.get("[data-testid='profile-save']").trigger("click");
-    await flushPromises();
-
-    expect(wrapper.findAll("[data-testid='profile-value']").map((node) => node.text())).toEqual(["Shared", "Shared"]);
-  });
-
-  it("keeps summary rows when a later analysis query fails", async () => {
+  it("loads the formal package profile with the selected analysis scope", async () => {
     const wrapper = await mountAnalysisViewer();
     await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
-    getLogAnalysisSummary.mockRejectedValueOnce(new Error("summary unavailable"));
-    await wrapper.get("[data-testid='filter-refresh']").trigger("click");
+    await wrapper.get("[data-testid='filter-query-existing']").trigger("click");
     await flushPromises();
 
-    expect(wrapper.get("[data-testid='summary-row']").text()).toContain("com.example.app");
-    expect(wrapper.get("[data-testid='error-feedback']").text()).toContain("summary unavailable");
+    expect(getPackageProfile).toHaveBeenLastCalledWith("com.example.app");
+    expect(wrapper.get("[data-testid='formal-package-profile']").text()).toContain("示例");
+    expect(wrapper.get("[data-testid='formal-package-profile']").text()).toContain("公司");
+    expect(wrapper.get("[data-testid='formal-package-profile']").text()).toContain("account-1");
+  });
+
+  it("ignores a stale package profile response after the package scope changes", async () => {
+    const profileA = deferred<unknown>();
+    const profileB = deferred<unknown>();
+    getPackageProfile.mockReset();
+    getPackageProfile.mockReturnValueOnce(profileA.promise as never).mockReturnValueOnce(profileB.promise as never);
+    const wrapper = await mountAnalysisViewer();
+    await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
+    await wrapper.get("[data-testid='filter-query-existing']").trigger("click");
+    await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.next");
+    await wrapper.get("[data-testid='filter-query-existing']").trigger("click");
+    profileA.resolve({ data: { code: 0, data: { package_name: "com.example.app", alias: "旧", company: "旧公司", account: "旧账号" } } });
+    profileB.resolve({ data: { code: 0, data: { package_name: "com.example.next", alias: "新", company: "新公司", account: "新账号" } } });
+    await flushPromises();
+
+    expect(wrapper.get("[data-testid='formal-package-profile']").text()).toContain("新");
+    expect(wrapper.get("[data-testid='formal-package-profile']").text()).not.toContain("旧公司");
   });
 
   it("connects the usage tab to the usage duration panel", async () => {
@@ -280,12 +234,12 @@ describe("LogViewer", () => {
     await wrapper.get("[data-testid='filter-refresh']").trigger("click");
     await flushPromises();
 
-    expect(getLogAnalysisSummary).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.next" }));
+    expect(getPackageProfile).toHaveBeenLastCalledWith("com.example.next");
     expect(getLatestParseJob).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.next" }));
 
     await wrapper.get("[data-testid='filter-query-existing']").trigger("click");
     await flushPromises();
-    expect(getLogAnalysisSummary).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.next" }));
+    expect(getPackageProfile).toHaveBeenLastCalledWith("com.example.next");
     expect(getMetricOverview).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.next" }));
     expect(getMetricConfigs).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.next" }));
     expect(getMetricTargets).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.next" }));
@@ -383,7 +337,7 @@ describe("LogViewer", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("composes scoped metrics and failure details without clearing the legacy summary", async () => {
+  it("composes scoped metrics and failure details in the formal view", async () => {
     const wrapper = await mountAnalysisViewer();
     await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
     await wrapper.get("[data-testid='filter-query-existing']").trigger("click");
@@ -425,7 +379,7 @@ describe("LogViewer", () => {
     expect(putLogAnalysisColumns).toHaveBeenCalledWith({ columns: ["date", "package_name", "alias", "user_count"] });
     await flushPromises();
     expect(wrapper.findAll("[data-testid='column-settings-modal']")).toHaveLength(0);
-    expect(wrapper.findAll(".summary-table th").map((node) => node.text())).toEqual(["日期", "包名", "用户数"]);
+    expect(wrapper.findAll(".summary-table")).toHaveLength(0);
   });
 
   it("loads only log events and sends all selected filters", async () => {

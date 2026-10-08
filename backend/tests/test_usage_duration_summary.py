@@ -67,7 +67,7 @@ def test_latest_query_does_not_filter_device_model_before_partitioning():
     assert "WHERE sdk_usage_durations.device_model" not in sql
 
 
-def test_usage_devices_query_filters_model_after_latest_partition():
+def test_usage_devices_query_filters_model_after_latest_partition_when_requested():
     from app.services.usage_duration_service import get_usage_devices
 
     db = Db([Result(scalar=0), Result(rows=[])])
@@ -88,6 +88,16 @@ def test_usage_devices_query_filters_model_after_latest_partition():
     assert sql.index("latest_rank") < sql.rindex("device_model")
 
 
+def test_usage_devices_query_keeps_all_models_when_model_is_omitted():
+    from app.services.usage_duration_service import get_usage_devices
+
+    db = Db([Result(scalar=0), Result(rows=[])])
+    asyncio.run(get_usage_devices(db, package_name="com.example.app", device_model=None, range_start=START, range_end=END, page=1, page_size=20))
+    sql = str(db.statements[1].compile(dialect=postgresql.dialect()))
+    assert "latest_rank =" in sql
+    assert "device_model =" not in sql
+
+
 def test_usage_summary_uses_only_latest_device_and_computes_four_buckets():
     from app.services.usage_duration_service import get_usage_summary
 
@@ -96,7 +106,7 @@ def test_usage_summary_uses_only_latest_device_and_computes_four_buckets():
             Result(scalar=2),
             Result(rows=[SimpleNamespace(
                 package_name="com.example.app",
-                device_model="iPhone13,2",
+                device_model=None,
                 device_count=2,
                 total_duration_s=540,
                 average_duration_s=270,
@@ -179,7 +189,8 @@ def test_usage_summary_and_devices_have_stable_tie_breakers():
     ))
     summary_sql = str(summary_db.statements[1].compile(dialect=postgresql.dialect()))
     assert "package_name" in summary_sql
-    assert "device_model" in summary_sql
+    assert "GROUP BY anon_1.package_name" in summary_sql
+    assert "GROUP BY anon_1.package_name, anon_1.device_model" not in summary_sql
 
     devices_db = Db([Result(scalar=0), Result(rows=[])])
     asyncio.run(get_usage_devices(

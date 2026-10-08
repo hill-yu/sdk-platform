@@ -56,7 +56,7 @@ describe("UsageDurationPanel", () => {
     await wrapper.get("[data-testid='usage-expand-0']").trigger("click");
     await flushPromises();
 
-    expect(getUsageDevices).toHaveBeenCalledWith({ ...summaryScope, package_name: "com.a", device_model: "Pixel", page: 1, page_size: 20 });
+    expect(getUsageDevices).toHaveBeenCalledWith({ ...summaryScope, package_name: "com.a", page: 1, page_size: 20 });
     expect(wrapper.get("[data-testid='usage-device-row']").text()).toContain("device-a");
     await wrapper.get("[data-testid='usage-expand-0']").trigger("click");
     await wrapper.get("[data-testid='usage-expand-0']").trigger("click");

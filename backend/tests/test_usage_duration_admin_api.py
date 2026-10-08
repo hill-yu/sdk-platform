@@ -162,7 +162,6 @@ def test_usage_duration_summary_and_devices_routes_forward_scope(monkeypatch):
                 "/api/admin/usage-durations/devices",
                 params={
                     "package_name": "COM.EXAMPLE.APP",
-                    "device_model": "Pixel",
                     "date_from": "2026-09-29",
                     "date_to": "2026-09-29",
                 },
@@ -175,4 +174,4 @@ def test_usage_duration_summary_and_devices_routes_forward_scope(monkeypatch):
     assert devices.status_code == 200
     assert calls[0][1]["package_name"] == "com.example.app"
     assert calls[0][1]["page"] == 2
-    assert calls[1][1]["device_model"] == "Pixel"
+    assert calls[1][1]["device_model"] is None

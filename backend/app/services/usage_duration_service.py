@@ -151,13 +151,14 @@ async def get_usage_summary(
         func.sum(case((latest_rows.c.duration_s.between(601, 899), 1), else_=0)).label("between_601_899_count"),
         func.sum(case((latest_rows.c.duration_s >= 900, 1), else_=0)).label("ge_900_count"),
         func.max(latest_rows.c.server_ts).label("last_report_at"),
-    ).group_by(latest_rows.c.package_name, latest_rows.c.device_model)
+    ).group_by(latest_rows.c.package_name)
     total = int((await db.execute(select(func.count()).select_from(grouped.subquery()))).scalar_one() or 0)
-    sort_expression = getattr(grouped.selected_columns, sort_by, grouped.selected_columns.package_name)
+    # ``device_model`` remains an accepted compatibility sort key, but the
+    # summary is intentionally one row per package now.
+    sort_expression = grouped.selected_columns.package_name if sort_by == "device_model" else getattr(grouped.selected_columns, sort_by, grouped.selected_columns.package_name)
     ordered = grouped.order_by(
         (sort_expression.desc() if sort_order == "desc" else sort_expression.asc()).nulls_last(),
         (grouped.selected_columns.package_name.desc() if sort_order == "desc" else grouped.selected_columns.package_name.asc()).nulls_last(),
-        (grouped.selected_columns.device_model.desc() if sort_order == "desc" else grouped.selected_columns.device_model.asc()).nulls_last(),
     )
     rows = (await db.execute(ordered.limit(page_size).offset((page - 1) * page_size))).mappings().all()
     items = []
@@ -165,7 +166,9 @@ async def get_usage_summary(
         count = int(_value(row, "device_count", 0) or 0)
         items.append({
             "package_name": _value(row, "package_name"),
-            "device_model": _value(row, "device_model"),
+            # Kept as a nullable compatibility field; summaries no longer
+            # split a package into separate model rows.
+            "device_model": None,
             "device_count": count,
             "total_duration_s": int(_value(row, "total_duration_s", 0) or 0),
             "average_duration_s": int(_value(row, "average_duration_s")) if _value(row, "average_duration_s") is not None else None,
@@ -179,7 +182,7 @@ async def get_usage_devices(
     db: AsyncSession,
     *,
     package_name: str,
-    device_model: str,
+    device_model: str | None,
     range_start,
     range_end,
     page: int,
@@ -193,10 +196,10 @@ async def get_usage_devices(
         range_start=range_start,
         range_end=range_end,
     ).subquery()
-    latest_rows = select(latest).where(
-        latest.c.latest_rank == 1,
-        latest.c.device_model == device_model,
-    ).subquery()
+    device_filters = [latest.c.latest_rank == 1]
+    if device_model is not None:
+        device_filters.append(latest.c.device_model == device_model)
+    latest_rows = select(latest).where(*device_filters).subquery()
     total = int((await db.execute(select(func.count()).select_from(latest_rows))).scalar_one() or 0)
     rows = (await db.execute(
         select(latest_rows)

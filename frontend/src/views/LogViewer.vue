@@ -13,12 +13,11 @@
       <section class="panel filters-panel">
         <div class="panel-header">
           <h3>解析统计</h3>
-          <button data-testid="configure-columns" class="ghost" type="button" @click="columnSettingsOpen = true">配置指标</button>
         </div>
         <LogAnalysisFilters
           v-model="draftFilters"
           :applied-value="appliedFilters"
-          :loading="summaryLoading"
+          :loading="false"
           @query="queryAnalysis"
           @refresh="refreshAnalysis"
           @reset="resetAnalysis"
@@ -34,72 +33,8 @@
         @request-parse="requestParse"
         @request-cancel="requestCancel"
       />
-      <LogMetricsPanel :scope="metricScope" :job="parseJob" @failure-select="openFailureDrawer" />
+      <LogMetricsPanel :scope="metricScope" :job="parseJob" :profile="packageProfile" :visible-columns="visibleColumns" @failure-select="openFailureDrawer" @configure-columns="columnSettingsOpen = true" @profile-update="updatePackageProfile" @profile-error="showProfileError" />
       <LogFailureDrawer :open="failureDrawerOpen" :items="failureItems" :loading="failureLoading" :error="failureError" @close="closeFailureDrawer" />
-
-      <section class="panel analysis-panel" data-testid="analysis-view">
-        <div class="panel-header"><h3>聚合结果</h3><span class="count">共 {{ summary.total }} 条</span></div>
-        <div class="analysis-toolbar">
-          <label>排序字段
-            <select data-testid="summary-sort-by" v-model="summarySortBy" :disabled="summaryLoading" @change="sortAnalysis">
-              <option value="date">日期</option><option value="package_name">包名</option><option value="user_count">用户数</option>
-              <option value="flow_count">流程日志数</option><option value="success_rate">成功率</option><option value="average_duration_ms">平均耗时</option>
-              <option value="parse_failure_count">解析失败数</option>
-            </select>
-          </label>
-          <button data-testid="summary-sort-order" class="ghost" type="button" :disabled="summaryLoading" @click="toggleSummarySort">{{ summarySortOrder === "desc" ? "降序" : "升序" }}</button>
-        </div>
-        <div class="table-scroll">
-          <table class="table summary-table">
-            <thead><tr><th v-for="column in visibleColumns" :key="column">{{ columnLabels[column] ?? column }}</th></tr></thead>
-            <tbody>
-              <tr v-if="!summary.items.length"><td data-testid="summary-empty" :colspan="Math.max(visibleColumns.length, 1)" class="empty-state">当前条件下没有聚合结果。</td></tr>
-              <tr
-                v-for="item in summary.items"
-                v-else
-                :key="`${item.date}-${item.package_name}`"
-                data-testid="summary-row"
-                class="clickable-row"
-                :class="{ selected: selectedSummary === item }"
-                @click="selectSummary(item)"
-              >
-                <td v-for="column in visibleColumns" :key="column">
-                  <PackageProfileCell
-                    v-if="isProfileColumn(column)"
-                    :package-name="item.package_name"
-                    :field="profileField(column)"
-                    :model-value="profileValue(item, column)"
-                    @click.stop
-                    @update:model-value="updateSummaryProfile(item.package_name, column, $event)"
-                  />
-                  <span v-else>{{ formatSummaryValue(item, column) }}</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="pager">
-          <button data-testid="summary-previous-page" class="ghost" type="button" :disabled="summary.page <= 1 || summaryLoading" @click="changeSummaryPage(summary.page - 1)">上一页</button>
-          <span>第 {{ summary.page }} / {{ summaryTotalPages }} 页</span>
-          <button data-testid="summary-next-page" class="ghost" type="button" :disabled="summary.page >= summaryTotalPages || summaryLoading" @click="changeSummaryPage(summary.page + 1)">下一页</button>
-        </div>
-      </section>
-
-      <section v-if="selectedSummary" class="panel details-panel" data-testid="details-panel">
-        <div class="panel-header"><h3>{{ selectedSummary.date }} · {{ selectedSummary.package_name }}</h3><button data-testid="close-details" class="ghost" type="button" @click="closeDetails">关闭</button></div>
-        <LogAnalysisDetail
-          :items="details.items"
-          :total="details.total"
-          :page="details.page"
-          :page-size="details.page_size"
-          :loading="detailsLoading"
-          :error="detailsError"
-          :selected="selectedDetail"
-          :detail="detail"
-          @select="selectDetail"
-          @page-change="changeDetailsPage"
-        />
-      </section>
 
       <div v-if="columnSettingsOpen" class="modal-backdrop" data-testid="column-settings-modal">
         <section class="panel modal-panel" role="dialog" aria-modal="true" aria-label="配置指标">
@@ -191,13 +126,11 @@ import { getEventFilterOptions, getEvents } from "@/api/dashboard";
 import type { EventFilterOptions, EventItem, EventQuery, LogLevel } from "@/api/dashboard";
 import { cancelParseJob, getLatestParseJob, getMetricFailures, getParseJob, postParseJob } from "@/api/logMetrics";
 import type { FailureBreakdownItem, LogMetricScope, ParseJob } from "@/api/logMetrics";
-import { getLogAnalysisColumns, getLogAnalysisDetail, getLogAnalysisDetails, getLogAnalysisSummary, putLogAnalysisColumns } from "@/api/logAnalysis";
-import type { DetailKey, DetailsQuery, LogAnalysisColumns, LogAnalysisSummaryItem, LogDecodeItem, SummaryQuery } from "@/api/logAnalysis";
-import LogAnalysisDetail from "@/components/LogAnalysisDetail.vue";
+import { getLogAnalysisColumns, getPackageProfile, putLogAnalysisColumns } from "@/api/logAnalysis";
+import type { LogAnalysisColumns, PackageProfile } from "@/api/logAnalysis";
 import LogAnalysisFilters, { type LogAnalysisFilterValues } from "@/components/LogAnalysisFilters.vue";
 import LogColumnSettings from "@/components/LogColumnSettings.vue";
 import LogFailureDrawer from "@/components/LogFailureDrawer.vue";
-import PackageProfileCell, { type PackageProfileField } from "@/components/PackageProfileCell.vue";
 import LogDetail from "@/components/LogDetail.vue";
 import LogExportPanel from "@/components/LogExportPanel.vue";
 import LogMetricsPanel from "@/components/LogMetricsPanel.vue";
@@ -208,13 +141,9 @@ import { beginFeedback, setFeedbackError, setFeedbackSuccess } from "@/utils/fee
 import { defaultRecentThreeDays } from "@/utils/logDateRange";
 import { analysisScopeUtcRange, validateAnalysisScope } from "@/utils/logAnalysisScope";
 
-type AnalysisList = { total: number; page: number; page_size: number; items: LogAnalysisSummaryItem[] };
-type DetailList = { total: number; page: number; page_size: number; items: LogDecodeItem[] };
 type View = "analysis" | "raw" | "usage";
 
 const DEFAULT_COLUMNS = ["date", "package_name", "alias", "url", "company", "account", "user_count", "flow_count", "expected_click_count", "actual_click_count", "ad_click_count", "interstitial_presentation_count", "interstitial_click_count", "average_duration_ms", "success_rate", "parse_failure_count"];
-const columnLabels: Record<string, string> = { date: "日期", package_name: "包名", alias: "别名", url: "网页 URL", company: "公司", account: "账户", user_count: "用户数", flow_count: "流程日志数", expected_click_count: "计划点击数", actual_click_count: "实际点击数", ad_click_count: "广告区域点击数", interstitial_presentation_count: "插屏展示数", interstitial_click_count: "插屏点击数", average_duration_ms: "平均流程耗时", success_rate: "成功完成率", parse_failure_count: "解析失败数" };
-const profileFields: Record<string, PackageProfileField> = { alias: "alias", company: "company", account: "account" };
 
 const view = ref<View>("analysis");
 const feedback = reactive({ error: "", success: "" });
@@ -225,30 +154,19 @@ const metricScope = ref<LogMetricScope>({ package_name: "", date_from: recentAna
 const parseJob = ref<ParseJob | null>(null);
 const parseStarting = ref(false);
 const parseCancelling = ref(false);
+const packageProfile = ref<PackageProfile | null>(null);
 const failureDrawerOpen = ref(false);
 const failureItems = ref<FailureBreakdownItem[]>([]);
 const failureLoading = ref(false);
 const failureError = ref("");
-const summary = reactive<AnalysisList>({ total: 0, page: 1, page_size: 20, items: [] });
-const details = reactive<DetailList>({ total: 0, page: 1, page_size: 20, items: [] });
 const availableColumns = ref<string[]>(DEFAULT_COLUMNS);
 const defaultColumns = ref<string[]>(DEFAULT_COLUMNS);
 const visibleColumns = ref<string[]>(DEFAULT_COLUMNS);
-const selectedSummary = ref<LogAnalysisSummaryItem | null>(null);
-const selectedDetail = ref<LogDecodeItem | null>(null);
-const detail = ref<LogDecodeItem | null>(null);
 const columnSettingsOpen = ref(false);
-const summaryLoading = ref(false);
-const detailsLoading = ref(false);
-const detailsError = ref("");
 const columnSaving = ref(false);
 const columnSaveError = ref("");
-const summarySortBy = ref("date");
-const summarySortOrder = ref<"asc" | "desc">("desc");
-let summaryRequestSequence = 0;
 let columnsRequestSequence = 0;
-let detailsRequestSequence = 0;
-let detailRequestSequence = 0;
+let profileRequestSequence = 0;
 let failureRequestSequence = 0;
 let parseRequestSequence = 0;
 let parsePollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -257,25 +175,6 @@ function responseData<T>(response: unknown): T {
   let value = response && typeof response === "object" && "data" in response ? (response as { data?: unknown }).data : response;
   if (value && typeof value === "object" && "code" in value && "data" in value) value = (value as { data: unknown }).data;
   return value as T;
-}
-
-function summaryParams(page: number): SummaryQuery {
-  return { page, page_size: summary.page_size, sort_by: summarySortBy.value, sort_order: summarySortOrder.value, date_from: appliedFilters.value.date_from || undefined, date_to: appliedFilters.value.date_to || undefined, package_name: appliedFilters.value.package_name || undefined, device_id: appliedFilters.value.device_id || undefined, log_level: appliedFilters.value.log_level || undefined };
-}
-
-async function loadSummary(options: { resetPage?: boolean; targetPage?: number } = {}) {
-  const targetPage = options.resetPage ? 1 : (options.targetPage ?? summary.page);
-  const requestSequence = ++summaryRequestSequence;
-  summaryLoading.value = true;
-  try {
-    const response = await getLogAnalysisSummary(summaryParams(targetPage));
-    if (requestSequence !== summaryRequestSequence) return;
-    const data = responseData<AnalysisList>(response);
-    summary.total = data.total; summary.page = data.page; summary.page_size = data.page_size; summary.items = data.items;
-  } catch (error) {
-    if (requestSequence !== summaryRequestSequence) return;
-    setFeedbackError(feedback, error instanceof Error ? error.message : "聚合查询失败");
-  } finally { if (requestSequence === summaryRequestSequence) summaryLoading.value = false; }
 }
 
 async function loadColumns() {
@@ -288,7 +187,19 @@ async function loadColumns() {
   } catch (error) { if (requestSequence === columnsRequestSequence) setFeedbackError(feedback, error instanceof Error ? error.message : "列配置读取失败"); }
 }
 
-function loadAnalysisInitial() { void Promise.all([loadColumns(), loadSummary({ resetPage: true })]); }
+async function loadPackageProfile(packageName: string) {
+  const requestSequence = ++profileRequestSequence;
+  packageProfile.value = null;
+  if (!packageName) return;
+  try {
+    const response = await getPackageProfile(packageName);
+    if (requestSequence === profileRequestSequence) packageProfile.value = responseData<PackageProfile>(response);
+  } catch (error) {
+    if (requestSequence === profileRequestSequence) setFeedbackError(feedback, error instanceof Error ? error.message : "包资料读取失败");
+  }
+}
+
+function loadAnalysisInitial() { void loadColumns(); }
 function analysisScopeFromFilters(value: LogAnalysisFilterValues): LogMetricScope {
   return { package_name: value.package_name, date_from: value.date_from, hour_from: value.hour_from, date_to: value.date_to, hour_to: value.hour_to };
 }
@@ -333,7 +244,6 @@ async function pollParseJob(scope: LogMetricScope, requestSequence: number) {
     parseJob.value = candidate;
     if (parseJob.value.status === "success") {
       refreshMetrics();
-      void loadSummary({ resetPage: true });
     }
     scheduleParsePoll(scope, requestSequence);
   } catch (error) {
@@ -356,25 +266,24 @@ function applyAnalysisScope(value: LogAnalysisFilterValues): LogMetricScope | nu
 function queryAnalysis(value: LogAnalysisFilterValues) {
   const scope = applyAnalysisScope(value);
   if (!scope) return;
-  void loadSummary({ resetPage: true });
   void loadLatestParseJob(scope);
+  void loadPackageProfile(scope.package_name);
 }
 
 function refreshAnalysis(value: LogAnalysisFilterValues) {
   const scope = applyAnalysisScope(value);
   if (!scope) return;
-  void loadSummary({ resetPage: true });
   void loadLatestParseJob(scope);
-  refreshMetrics();
+  void loadPackageProfile(scope.package_name);
 }
 
 function resetAnalysis(value: LogAnalysisFilterValues) {
   clearParsePoll();
   ++parseRequestSequence;
   parseJob.value = null;
+  packageProfile.value = null;
   appliedFilters.value = { ...value };
   metricScope.value = { package_name: "", date_from: value.date_from, hour_from: value.hour_from, date_to: value.date_to, hour_to: value.hour_to };
-  void loadSummary({ resetPage: true });
 }
 
 async function requestParse(snapshot: LogMetricScope) {
@@ -443,46 +352,10 @@ watch(metricScope, () => {
   failureItems.value = [];
   failureError.value = "";
 }, { deep: true });
-function sortAnalysis() { void loadSummary({ resetPage: true }); }
-function toggleSummarySort() { summarySortOrder.value = summarySortOrder.value === "desc" ? "asc" : "desc"; void loadSummary({ resetPage: true }); }
-
-const summaryTotalPages = computed(() => Math.max(1, Math.ceil(summary.total / summary.page_size)));
-function changeSummaryPage(page: number) { const bounded = Math.min(summaryTotalPages.value, Math.max(1, page)); if (bounded !== summary.page) void loadSummary({ targetPage: bounded }); }
-
-function detailParams(item: LogAnalysisSummaryItem, page: number): DetailsQuery { return { date: item.date, package_name: item.package_name, page, page_size: details.page_size, device_id: appliedFilters.value.device_id || undefined, log_level: appliedFilters.value.log_level || undefined }; }
-async function loadDetails(item: LogAnalysisSummaryItem, targetPage = 1) {
-  const requestSequence = ++detailsRequestSequence; detailsLoading.value = true; detailsError.value = "";
-  try {
-    const response = await getLogAnalysisDetails(detailParams(item, targetPage));
-    if (requestSequence !== detailsRequestSequence) return;
-    const data = responseData<DetailList>(response); details.total = data.total; details.page = data.page; details.page_size = data.page_size; details.items = data.items;
-  } catch (error) { if (requestSequence === detailsRequestSequence) { detailsError.value = error instanceof Error ? error.message : "明细查询失败"; setFeedbackError(feedback, detailsError.value); } }
-  finally { if (requestSequence === detailsRequestSequence) detailsLoading.value = false; }
+function updatePackageProfile(payload: { field: "alias" | "company" | "account"; value: string; profile: Partial<PackageProfile> }) {
+  packageProfile.value = { ...(packageProfile.value ?? { package_name: metricScope.value.package_name, alias: "", company: "", account: "" }), ...payload.profile, [payload.field]: payload.value };
 }
-function selectSummary(item: LogAnalysisSummaryItem) { selectedSummary.value = item; selectedDetail.value = null; detail.value = null; void loadDetails(item); }
-function closeDetails() { selectedSummary.value = null; selectedDetail.value = null; detail.value = null; ++detailsRequestSequence; ++detailRequestSequence; }
-function changeDetailsPage(page: number) { if (selectedSummary.value) void loadDetails(selectedSummary.value, page); }
-
-async function selectDetail(item: LogDecodeItem) {
-  selectedDetail.value = item; const requestSequence = ++detailRequestSequence; const key: DetailKey = { event_server_ts: item.event_server_ts, record_index: item.record_index };
-  try { const response = await getLogAnalysisDetail(item.event_id, key); if (requestSequence === detailRequestSequence) detail.value = responseData<LogDecodeItem>(response); }
-  catch (error) { if (requestSequence === detailRequestSequence) setFeedbackError(feedback, error instanceof Error ? error.message : "详情查询失败"); }
-}
-
-function isProfileColumn(column: string): boolean { return column in profileFields; }
-function profileField(column: string): PackageProfileField { return profileFields[column] ?? "alias"; }
-function profileValue(item: LogAnalysisSummaryItem, column: string): string { return item[profileField(column)] ?? ""; }
-function updateSummaryProfile(packageName: string, column: string, value: string) { if (isProfileColumn(column)) for (const item of summary.items) if (item.package_name === packageName) item[profileField(column)] = value; }
-function formatSummaryValue(item: LogAnalysisSummaryItem, column: string): string {
-  if (column === "url") return display(item.primary_url);
-  const value = item[column as keyof LogAnalysisSummaryItem];
-  if (column === "success_rate" && (value == null || value === "")) return `-（${item.success_sample_count} 个样本）`;
-  if (column === "average_duration_ms" && (value == null || value === "")) return `-（${item.duration_sample_count} 个样本）`;
-  if (value == null || value === "") return "-";
-  if (column === "success_rate") { const percentage = Number(value) * 100; return `${Number.isInteger(percentage) ? percentage : percentage.toFixed(1)}%（${item.success_sample_count} 个样本）`; }
-  if (column === "average_duration_ms") return `${value} ms（${item.duration_sample_count} 个样本）`;
-  return String(value);
-}
+function showProfileError(message: string) { setFeedbackError(feedback, message); }
 
 async function saveColumns(columns: string[]) {
   columnSaving.value = true; columnSaveError.value = "";
@@ -577,7 +450,7 @@ onBeforeUnmount(() => { ++failureRequestSequence; ++parseRequestSequence; clearP
 select, input, button { border: 1px solid var(--border-soft); border-radius: 12px; color: var(--text-primary); background: rgba(255, 255, 255, .05); padding: 10px 12px; }
 button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity: .45; }.timezone-note { margin: 12px 0 0; color: var(--text-muted); font-size: 12px; }
 .viewer-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); gap: 18px; align-items: start; min-width: 0; min-height: 0; }.viewer-grid > *, .panel, .panel-header, .filters, .analysis-toolbar { min-width: 0; }.table-scroll { min-width: 0; max-width: 100%; overflow-x: auto; }
-.table { width: 100%; margin-top: 14px; border-collapse: collapse; }.summary-table { min-width: 1200px; }.table th, .table td { padding: 12px 10px; border-bottom: 1px solid rgba(255, 255, 255, .08); text-align: left; white-space: nowrap; }
+.table { width: 100%; margin-top: 14px; border-collapse: collapse; }.table th, .table td { padding: 12px 10px; border-bottom: 1px solid rgba(255, 255, 255, .08); text-align: left; white-space: nowrap; }
 .clickable-row { cursor: pointer; }.clickable-row.selected { background: rgba(214, 140, 69, .1); }.message-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .level-tag { display: inline-block; padding: 4px 8px; border-radius: 999px; background: rgba(255, 255, 255, .08); }.level-debug { color: #c6cbd3; }.level-info { color: #8cc8ff; }.level-warn { color: #ffd27a; }.level-error { color: #ff9f96; }
 .empty-state { color: var(--text-muted); text-align: center; }.pager { justify-content: space-between; margin-top: 16px; }.feedback { margin: 0; padding: 12px 14px; border-radius: 14px; background: rgba(255, 255, 255, .06); }.feedback.error { color: #ffb0a8; background: rgba(209, 89, 89, .18); }.feedback.success { color: #a8e5bd; background: rgba(73, 150, 99, .18); }

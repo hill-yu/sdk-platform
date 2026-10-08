@@ -21,13 +21,13 @@ SDK 在运行期间约每 1～2 分钟上报一次本阶段产生的使用时长
 ## 2. 已确认的业务语义
 
 - `duration_s` 由 SDK 计算并上报，单位为秒；
-- `duration_s` 表示本次周期内产生的 SDK 使用时长，不是设备累计时长；
+- `duration_s` 表示设备截至本次上报的累计 SDK 使用时长；同一设备在查询窗口内只取最新一条记录；
 - SDK 预计每 1～2 分钟上报一次；
 - 请求不携带客户端时间戳，记录时间使用服务器接收时间；
 - 请求不携带 `report_id`，因此 SDK 超时重试可能形成重复记录，本期接受该行为；
 - SDK 上报接口不使用 `SDK_CONFIG_TOKEN`，但必须使用现有写接口限流；
 - SDK 上报响应只返回接收结果，不回显设备信息；
-- 后台查询同时返回汇总数据与分页明细。
+- 后台查询同时返回历史上报明细，以及按“包名 + 最新设备状态”计算的汇总。
 
 ## 3. 方案选择
 
@@ -148,6 +148,10 @@ GET /api/admin/usage-durations
 Authorization: Bearer <ADMIN_TOKEN>
 ```
 
+最新设备汇总接口为 `GET /api/admin/usage-durations/summary`；设备明细接口为
+`GET /api/admin/usage-durations/devices`。汇总接口的 `package_name` 可留空查询全部包名，
+`sort_by=device_model` 仅为兼容旧客户端，实际按包名排序。
+
 查询参数：
 
 | 参数 | 类型 | 说明 |
@@ -169,7 +173,7 @@ Authorization: Bearer <ADMIN_TOKEN>
 - 单次日期跨度最多 31 个自然日，超出返回 HTTP 422；
 - 明细按 `server_ts DESC, id DESC` 排序，保证相同时间下顺序稳定。
 
-### 6.2 响应
+### 6.2 原始上报响应
 
 ```json
 {
@@ -212,6 +216,33 @@ Authorization: Bearer <ADMIN_TOKEN>
 - `summary` 与 `items` 必须复用同一个筛选条件构造器。
 
 所有响应时间使用项目现有 UTC+8 ISO 8601 序列化方法。
+
+### 6.3 最新设备汇总响应
+
+`/summary` 在时间范围内按 `(package_name, device_id)` 分区，使用
+`server_ts DESC, id DESC` 选出每台设备的最新记录，再按包名聚合。即使同一包名包含多个
+`device_model`，也只返回一个包名行；`device_model` 保留为 `null` 兼容字段。
+
+```json
+{
+  "package_name": "com.example.app",
+  "device_model": null,
+  "device_count": 2,
+  "total_duration_s": 1500,
+  "average_duration_s": 750,
+  "buckets": [
+    {"key": "le_300", "count": 1, "share": 0.5},
+    {"key": "301_600", "count": 0, "share": 0.0},
+    {"key": "601_899", "count": 0, "share": 0.0},
+    {"key": "ge_900", "count": 1, "share": 0.5}
+  ],
+  "last_report_at": "2026-09-30T10:00:00+08:00"
+}
+```
+
+桶边界为 `≤300`、`301–600`、`601–899`、`≥900` 秒，比例以最新设备数为分母；无设备时
+比例为 `null`。展开包名明细时不再按机型过滤，返回该包名的全部最新设备；如传入
+`device_model`，仅作为兼容性的可选过滤条件。
 
 ## 7. 代码组织
 

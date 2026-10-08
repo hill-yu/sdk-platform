@@ -173,4 +173,25 @@ describe("LogMetricsPanel", () => {
     expect(wrapper.get("[data-testid='declaration-count']").text()).toBe("1");
     expect(wrapper.get("[data-testid='planned-click-count']").text()).toBe("0");
   });
+
+  it("renders the package profile and emits column configuration", async () => {
+    const wrapper = mount(LogMetricsPanel, {
+      props: {
+        scope,
+        job: successJob,
+        profile: { package_name: scope.package_name, alias: "示例", company: "公司", account: "acct" },
+      },
+    });
+    await flushPromises();
+    expect(wrapper.get("[data-testid='formal-package-profile']").text()).toContain("示例");
+    await wrapper.get("[data-testid='configure-columns']").trigger("click");
+    expect(wrapper.emitted("configure-columns")).toHaveLength(1);
+  });
+
+  it("hides formal cards excluded by the saved column set", async () => {
+    const wrapper = mount(LogMetricsPanel, { props: { scope, job: successJob, visibleColumns: ["package_name", "alias"] } });
+    await flushPromises();
+    expect(wrapper.find("[data-testid='planned-click-count']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='interstitial-presentation-count']").exists()).toBe(false);
+  });
 });
