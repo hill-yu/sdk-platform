@@ -1,227 +1,261 @@
 # 日志分析生效范围、正式结果与包级在线时长实施计划
 
-> **目标：** 将日志分析页面、显式解析任务、正式 H1/click 结果和在线时长汇总统一到同一组北京时间范围与包名条件下；主结果不再使用 `LogDecode` 聚合冒充正式解析结果；usage 默认按包名一行汇总。  
-> **基线：** `d08718c7bc0877415eaf04d871a1b5878154a6c2`（当前分区维护提交）  
-> **目标分支：** `codex/log-analysis-scope-package-usage-20261008`  
-> **实施状态：** 仅为审查用计划；本轮不修改业务代码、不创建生产任务、不部署。  
-> **技术栈：** Python 3.12、FastAPI、SQLAlchemy 2.x、PostgreSQL、Vue 3、TypeScript、Pytest、Vitest。
+> **目标：** 统一 analysis 的合法 draft、精确 UTC 半开范围、最近任务状态和正式 H1/click 展示；移除旧 `LogDecode` summary 主 UI；usage 保持独立 31 天/空包名规则并按包名一行汇总。
+> **基线：** `d08718c7bc0877415eaf04d871a1b5878154a6c2`
+> **分支：** `codex/log-analysis-scope-package-usage-20261008`
+> **当前状态：** 仅为审查用 spec/plan；本轮不写业务代码、不运行生产任务、不部署。
+> **实现原则：** 不做正式结果版本化，不增加正式表 `job_id`，不修改旧 summary/details API，不创建数据库迁移。
 
-## 0. 执行约束与完成定义
+## 0. 执行边界与完成定义
 
 ### 0.1 保护范围
 
-- 保留并忽略用户已有的 `docs/50-LOG-METRICS-DEVICE-DURATION-H1-EXPORT-IMPLEMENTATION-20260930.md` 工作区修改；不提交、不覆盖。
-- 不修改分区维护提交及其代码、文档和部署文件。
-- 不修改 SDK 上传协议、原始事件写入、配置系统和旧 8102 相关范围。
-- 不运行生产解析任务，不做生产回填，不执行部署。
+- 保留用户已有的 `docs/50-LOG-METRICS-DEVICE-DURATION-H1-EXPORT-IMPLEMENTATION-20260930.md` 脏改动，不 stage、不覆盖。
+- 不修改分区维护、SDK 上传协议、原始事件写入、配置系统和旧 8102。
+- 不删除 `LogDecode`、历史正式 H1/click、usage 历史报告或旧 summary/details API。
+- 不创建生产 parse job，不回填生产数据，不执行部署。
 
-### 0.2 实施完成定义
+### 0.2 实现完成定义
 
-只有同时满足以下条件才可进入发布审查：
+- [ ] analysis query/refresh/parse 统一使用当前合法 draft；usage 继续独立、空包名查全部、最多 31 天。
+- [ ] formal metrics 和创建 parse job 共享后端 7 个北京时间自然日校验。
+- [ ] `LogViewer.vue` 不再渲染旧 `LogDecode` summary/details 表；不增加兼容面板。
+- [ ] 包资料和可配指标在 `LogMetricsPanel.vue` 正式结果界面保留，且有独立生命周期测试。
+- [ ] exact scope 最近任务状态按 `(package_name, range_start_utc, range_end_utc)`、`created_at DESC, id DESC` 查询。
+- [ ] pending/running、failed/cancelled、all-failed、no-H1、true-zero、no-source、success-nonzero 可区分。
+- [ ] formal metrics 只在当前查询范围和合法 snapshot 上限读取，不宣称 job 级不可变结果。
+- [ ] usage 一包一行，保留 nullable `device_model` 兼容字段，四个桶边界和上报 1–3600 约束不变。
+- [ ] 真实 PostgreSQL 回归已执行；若没有隔离 PG16，验收记录明确写“未验证”，不能用编译代替。
 
-1. 查询、刷新、解析任务创建、任务成功后的刷新和 usage 查询均由同一个规范化范围驱动。
-2. 主结果只使用显式任务成功发布的正式 H1/click 表；旧 `LogDecode` 仅作兼容区或兼容 API。
-3. 无任务、运行中、失败、成功空结果、成功有结果均有稳定 UI 状态和测试。
-4. usage summary 对每个包名仅有一行，输入为范围内每台设备的最新累计报告。
-5. `docs/48-SDK-USAGE-DURATION-DESIGN-20260929.md` 已更新为当前口径。
-6. 后端和前端相关测试、构建、类型检查和 `git diff --check` 通过。
-7. 无数据库迁移，无保护范围改动，无生产写操作。
-
-## 1. 建立规范化范围契约
+## 1. 先锁定范围契约和审查回归
 
 ### 文件
 
+- 新增：`backend/app/services/log_analysis_scope.py`
+- 新增：`backend/tests/test_log_analysis_scope.py`
+- 新增：`frontend/src/utils/logAnalysisScope.ts`
+- 新增：`frontend/src/utils/logAnalysisScope.test.ts`
 - 修改：`frontend/src/components/LogAnalysisFilters.vue`
-- 修改：`frontend/src/api/logMetrics.ts`
 - 修改：`frontend/src/views/LogViewer.vue`
+- 修改：`frontend/src/api/logMetrics.ts`
 - 修改：`backend/app/schemas/log_metrics_schemas.py`
-- 修改：`backend/app/schemas/log_analysis_schemas.py`
-- 修改：`backend/app/api/admin/log_analysis.py`
 - 修改：`backend/app/api/admin/log_metrics.py`
 - 修改：`backend/app/services/log_parse_job_service.py`
+- 修改：`backend/app/services/log_metrics_service.py`
 - 测试：`frontend/src/components/LogAnalysisFilters.test.ts`
-- 测试：`frontend/src/api/logMetrics.test.ts`
 - 测试：`frontend/src/views/LogViewer.test.ts`
-- 测试：`backend/tests/test_log_analysis_api.py`
+- 测试：`frontend/src/api/logMetrics.test.ts`
 - 测试：`backend/tests/test_log_metrics_api_v2.py`
 - 测试：`backend/tests/test_log_parse_job_service_v2.py`
+- 测试：`backend/tests/test_log_metrics_service_v2.py`
 
 ### 步骤
 
-- [ ] **1.1 记录基线并建立失败测试**
+- [ ] **1.1 建立 `AnalysisScope` 后端唯一校验器**
 
-  在改代码前保存 `BASE_SHA`、当前分支和工作区状态；确认 `docs50` 是唯一既有脏文件。新增或补充测试，先断言以下当前缺陷：
+  在 `backend/app/services/log_analysis_scope.py` 定义规范化结果：
 
-  - 刷新事件带有新日期/小时/包名快照时，页面请求必须使用该快照；
-  - summary 请求必须传递 `hour_from` 和 `hour_to`；
-  - 解析任务 POST 只能由显式解析动作触发；
-  - `business_hour_utc_range` 的小时边界和 7 天限制保持一致。
-
-  运行：
-
-  ```powershell
-  cd backend
-  python -m pytest tests/test_log_analysis_api.py tests/test_log_metrics_api_v2.py tests/test_log_parse_job_service_v2.py -q
-  cd ..\frontend
-  npm test -- --run src/components/LogAnalysisFilters.test.ts src/api/logMetrics.test.ts src/views/LogViewer.test.ts
+  ```text
+  package_name
+  range_start_utc
+  range_end_utc
   ```
 
-- [ ] **1.2 统一前端生效范围状态**
+  输入可以是现有日期/小时字段；输出必须是 `package_name + UTC 半开完整边界`。统一处理包名规范化、小时边界、正向区间和日期差最多 6 天。`LogParseJobCreateRequest`、`log_metrics.py` 的 metrics scope dependency、最近任务查询和 service 层均调用它。
 
-  `LogViewer.vue` 维护一个明确的 `appliedScope`，而不是让 summary、metrics、parse job 各自从不同状态拼参数。`query(value)`、`refresh(value)`、`reset(value)` 均先校验/规范化并保存完整快照，再把同一对象传给所有请求。
+  不把 usage 的可空包名或 31 天规则放进此 helper。
 
-  允许抽取纯函数到 `frontend/src/utils/logAnalysisScope.ts`，职责限定为：规范化默认值、校验包名/日期/小时/7 天限制、生成 API 参数和比较范围；不得在该工具中发请求或创建任务。若抽取该文件，新增 `frontend/src/utils/logAnalysisScope.test.ts`。
+- [ ] **1.2 固定前端 draft/applied 状态**
 
-- [ ] **1.3 保持最近 3 天初始默认和 7 天上限**
+  `LogViewer.vue` 只保留一个 `appliedAnalysisScope` 作为 analysis 请求来源。`queryAnalysis(value)`、`refreshAnalysis(value)`、`resetAnalysis(value)` 先应用完整快照，再触发任务状态和 formal metrics 加载。不要从旧 `appliedFilters`、旧 `metricScope` 或闭包重建范围。
 
-  初始值继续由北京时间当天计算最近 3 个自然日；不是浏览器本地日期，也不是滚动 72 小时。用户提交时保留现有最多 7 个日历日约束，前后端都校验；开始/结束小时仍按照现有 `hour_from`/`hour_to` 合同解释，结束小时包含在范围内。
+  `frontend/src/utils/logAnalysisScope.ts` 只负责默认最近 3 个北京时间自然日、前端合法性校验和显示 scope 到 exact UTC scope 的转换；不发请求、不创建任务。
 
-- [ ] **1.4 使后端所有相关请求使用同一范围**
+- [ ] **1.3 保持 usage 独立**
 
-  对正式指标、任务创建、任务详情/覆盖率和旧 summary 兼容查询统一接受包名、日期和小时。所有数据库过滤继续通过 `business_hour_utc_range` 生成 UTC 半开区间，不在 API 层手写时区偏移。
+  analysis 的 7 天校验不得复用于 `UsageDurationPanel.vue`。usage 仍允许空包名查全部，日期范围仍由 `usage_duration_service.resolve_usage_summary_range` 校验最多 31 天。
 
-  旧仅日期的 API 字段不能悄悄忽略小时：兼容调用若未提供小时可继续使用整日；一旦提供小时，必须将小时带入查询。
+- [ ] **1.4 先写失败/边界测试**
 
-### 验证点
+  必须先锁定：
 
-- [ ] 组件测试证明修改表单后点击刷新，请求参数等于当前表单完整快照。
-- [ ] API 测试证明小时被传入 service 并影响查询边界。
-- [ ] 静态检查确认页面挂载、刷新、查询、轮询和指标面板初始化都没有 POST parse job。
+  - 最近 3 天按北京时间自然日；
+  - 7 个自然日合法，第 8 个日历日非法；
+  - analysis formal metrics 和创建任务都拒绝同一组非法范围；
+  - 刷新使用当前完整 draft；
+  - 页面挂载、刷新、查询、轮询、指标加载均不 POST parse job；
+  - usage 空包名和 31 天规则不受影响。
 
-## 2. 将正式 H1/click 结果设为主分析路径
+## 2. 增加 exact scope 最近任务状态查询
+
+### 文件
+
+- 修改：`backend/app/services/log_parse_job_service.py`
+- 修改：`backend/app/api/admin/log_metrics.py`
+- 修改：`backend/app/schemas/log_metrics_schemas.py`
+- 修改：`frontend/src/api/logMetrics.ts`
+- 修改：`frontend/src/components/LogParseTaskPanel.vue`
+- 修改：`frontend/src/views/LogViewer.vue`
+- 修改：`frontend/src/components/LogMetricsPanel.vue`
+- 测试：`backend/tests/test_log_parse_job_service_v2.py`
+- 测试：`backend/tests/test_log_metrics_api_v2.py`
+- 测试：`frontend/src/api/logMetrics.test.ts`
+- 测试：`frontend/src/components/LogParseTaskPanel.test.ts`
+- 测试：`frontend/src/views/LogViewer.test.ts`
+
+### 步骤
+
+- [ ] **2.1 实现 exact scope 查询 service 和 endpoint**
+
+  新增最近任务查询，例如 `GET /api/admin/log-analysis/parse-jobs/latest`。HTTP 可接收页面的日期/小时输入，但必须经共享 helper 转换后按以下 exact tuple 查询：
+
+  ```text
+  package_name = exact package
+  range_start = exact UTC start
+  range_end = exact UTC end
+  ORDER BY created_at DESC, id DESC
+  LIMIT 1
+  ```
+
+  无匹配返回 `200 { code: 0, data: null }`；不得按日期、包名或 overlap 模糊取任务。
+
+- [ ] **2.2 修正 `ParseJob` 类型与时间输出**
+
+  `frontend/src/api/logMetrics.ts` 的 `ParseJob` 移除 `extends LogMetricScope`。保留 job 自身的 ID、状态、进度和时间字段，增加明确的 `scope.package_name`、`scope.range_start_utc`、`scope.range_end_utc`、`snapshot_end_utc`。
+
+  后端 `serialize_parse_job` 增加/明确 UTC ISO 字段；旧字段若保留，写明其时区。前端通过现有时间格式化工具转换北京时间，不假定响应含 `date_from/hour_from/date_to/hour_to`。
+
+- [ ] **2.3 处理最新任务状态和过期完成事件**
+
+  `LogViewer.vue` 保存当前 exact scope、最新任务和请求序列号。任务 POST/轮询完成后，只有当任务 scope 等于当前 `appliedAnalysisScope` 时才刷新；旧 scope 的完成事件不得覆盖新 scope。
+
+  最新任务为 pending/running 时显示进度；failed/cancelled 时显示错误/取消信息，不能把旧正式数据标成此次成功。
+
+## 3. formal metrics 的 snapshot 查询和失败语义
+
+### 文件
+
+- 修改：`backend/app/services/log_metrics_service.py`
+- 修改：`backend/app/api/admin/log_metrics.py`
+- 修改：`backend/app/schemas/log_metrics_schemas.py`
+- 修改：`frontend/src/api/logMetrics.ts`
+- 修改：`frontend/src/components/LogMetricsPanel.vue`
+- 修改：`frontend/src/views/LogViewer.vue`
+- 测试：`backend/tests/test_log_metrics_service_v2.py`
+- 测试：`backend/tests/test_log_metrics_api_v2.py`
+- 测试：`frontend/src/components/LogMetricsPanel.test.ts`
+- 测试：`frontend/src/views/LogViewer.test.ts`
+
+### 步骤
+
+- [ ] **3.1 增加 snapshot 上限参数和校验**
+
+  formal metrics 请求携带当前 exact scope；当最新任务成功时额外携带 `snapshot_end_utc`。后端验证：
+
+  ```text
+  range_start_utc <= snapshot_end_utc <= range_end_utc
+  ```
+
+  所有 H1/click 查询使用 `[range_start_utc, min(range_end_utc, snapshot_end_utc))`。若没有成功任务，主 UI 不请求或不展示 formal metrics；不使用旧成功任务冒充当前失败/运行任务。
+
+- [ ] **3.2 保持共享正式表语义**
+
+  不给正式 H1/click 表增加 `job_id`，不做结果版本化。测试和文案明确：重叠任务可以重写相同正式表范围，formal metrics 仅是当前共享正式表在查询 scope/snapshot 上限内的结果，不是 job 级不可变快照。
+
+- [ ] **3.3 排除失败 H1 的成功指标**
+
+  `LogMetricsService` 的 overview、计划、配置分布、计划不一致等成功指标只使用成功 H1；失败 H1 计入失败计数并在 H1 明细/失败区展示脱敏错误。click failure 仍按 `navigation_code IS DISTINCT FROM 1` 计入失败指标。
+
+- [ ] **3.4 固定结果状态矩阵**
+
+  后端/前端测试分别覆盖：
+
+  - `no_source`：任务成功、`total_count=0`；
+  - `no_h1`：有源事件但没有成功 H1；
+  - `all_failed_h1`：有 H1 但全部失败；
+  - `true_zero`：有成功 H1，但正式计划/实际/成功指标确实为 0；
+  - `success_nonzero`：至少一个正式指标非零。
+
+  页面不得把这些情况统一成“暂无指标”或全 0。
+
+## 4. 移除旧 LogDecode 主 UI，保留正式界面的必要功能
 
 ### 文件
 
 - 修改：`frontend/src/views/LogViewer.vue`
 - 修改：`frontend/src/components/LogMetricsPanel.vue`
-- 修改：`frontend/src/components/LogParseTaskPanel.vue`
-- 修改：`frontend/src/api/logMetrics.ts`
-- 修改：`backend/app/services/log_metrics_service.py`
-- 修改：`backend/app/services/log_parse_job_service.py`
-- 修改：`backend/app/api/admin/log_metrics.py`
-- 保留兼容：`backend/app/services/log_analysis_service.py`
-- 保留兼容：`backend/app/api/admin/log_analysis.py`
-- 测试：`frontend/src/components/LogMetricsPanel.test.ts`
-- 测试：`frontend/src/components/LogParseTaskPanel.test.ts`（若文件已存在则扩展；不存在时创建）
+- 修改：`frontend/src/components/LogColumnSettings.vue`（仅在正式指标 ID 需要调整时）
+- 修改：`frontend/src/components/PackageProfileCell.vue`（仅在正式面板 props/lifecycle 需要调整时）
+- 修改：`backend/app/services/log_analysis_service.py`（仅列配置目录/兼容适配；不改 summary/details 查询）
+- 保留不改：`backend/app/api/admin/log_analysis.py` 的 summary/details 路由
+- 保留不改：`frontend/src/api/logAnalysis.ts` 的 summary/details API 类型和函数
 - 测试：`frontend/src/views/LogViewer.test.ts`
-- 测试：`backend/tests/test_log_metrics_service_v2.py`
-- 测试：`backend/tests/test_log_metrics_api_v2.py`
-- 测试：`backend/tests/test_log_parse_job_service_v2.py`
+- 测试：`frontend/src/components/LogMetricsPanel.test.ts`
+- 测试：`frontend/src/components/PackageProfileCell.test.ts`
+- 测试：`frontend/src/components/LogColumnSettings.test.ts`
+- 测试：`frontend/src/api/logAnalysis.test.ts`
+- 测试：`backend/tests/test_log_analysis_service.py`
 
 ### 步骤
 
-- [ ] **2.1 先固定主结果来源的契约测试**
+- [ ] **4.1 删除旧分析表和旧详情调用**
 
-  测试主分析页面在有成功任务时只请求/展示 `H1Declaration`、`LogClickAttempt` 及任务状态；不能以 `get_log_analysis_summary` 的 `LogDecode` 字段作为正式 H1/click 数值。
+  从 `LogViewer.vue` 移除 `getLogAnalysisSummary`、`getLogAnalysisDetails`、`getLogAnalysisDetail` 的 analysis 主页面调用、旧表、旧排序分页、旧 `LogAnalysisDetail` 和旧 `LogDecode` 类型状态。不得新增折叠兼容表。
 
-  保留旧 summary API 的兼容测试，但将其响应标记为 legacy/compatibility 语义，不把它作为主结果断言来源。
+  后端 summary/details API 不改，外部调用方兼容性不在本次 UI 变更中承担。
 
-- [ ] **2.2 补齐任务状态和结果状态模型**
+- [ ] **4.2 将包资料放到正式结果标题区域**
 
-  将任务状态、任务范围、`snapshot_end`、扫描数量和正式发布摘要作为 `LogMetricsPanel` 可用的状态输入。状态映射固定为：
+  `LogMetricsPanel.vue` 正式结果标题区域渲染 `PackageProfileCell` 的 alias/company/account。`LogViewer.vue` 在 applied package 变化时调用既有 `getPackageProfile`，用请求序列号防止旧包响应覆盖新包；保存由 `PackageProfileCell` 调用既有 PUT，成功只更新本地正式面板资料，不创建任务、不刷新旧 summary。
 
-  ```text
-  scope_required -> no_job -> pending/running -> failed/cancelled
-                                      \-> success_empty
-                                      \-> success_non_empty
-  ```
+- [ ] **4.3 将可配指标放到正式结果界面**
 
-  `success_empty` 必须来自成功任务且正式结果行数为 0；不能将 HTTP 空数组、网络错误、尚未有任务和真实零结果混为一类。
+  `LogViewer.vue` 继续拥有列配置加载/保存和 modal 生命周期，但入口移动到 `LogMetricsPanel.vue` 正式结果标题区域；`LogColumnSettings.vue` 的当前配置驱动 formal metric cards/tables，不再驱动已删除的 LogDecode 表。
 
-- [ ] **2.3 将 `LogMetricsPanel` 设为正式结果主面板**
+  如现有 `log_analysis_service.py` 的列目录仍是旧 summary 字段，只调整 columns preference 的目录/兼容适配，不修改 summary/details SQL/API；已有 JSON preference 以兼容方式读取，用户保存成功后才更新 formal metric 配置，不做数据库迁移。
 
-  继续使用现有正式指标接口和已有配置/目标/失败原因/H1 下钻能力，增加：
+- [ ] **4.4 测试生命周期**
 
-  - 当前生效范围摘要；
-  - 最近任务状态和快照结束时间；
-  - 扫描事件/H1/click/无 H1/失败 H1 计数；
-  - 无任务、运行中、失败、成功空结果和成功有结果的独立文案。
+  覆盖包资料加载、包切换防旧响应、保存成功/失败、范围刷新不触发解析、配置加载/保存失败和正式面板渲染配置后的结果。增加断言：`LogViewer.vue` 不再出现旧 summary/details API 调用或旧表测试选择器。
 
-  不修改正式表语义，不把任务暂存表直接暴露给页面。
-
-- [ ] **2.4 处理旧 `LogDecode` 汇总**
-
-  `LogViewer.vue` 不再把旧 summary 表作为主结果区。若包资料编辑、列配置或兼容排查功能仍依赖旧表：
-
-  - 保留兼容请求和组件，但移到折叠/次级的“原始事件兼容汇总”；
-  - 所有标题明确写明 `SdkEvent + LogDecode`，禁止使用“正式 H1 指标”等字样；
-  - 只保留必要的包资料和指标配置能力，不复制正式结果数值；
-  - 旧 detail 下钻不得影响正式指标刷新。
-
-  如果现有组件已能保留配置而不显示旧指标，则优先减少主页面并避免重复请求；不删除后端兼容 API。
-
-- [ ] **2.5 固定显式解析和成功刷新行为**
-
-  `LogParseTaskPanel` 只在用户点击解析时调用 POST；其 scope 取自 `appliedScope`。任务成功后发出带任务 scope 的刷新事件，`LogViewer` 使用该 scope 重新加载正式结果和任务摘要，不回读可能已变化的草稿。
-
-  任务轮询只读 GET；切换范围时清理旧任务展示，但不得取消或创建新任务，除非已有明确取消按钮语义。
-
-- [ ] **2.6 明确快照语义的 UI 文案**
-
-  在任务详情或正式结果摘要中显示：任务请求范围、`snapshot_end`、“该时间点之后到达的日志需新建任务纳入”。不要把任务完成时间替代 `snapshot_end`，也不要暗示一次任务会持续追踪范围内后续日志。
-
-### 验证点
-
-- [ ] 成功任务有正式数据时，页面数值与正式表聚合结果一致。
-- [ ] 成功任务但正式 H1/click 为 0 时，显示“已完成、正式结果为 0”而不是加载态或错误。
-- [ ] 当前范围无任务时，显示“尚未执行显式解析”，即使旧 raw/legacy summary 有原始事件也不改变此状态。
-- [ ] 任务失败/取消时显示可重试状态，不读取未发布暂存结果。
-- [ ] 解析成功后刷新同一 scope；用户在任务运行期间修改草稿不会改变运行中任务的 scope。
-
-## 3. 收敛在线时长为包级一行
+## 5. usage 包级一行和兼容参数
 
 ### 文件
 
 - 修改：`backend/app/services/usage_duration_service.py`
 - 修改：`backend/app/api/admin/usage_duration.py`
-- 修改：`backend/app/schemas/usage_duration_schemas.py`（若当前契约在其他 schema 文件，按实际定义调整）
 - 修改：`frontend/src/api/usageDurations.ts`
 - 修改：`frontend/src/components/UsageDurationPanel.vue`
-- 修改：`frontend/src/components/UsageDurationPanel.test.ts`
-- 测试：`frontend/src/api/usageDurations.test.ts`
 - 测试：`backend/tests/test_usage_duration_service.py`
 - 测试：`backend/tests/test_usage_duration_summary.py`
 - 测试：`backend/tests/test_usage_duration_admin_api.py`
-- 兼容测试：`backend/tests/test_usage_duration_api.py`
+- 测试：`backend/tests/test_usage_duration_api.py`
+- 测试：`frontend/src/api/usageDurations.test.ts`
+- 测试：`frontend/src/components/UsageDurationPanel.test.ts`
 
 ### 步骤
 
-- [ ] **3.1 先锁定累计/最新报告口径**
+- [ ] **5.1 保留 latest-per-device 查询**
 
-  为同一设备多条报告补充回归测试：按 `server_ts DESC, id DESC` 只选最新一条；其 `duration_s` 已是累计值，只计一次。测试设备机型变化、同一时间戳用 ID 破平局、空范围和 `duration_s=0`。
+  保留 `(package_name, device_id)` 分区和 `server_ts DESC, id DESC` 排序；先取每设备最新报告，再按包名聚合。新增同设备多条报告、同时间戳 ID 破平局、机型变化和累计时长不重复相加测试。
 
-- [ ] **3.2 改 summary 聚合粒度**
+- [ ] **5.2 汇总一包一行**
 
-  保留 `build_latest_usage_query` 的每包每设备最新记录选择逻辑，移除 summary 的 `device_model` 分组。按 `package_name` 计算：设备数、最新累计时长总和、平均值、四个桶的数量和占比、最大最后上报时间。
+  移除 summary 的 `device_model` 分组，返回每包设备数、最新累计时长总和、平均值、四个桶数量/占比和最大最后上报时间。桶固定：`<=300`、`301–600`、`601–899`、`>=900`。空设备集的平均值/桶占比保持 `null`。
 
-  四个桶继续复用现有常量、边界和命名；本次不改变桶定义。没有设备时，平均值和各桶占比使用现有 API 约定的 `null`，不要伪造 `0`。
+- [ ] **5.3 保留 nullable device_model 和排序兼容**
 
-- [ ] **3.3 收敛 summary API 契约**
+  summary 响应保留 `device_model: null` 字段供旧客户端解码；`sort_by=device_model` 仍接受，但显式降级为 `package_name`，不能恢复机型分组。设备明细 endpoint 的 `device_model` 改为可选：缺省返回包内所有最新设备，传值继续按机型筛选。
 
-  summary 响应类型移除主页面必需的 `device_model` 分组语义，排序白名单改为包级字段。若为兼容旧客户端暂时接受 `device_model` sort 参数，必须明确忽略/降级规则并增加测试，不得让后端重新按机型返回多行。
+- [ ] **5.4 保持 usage 范围/协议规则**
 
-- [ ] **3.4 保留设备明细接口兼容能力**
+  空 `package_name` 仍查询全部包；日期范围仍最多 31 个北京时间日；上报 schema 仍只接受 `duration_s` 的 `1–3600`，`0`、负数、超 3600 和非整数继续 422。
 
-  `get_usage_devices` 继续接受旧的 `device_model` 过滤；同时允许缺省机型时按包名返回全部最新设备，供显式下钻使用。该接口不是默认 summary 页面数据源，不改变默认渲染。
+- [ ] **5.5 更新默认 UI**
 
-- [ ] **3.5 更新前端展示**
+  `UsageDurationPanel.vue` 行键改为 scope + package，默认只渲染包级行，不展示单设备/机型汇总；显式展开才调用设备明细。前端类型保留 nullable `device_model`，并测试多机型仍只有一行。
 
-  `UsageDurationPanel.vue`：
-
-  - 行键从“范围 + 包名 + 机型”改为“范围 + 包名”；
-  - 默认列只渲染包级汇总；
-  - 不渲染机型汇总行或设备明细；
-  - 显式下钻时才请求 devices，并可继续展示机型/设备字段；
-  - 处理包名切换、空结果、桶占比 `null` 和最后上报时间。
-
-### 验证点
-
-- [ ] 一个包包含多个机型时 summary 只有一行。
-- [ ] 两台设备各有多条历史报告时，总时长等于两台设备各自最新累计值之和。
-- [ ] 设备详情不影响默认 summary 行数；旧机型过滤调用仍通过兼容测试。
-- [ ] UI 不会因为机型变化产生重复 key 或重复包行。
-
-## 4. 更新旧时长定义文档
+## 6. 更新旧时长定义文档
 
 ### 文件
 
@@ -229,91 +263,73 @@
 
 ### 步骤
 
-- [ ] 将 `duration_s` 明确写为“单条报告时设备累计在线时长”。
-- [ ] 将汇总算法明确写为“所选北京时间范围内，每个包名/设备取最新报告，再按包名聚合”。
-- [ ] 删除或改写任何会让读者把所有历史报告直接求和的旧表述。
-- [ ] 明确包级 summary 一包一行；机型和设备仅作为可选下钻，不是默认汇总维度。
-- [ ] 增加一个含同设备多次报告的数值示例，证明历史报告不重复相加。
+- [ ] 写明 `duration_s` 是单条报告时设备累计在线时长。
+- [ ] 写明选定范围内每个 `(package_name, device_id)` 按 `server_ts,id` 取最新报告后再按包聚合。
+- [ ] 写明四桶：`<=300`、`301–600`、`601–899`、`>=900`。
+- [ ] 写明包级 summary 一包一行、机型仅 nullable 兼容字段/可选明细维度。
+- [ ] 添加同一设备多条历史报告但只计最新累计值的示例。
 
-## 5. 数据库与迁移判断
+## 7. 数据库和真实 PostgreSQL 回归
 
-- [ ] 检查现有 `sdk_log_h1_declarations`、`sdk_log_click_attempts`、`sdk_log_reparse_jobs` 和 `sdk_usage_durations` 字段、索引足以支持本计划。
-- [ ] 若检查通过，不创建 SQL、ORM 表结构或数据迁移；在 PR/发布说明中明确“无数据库迁移”。
-- [ ] 不删除旧 summary 相关表/字段、`LogDecode`、历史正式结果、usage 历史报告或旧 API。
-- [ ] 若实施中确实发现字段不足，必须停止并重新提交迁移设计；不得在本计划范围内临时修改生产 schema。
+### 文件
 
-## 6. 测试矩阵与命令
+- 新增：`backend/tests/test_log_scope_and_usage_integration.py`
+- 保持不变：正式表 ORM/SQL，不新增 `job_id` 或迁移脚本。
 
-### 6.1 后端
+### 步骤
 
-- [ ] 范围和小时边界：`backend/tests/test_log_analysis_api.py`、`backend/tests/test_log_metrics_api_v2.py`。
-- [ ] 任务快照、`snapshot_end`、无暂存泄漏、显式创建：`backend/tests/test_log_parse_job_service_v2.py`。
-- [ ] 正式 H1/click 聚合和空结果语义：`backend/tests/test_log_metrics_service_v2.py`。
-- [ ] usage 每设备最新值、包级聚合、四桶占比：`backend/tests/test_usage_duration_service.py`、`backend/tests/test_usage_duration_summary.py`。
-- [ ] API 兼容参数和排序：`backend/tests/test_usage_duration_admin_api.py`、`backend/tests/test_usage_duration_api.py`。
+- [ ] 为真实 PostgreSQL 16 增加 `@pytest.mark.integration` 测试，使用环境变量 `SDK_LOG_SCOPE_TEST_DATABASE_URL`。
+- [ ] 只接受 loopback 主机和专用数据库名 `sdk_scope_test_<suffix>`；测试建立隔离 schema/临时表或清理自有 fixture，不连接生产库。
+- [ ] 插入 fixture 覆盖：重叠任务、同 exact scope 多任务、任务状态排序、成功/失败 H1、无 H1、成功 H1 真零、usage 多机型和同设备历史报告。
+- [ ] 真实执行 summary SQL、formal metrics snapshot 上限 SQL、latest job SQL、usage latest-per-device/package SQL，并断言结果和边界。
+- [ ] 若环境无 PG16 或 `SDK_LOG_SCOPE_TEST_DATABASE_URL` 未设置，命令可以 skip，但验收报告必须明确“真实 PostgreSQL 回归未验证”；不得写成“测试通过”。
 
-建议命令：
+## 8. 测试命令与验收证据
+
+### 8.1 后端单元/API/SQL 编译回归
 
 ```powershell
 cd backend
-python -m pytest tests/test_log_analysis_api.py tests/test_log_metrics_api_v2.py tests/test_log_parse_job_service_v2.py tests/test_log_metrics_service_v2.py tests/test_usage_duration_service.py tests/test_usage_duration_summary.py tests/test_usage_duration_admin_api.py tests/test_usage_duration_api.py -q
+python -m pytest tests/test_log_analysis_scope.py tests/test_log_metrics_api_v2.py tests/test_log_metrics_service_v2.py tests/test_log_parse_job_service_v2.py tests/test_log_analysis_service.py tests/test_usage_duration_service.py tests/test_usage_duration_summary.py tests/test_usage_duration_admin_api.py tests/test_usage_duration_api.py -q
 ```
 
-### 6.2 前端
+### 8.2 真实 PostgreSQL 回归
 
-- [ ] `LogAnalysisFilters.test.ts`：最近 3 天、7 天上限、完整快照、小时校验。
-- [ ] `LogViewer.test.ts`：query/refresh 使用新范围、无自动 POST、成功任务同范围刷新、legacy 不作为主结果。
-- [ ] `LogMetricsPanel.test.ts` 和 `LogParseTaskPanel.test.ts`：正式结果和任务状态矩阵。
-- [ ] `UsageDurationPanel.test.ts`：一包一行、同设备取最新、显式设备下钻。
-- [ ] `logMetrics.test.ts`、`usageDurations.test.ts`：请求参数和响应类型。
+```powershell
+cd backend
+python -m pytest -m integration tests/test_log_scope_and_usage_integration.py -q
+```
 
-建议命令：
+必须记录是通过、跳过（未验证）还是失败；无连接环境不能以静态 SQL 编译结果替代。
+
+### 8.3 前端
 
 ```powershell
 cd frontend
-npm test -- --run src/components/LogAnalysisFilters.test.ts src/views/LogViewer.test.ts src/components/LogMetricsPanel.test.ts src/components/LogParseTaskPanel.test.ts src/components/UsageDurationPanel.test.ts src/api/logMetrics.test.ts src/api/usageDurations.test.ts
+npm test -- --run src/utils/logAnalysisScope.test.ts src/components/LogAnalysisFilters.test.ts src/views/LogViewer.test.ts src/components/LogParseTaskPanel.test.ts src/components/LogMetricsPanel.test.ts src/components/PackageProfileCell.test.ts src/components/LogColumnSettings.test.ts src/components/UsageDurationPanel.test.ts src/api/logMetrics.test.ts src/api/logAnalysis.test.ts src/api/usageDurations.test.ts
 npm run build
 ```
 
-### 6.3 静态和保护范围检查
+### 8.4 静态/保护范围
 
 - [ ] `git diff --check`。
-- [ ] 前端类型检查/构建通过。
-- [ ] 搜索主页面不再把 `LogDecode` summary 响应当作正式 H1/click 指标。
-- [ ] 搜索页面挂载、查询、刷新、轮询路径没有 `postParseJob` 调用。
-- [ ] 确认只修改本计划列出的实现、测试和 `docs/48`；`docs/50` 的既有修改保持原样且不进入提交。
+- [ ] `rg` 确认 `LogViewer.vue` 不再导入/调用旧 summary/details API。
+- [ ] `rg` 确认 analysis mount/query/refresh/轮询路径没有 `postParseJob`，只有显式按钮路径允许调用。
+- [ ] `rg` 确认没有新增正式表 `job_id`、迁移脚本或生产写操作。
+- [ ] 确认 `docs50` 仍是未暂存脏文件且未被提交。
 
-## 7. 提交顺序与审查检查点
+## 9. 提交、审查、发布和回滚
 
-本轮只提交规格和计划文档；后续实施建议按以下小提交进行，避免把兼容清理和业务口径混在一起：
+本次修订先提交文档，等待主审确认后才允许进入实现；当前提交不包含业务代码。
 
-1. `test: lock unified log analysis scope behavior`：范围/刷新/小时/无自动解析测试。
-2. `feat: use formal parse results as analysis primary path`：正式结果状态、任务快照展示和 legacy 次级区。
-3. `feat: aggregate usage duration by package`：后端一包一行、设备明细兼容和前端展示。
-4. `docs: clarify cumulative usage duration semantics`：更新 `docs/48`。
-5. `test: verify log analysis and package usage release`：补齐端到端/构建/保护范围验证。
+后续实现建议按小提交拆分：
 
-每个提交前都确认 `docs/50` 未被 stage。实施前审查点：
+1. `test: lock analysis scope and latest job contract`；
+2. `feat: show formal metrics and task states in log viewer`；
+3. `feat: aggregate usage duration by package`；
+4. `docs: clarify cumulative usage duration semantics`；
+5. `test: add PostgreSQL scope and usage regression`。
 
-- [ ] 用户确认本规格和计划。
-- [ ] 用户确认 `BASE_SHA=d08718c7bc0877415eaf04d871a1b5878154a6c2` 作为实现起点。
-- [ ] 用户确认旧 summary 是“兼容次级区”还是完全移除其前端显示；默认按本计划的兼容次级区实施，以保留包资料/指标配置。
+发布前必须有前后端同版本构建、单元/API 测试、真实 PostgreSQL 回归结果（或明确未验证）和保护范围检查。发布只做只读验证，不创建生产 parse job。
 
-## 8. 发布、观测与回滚
-
-### 发布前
-
-- [ ] 只在测试数据或只读环境验证；不创建生产 parse job。
-- [ ] 检查前后端版本一起发布，避免新页面调用旧 API 契约。
-- [ ] 记录构建产物校验值和发布前应用版本，保留回滚目标。
-
-### 发布后只读验证
-
-- [ ] 选择一个有正式任务、一个无任务、一个成功空结果范围，确认 UI 三态/多态文案。
-- [ ] 修改范围后点击刷新，确认请求参数与生效范围一致。
-- [ ] 检查一包多机型只出现一行，抽查总时长和数据库最新设备值一致。
-- [ ] 确认无后台自动解析任务新增。
-
-### 回滚
-
-回滚只恢复上一应用版本，不执行数据库逆迁移、不删除正式结果、不删除 usage 历史报告。由于本计划不要求 schema 变更、不自动创建生产任务，回滚不会改变数据事实；旧 summary 和设备明细兼容 API 可继续服务旧页面。
+回滚只恢复上一应用版本，不做数据库逆迁移、不删除历史正式结果或 usage 报告。共享正式表的重叠发布不通过回滚补偿；若需重新发布期望范围，必须由管理员明确创建新任务。
