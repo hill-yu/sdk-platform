@@ -325,6 +325,64 @@ describe("LogViewer", () => {
     expect(cancelParseJob).toHaveBeenCalledWith(9);
   });
 
+  it("does not let an older cancellation response overwrite a newer scope", async () => {
+    const cancelA = deferred<unknown>();
+    cancelParseJob.mockReturnValueOnce(cancelA.promise as never);
+    const wrapper = await mountAnalysisViewer();
+    await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
+    const scopeA = { package_name: "com.example.app", date_from: "2026-10-06", hour_from: 0, date_to: "2026-10-08", hour_to: 23 };
+    postParseJob.mockResolvedValueOnce({ data: { code: 0, data: { id: 91, package_name: scopeA.package_name, ...analysisScopeUtcRange(scopeA), status: "running", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
+    await wrapper.get("[data-testid='start-parse']").trigger("click");
+    await flushPromises();
+    await wrapper.get("[data-testid='cancel-parse']").trigger("click");
+    await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.next");
+    await wrapper.get("[data-testid='filter-query-existing']").trigger("click");
+    await flushPromises();
+    cancelA.resolve({ data: { code: 0, data: { id: 91, package_name: scopeA.package_name, ...analysisScopeUtcRange(scopeA), status: "cancelled", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
+    await flushPromises();
+    expect(wrapper.find("[data-testid='cancel-parse']").exists()).toBe(false);
+  });
+
+  it("polls after cancellation returns running until the worker reports cancelled", async () => {
+    vi.useFakeTimers();
+    try {
+      const wrapper = await mountAnalysisViewer();
+      await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
+      const scope = { package_name: "com.example.app", date_from: "2026-10-06", hour_from: 0, date_to: "2026-10-08", hour_to: 23 };
+      postParseJob.mockResolvedValueOnce({ data: { code: 0, data: { id: 92, package_name: scope.package_name, ...analysisScopeUtcRange(scope), status: "running", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
+      cancelParseJob.mockResolvedValueOnce({ data: { code: 0, data: { id: 92, package_name: scope.package_name, ...analysisScopeUtcRange(scope), status: "running", cancel_requested_at: "2026-10-08T00:00:00Z", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
+      getParseJob.mockResolvedValueOnce({ data: { code: 0, data: { id: 92, package_name: scope.package_name, ...analysisScopeUtcRange(scope), status: "cancelled", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
+      await wrapper.get("[data-testid='start-parse']").trigger("click");
+      await flushPromises();
+      await wrapper.get("[data-testid='cancel-parse']").trigger("click");
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushPromises();
+      expect(getParseJob).toHaveBeenCalledWith(92);
+      expect(wrapper.find("[data-testid='cancel-parse']").exists()).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("restores polling when cancellation fails", async () => {
+    vi.useFakeTimers();
+    try {
+      const wrapper = await mountAnalysisViewer();
+      await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
+      const scope = { package_name: "com.example.app", date_from: "2026-10-06", hour_from: 0, date_to: "2026-10-08", hour_to: 23 };
+      postParseJob.mockResolvedValueOnce({ data: { code: 0, data: { id: 93, package_name: scope.package_name, ...analysisScopeUtcRange(scope), status: "running", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
+      cancelParseJob.mockRejectedValueOnce(new Error("cancel unavailable"));
+      getParseJob.mockResolvedValueOnce({ data: { code: 0, data: { id: 93, package_name: scope.package_name, ...analysisScopeUtcRange(scope), status: "running", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
+      await wrapper.get("[data-testid='start-parse']").trigger("click");
+      await flushPromises();
+      await wrapper.get("[data-testid='cancel-parse']").trigger("click");
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushPromises();
+      expect(getParseJob).toHaveBeenCalledWith(93);
+      expect(wrapper.find("[data-testid='cancel-parse']").exists()).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("composes scoped metrics and failure details without clearing the legacy summary", async () => {
     const wrapper = await mountAnalysisViewer();
     await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");

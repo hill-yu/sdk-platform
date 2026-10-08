@@ -166,10 +166,11 @@ describe("LogMetricsPanel", () => {
   });
 
   it("labels true zero while retaining zero-valued formal cards", async () => {
-    vi.mocked(getMetricOverview).mockResolvedValueOnce({ data: { code: 0, data: { declaration_count: 0, planned_click_count: 0, actual_click_count: 0, response_success_count: 0, plan_mismatch_count: 0, interstitial_presentation_count: 0, interstitial_click_count: 0, interstitial_close_count: 0, interstitial_close_rate: null, interstitial_non_close_click_rate: null, target_breakdown: {} } } } as never);
+    vi.mocked(getMetricOverview).mockResolvedValueOnce({ data: { code: 0, data: { declaration_count: 1, planned_click_count: 0, actual_click_count: 0, response_success_count: 0, plan_mismatch_count: 0, interstitial_presentation_count: 0, interstitial_click_count: 0, interstitial_close_count: 0, interstitial_close_rate: null, interstitial_non_close_click_rate: null, target_breakdown: {} } } } as never);
     const wrapper = mount(LogMetricsPanel, { props: { scope, job: { ...successJob, h1_count: 1 } } });
     await flushPromises();
-    expect(wrapper.get("[data-testid='metrics-status']").text()).toContain("未产生可展示指标");
-    expect(wrapper.get("[data-testid='declaration-count']").text()).toBe("0");
+    expect(wrapper.get("[data-testid='metrics-status']").text()).toContain("真实零值");
+    expect(wrapper.get("[data-testid='declaration-count']").text()).toBe("1");
+    expect(wrapper.get("[data-testid='planned-click-count']").text()).toBe("0");
   });
 });

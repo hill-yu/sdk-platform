@@ -165,10 +165,10 @@
   formal metrics 请求携带当前 exact scope；当最新任务成功时额外携带 `snapshot_end_utc`。后端验证：
 
   ```text
-  range_start_utc <= snapshot_end_utc <= range_end_utc
+  range_start_utc < snapshot_end_utc <= range_end_utc
   ```
 
-  所有 H1/click 查询使用 `[range_start_utc, min(range_end_utc, snapshot_end_utc))`。若没有成功任务，主 UI 不请求或不展示 formal metrics；不使用旧成功任务冒充当前失败/运行任务。
+  所有 H1/click 查询使用 `[range_start_utc, snapshot_end_utc)`；`snapshot_end_utc <= range_start_utc` 继续 422，`snapshot_end_utc > range_end_utc` 也 422，不静默截断。`no_source` 只表示合法非空 snapshot 区间内没有源事件。若没有成功任务，主 UI 不请求或不展示 formal metrics；不使用旧成功任务冒充当前失败/运行任务。
 
 - [ ] **3.2 保持共享正式表语义**
 

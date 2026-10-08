@@ -397,14 +397,25 @@ async function requestParse(snapshot: LogMetricScope) {
 }
 
 async function requestCancel(jobId: number) {
-  if (parseCancelling.value) return;
+  if (parseCancelling.value || !parseJob.value || parseJob.value.id !== jobId) return;
+  const requestGeneration = parseRequestSequence;
+  const cancelScope = { ...metricScope.value };
+  const previousJob = parseJob.value;
   clearParsePoll();
   parseCancelling.value = true;
   try {
     const response = await cancelParseJob(jobId);
-    parseJob.value = responseData<ParseJob>(response);
+    if (requestGeneration !== parseRequestSequence) return;
+    const candidate = responseData<ParseJob>(response);
+    if (!latestJobMatchesScope(candidate, cancelScope)) return;
+    parseJob.value = candidate;
+    scheduleParsePoll(cancelScope, requestGeneration);
   } catch (error) {
-    setFeedbackError(feedback, error instanceof Error ? error.message : "解析任务取消失败");
+    if (requestGeneration === parseRequestSequence) {
+      parseJob.value = previousJob;
+      setFeedbackError(feedback, error instanceof Error ? error.message : "解析任务取消失败");
+      scheduleParsePoll(cancelScope, requestGeneration);
+    }
   } finally { parseCancelling.value = false; }
 }
 function refreshMetrics() { metricScope.value = { ...metricScope.value }; }

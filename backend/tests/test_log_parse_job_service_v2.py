@@ -1056,30 +1056,28 @@ def test_batch_preserves_successful_h1_and_failed_h1_subset_counts(monkeypatch) 
         lease_owner="worker-1",
         lease_expires_at=NOW.replace(hour=2),
     )
-    events = [
-        SdkEvent(id=index, event_type="log", package_name="com.example.app", server_ts=NOW, payload={"extra": "H1|i=GC"})
-        for index in range(2)
-    ]
+    events = [SdkEvent(id=1, event_type="log", package_name="com.example.app", server_ts=NOW, payload={"extra": "H1|i=GC|p=1||H1|i=GD|p=1"})]
+    original = service.parse_host_final_result_line
+    calls = 0
 
-    def mixed_rows(event, job_id):
-        return [{
-            "job_id": job_id,
-            "event_id": event.id,
-            "event_server_ts": event.server_ts,
-            "record_index": 1,
-            "package_name": event.package_name,
-            "status": "failed" if event.id == 0 else "success",
-            "decoder_version": "2.0.0",
-            "parsed_at": NOW,
-        }], [], 0
+    def fail_first_h1(record):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ValueError("bad H1")
+        return original(record)
 
-    monkeypatch.setattr(service, "build_h1_and_click_rows", mixed_rows)
-    result = asyncio.run(service.process_parse_job_batch(BatchDb(job, events), 91, worker_id="worker-1", now=NOW, batch_size=200))
+    monkeypatch.setattr(service, "parse_host_final_result_line", fail_first_h1)
+    db = BatchDb(job, events)
+    result = asyncio.run(service.process_parse_job_batch(db, 91, worker_id="worker-1", now=NOW, batch_size=200))
 
     assert result.h1_count == 2
     assert result.failed_h1_count == 1
     assert job.h1_count == 2
     assert job.failed_h1_count == 1
+    asyncio.run(service.publish_parse_job(db, job, now=NOW))
+    assert job.status == "success"
+    assert any("sdk_log_h1_declarations" in str(statement) for statement in db.statements)
 
 
 def test_publish_replaces_only_job_scope_and_marks_success() -> None:

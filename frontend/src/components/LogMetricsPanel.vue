@@ -127,7 +127,7 @@ const jobStatusMessage = computed(() => {
   if (props.job.h1_count === 0) return "解析完成，但没有 H1 结果。";
   if (props.job.failed_h1_count >= props.job.h1_count) return "解析完成，但所有 H1 均失败。";
   if (props.job.failed_h1_count > 0) return `解析完成，${props.job.failed_h1_count} 个 H1 失败；下方仅展示成功结果。`;
-  if (overview.value && overview.value.declaration_count === 0) return "解析完成，但成功 H1 未产生可展示指标。";
+  if (overview.value && overview.value.declaration_count > 0 && overview.value.planned_click_count === 0 && overview.value.actual_click_count === 0 && overview.value.response_success_count === 0) return "解析完成，成功 H1 存在，但正式点击指标为真实零值。";
   return "";
 });
 

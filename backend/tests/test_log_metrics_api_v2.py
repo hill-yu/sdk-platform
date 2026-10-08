@@ -208,3 +208,34 @@ def test_metrics_scope_rejects_snapshot_after_requested_range(monkeypatch):
         app.dependency_overrides.clear()
 
     assert response.status_code == 422
+
+
+def test_metrics_scope_accepts_snapshot_at_requested_end_and_rejects_start(monkeypatch):
+    from app.admin_main import app
+    from app.api.admin import log_metrics
+
+    calls = []
+
+    async def fake_query(_db, **kwargs):
+        calls.append(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(log_metrics._metrics_service(), "get_overview", fake_query)
+    app.dependency_overrides[get_db_no_commit] = override_db
+    try:
+        with TestClient(app) as client:
+            common = {
+                "package_name": "com.example.app",
+                "date_from": "2026-10-01",
+                "hour_from": 0,
+                "date_to": "2026-10-01",
+                "hour_to": 23,
+            }
+            at_end = client.get("/api/admin/log-analysis/metrics/overview", params={**common, "snapshot_end_utc": "2026-10-01T16:00:00Z"}, headers={"Authorization": f"Bearer {TOKEN}"})
+            at_start = client.get("/api/admin/log-analysis/metrics/overview", params={**common, "snapshot_end_utc": "2026-09-30T16:00:00Z"}, headers={"Authorization": f"Bearer {TOKEN}"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert at_end.status_code == 200
+    assert calls[-1]["range_end"].isoformat() == "2026-10-01T16:00:00+00:00"
+    assert at_start.status_code == 422

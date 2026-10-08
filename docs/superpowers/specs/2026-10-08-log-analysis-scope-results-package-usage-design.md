@@ -178,7 +178,7 @@ successful_h1_count = h1_count - failed_h1_count
 - 任务状态和 snapshot 信息独立于正式表，不把正式行标记为属于某个 job；
 - UI 只能表述“当前 exact scope 在选定 snapshot 上限内读取到的正式结果”，不能表述“job N 的不可变输出”。
 
-formal metrics 查询必须带当前 exact scope，并在有最新成功任务时带 `snapshot_end_utc` 上限。后端校验 `range_start_utc <= snapshot_end_utc <= range_end_utc`，实际读取边界为：
+formal metrics 查询必须带当前 exact scope，并在有最新成功任务时带 `snapshot_end_utc` 上限。后端校验 `range_start_utc < snapshot_end_utc <= range_end_utc`；`snapshot_end_utc <= range_start_utc` 继续返回 422，不扩大“空快照”语义。`no_source` 只表示合法非空 snapshot 区间内没有源事件。实际读取边界为：
 
 ```text
 [range_start_utc, min(range_end_utc, snapshot_end_utc))
