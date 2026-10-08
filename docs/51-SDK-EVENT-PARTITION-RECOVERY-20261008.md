@@ -63,4 +63,17 @@ FOR VALUES FROM ('2026-12-01 00:00:00+00') TO ('2027-01-01 00:00:00+00');
 - `deploy/systemd/sdk-event-partition-maintenance.service` 与 `.timer`：脚本放在独立 `/opt/sdk-platform-maintenance/<commit>/scripts/`，复用当前 release 的 `.env`/venv，不切换业务 API release。
 - 本地 PostgreSQL 集成测试仅允许 loopback 且数据库名为唯一 `sdk_partition_test_<suffix>`，覆盖真实 dry-run 无 DDL、旧 fixture 计数保留、apply、幂等 apply、advisory 冲突快速拒绝和 DDL 后置校验失败 rollback；专项 9 项通过，后端全量 `412 passed, 1 skipped`。
 
-timer 尚未安装或启用。正式安装须先完成代码审查，再执行以下受控流程：将脚本以 root:root、`0755` 安装到 `/opt/sdk-platform-maintenance/<commit>/scripts/`，创建同目录的 `current.new` 符号链接并用 `mv -Tf` 原子切换 `/opt/sdk-platform-maintenance/current`，核对服务用户 `www-data` 可读；随后 `systemctl daemon-reload`，再由单独发布窗口决定是否 enable/start timer。该流程不切换 `/www/releases/sdk-platform/current`。旧 `create_next_partition()` 仅保留为 legacy，不用于修复已存在的分区缺口。
+## 独立维护 timer 安装与验收
+
+经独立代码审查放行后，维护版本按原子切换流程安装；本次安装不切换业务 release，也未重启 API/worker：
+
+- 维护提交：`44856caa1df0d0bd2165102080ae161d193c4dbc`；生产 `ensure_sdk_event_partitions.py` SHA-256 为 `00b8909c1bda2358f83e0d8feb3a23a02d65f65dc1177d5a2faf74bc83312bb0`，与本地版本一致。
+- 安装目录：`/opt/sdk-platform-maintenance/44856caa1df0d0bd2165102080ae161d193c4dbc`，`/opt/sdk-platform-maintenance/current` 原子指向该目录；脚本为 `root:root 0755`，两个 unit 为 `root:root 0644`。
+- 安装前备份：`/root/sdk-deploy-backups/20261008_021738_partition-maintenance-install`，保存旧 `current` 指针及同名 unit 的状态（此前均不存在）。
+- `systemd-analyze verify` 通过；以 `www-data` 最小环境执行 dry-run 返回 `current_month=2026-10-01`、目标 10/11/12 月、`missing=none`、`created=none`。一次继承 root `PGSSLKEY` 的包装器检查因无法读取 root 私钥失败，但未连接数据库或写入；未修改业务 `.env`、TLS 配置或权限，随后最小环境和真实 systemd 执行均成功。
+- 真实 oneshot 首次执行成功：`missing=none`、`created=none`、`verified=true`、`committed=true`，service `Result=success`、`ExecMainStatus=0`；幂等执行未重复创建分区。
+- timer 已 `enabled/active/waiting`，下一次触发为 `2026-10-09 00:18:56 UTC`，即北京时间 `2026-10-09 08:18:56`（含随机错峰延迟）。
+- 独立真实 PostgreSQL 集成证据：`1 passed, 9 deselected`；生产只读复核确认旧分区计数 `2/867/205365` 未减少，10 月分区持续有新数据，20 分钟窗口内上报连续 `HTTP 200` 且未出现新的 `no partition`。
+- 业务 API release 仍为 `a822891065c7439cfa27cf70c11f26e6ea9cdf71`；四个业务进程 PID 未变，均保持 active、`NRestarts=0`、`ExecMainStatus=0`。维护版本 `44856ca...` 仅由独立 service 使用。
+
+旧 `create_next_partition()` 仅保留为 legacy，不用于修复已存在的分区缺口。

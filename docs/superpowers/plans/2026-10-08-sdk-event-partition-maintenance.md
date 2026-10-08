@@ -129,4 +129,22 @@
 
 - [ ] **步骤 5：提交**
 
-  只提交维护脚本、unit、测试和计划；`docs/50` 等用户已有脏文件单独保留，生产证据待审阅结论后再记录。
+只提交维护脚本、unit、测试和计划；`docs/50` 等用户已有脏文件单独保留，生产证据待审阅结论后再记录。
+
+## 任务 5：独立维护 timer 安装收口
+
+- [x] **步骤 1：安装版本化维护文件并保留恢复指针**
+
+  已安装提交 `44856caa1df0d0bd2165102080ae161d193c4dbc` 到 `/opt/sdk-platform-maintenance/<commit>/`，并以 `current.new` + `mv -Tf` 原子切换 `current`。安装备份为 `/root/sdk-deploy-backups/20261008_021738_partition-maintenance-install`；未切换 `/www/releases/sdk-platform/current`。
+
+- [x] **步骤 2：验证权限、unit 和实际执行**
+
+  `systemd-analyze verify` 通过；`www-data` 最小环境 dry-run 报告 `missing=none`、`created=none`；真实 oneshot 报告 `verified=true`、`committed=true`，无新增 DDL。一次继承 root `PGSSLKEY` 的包装器检查仅因私钥权限失败，未连接数据库或写入，且未改动业务 TLS/环境配置。
+
+- [x] **步骤 3：启用 timer 并记录独立验收证据**
+
+  timer 已 `enabled/active/waiting`，下一次触发为 `2026-10-09 00:18:56 UTC`（北京时间 `2026-10-09 08:18:56`）。真实 PostgreSQL 集成测试为 `1 passed, 9 deselected`；业务 release 保持 `a822891065c7439cfa27cf70c11f26e6ea9cdf71`，维护提交保持 `44856caa1df0d0bd2165102080ae161d193c4dbc`，四个业务进程未重启。旧分区计数未减少，10 月上报持续返回 200。
+
+- [x] **步骤 4：文档提交边界**
+
+  本次仅提交 `docs/51` 和本计划文件；`docs/50-LOG-METRICS-DEVICE-DURATION-H1-EXPORT-IMPLEMENTATION-20260930.md` 的用户既有 dirty 改动不纳入提交。本次不合并、不推送。
