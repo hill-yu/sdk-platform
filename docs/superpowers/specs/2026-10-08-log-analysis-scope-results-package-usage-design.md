@@ -56,7 +56,27 @@ usage 与 analysis 使用独立范围状态和校验，不共享“包名必填�
 
 ### 3.1 当前合法 draft 的应用规则
 
-`LogAnalysisFilters.vue` 发出的 query/refresh/reset 事件都带完整 draft 快照。`LogViewer.vue` 必须在处理事件时：
+`LogAnalysisFilters.vue` 发出的 query/refresh/reset 事件都带完整 draft 快照。解析按钮事件链固定为：
+
+```text
+LogAnalysisFilters
+  -- query/refresh/update:modelValue --> LogViewer 保存 draft snapshot
+LogParseTaskPanel
+  -- request-parse(snapshot) --> LogViewer
+LogViewer
+  -- 校验当前最新 draft --> appliedAnalysisScope
+  -- 合法后 POST /parse-jobs --> TaskPanel 轮询任务
+```
+
+组件契约固定为：
+
+- `LogAnalysisFilters` 维护 draft，`update:modelValue`、`query`、`refresh`、`reset` 均传完整 `LogAnalysisFilterValues`；
+- `LogParseTaskPanel` 接收当前 draft/applied scope 作为 props，只 emit `request-parse`，不直接读取表单、不自行校验旧值、不直接 POST；
+- `LogViewer` 接收 `request-parse` 后从当前最新 draft 取值，执行同一合法性校验，合法时保存 `appliedAnalysisScope` 并 POST；非法时显示校验错误且不得 POST。
+
+因此用户修改表单后不点击查询、直接点击解析时，解析使用最新 draft；用户提交非法 draft 时，解析按钮事件仍不能绕过校验。
+
+`LogViewer.vue` 必须在处理 query/refresh/reset/request-parse 时：
 
 1. 校验并保存该快照为 `appliedAnalysisScope`；
 2. 用同一个快照触发任务状态查询、formal metrics 查询和页面展示；
@@ -95,7 +115,7 @@ ORDER BY created_at DESC, id DESC
 LIMIT 1
 ```
 
-没有匹配任务返回明确的 `data: null`，不能伪造空任务对象。
+没有匹配任务返回明确的 `data: null`，不能伪造空任务对象。静态路由必须注册在 `GET /log-analysis/parse-jobs/{job_id}` 之前；API 回归必须实际请求 `/latest`，确认不会被 `{job_id}` 路由解析为整数而返回 422。
 
 ### 4.2 `ParseJob` 类型与时间字段
 
@@ -113,29 +133,42 @@ scope.range_end_utc
 snapshot_end_utc
 ```
 
-现有旧时间字段如继续返回，必须在 API 文档中标注其时区和兼容语义；前端展示不得猜测，统一用 UTC 边界转换为北京时间显示。任务进度使用 `total_count`、`processed_count`、`decoded_count`、`h1_count`、`failed_h1_count`、`no_h1_count`。
+现有旧时间字段如继续返回，必须在 API 文档中标注其时区和兼容语义；前端展示不得猜测，统一用 UTC 边界转换为北京时间显示。新进度 UI 使用 `total_count`、`processed_count`、`h1_count`、`failed_h1_count`、`no_h1_count`；`decoded_count` 和 `failed_count` 旧字段不作为本次新进度展示依据。
 
 ### 4.3 任务状态和 formal 结果状态
 
-最近任务是当前 scope 的状态来源：
+最近任务是当前 scope 的状态来源。成功状态按以下互斥顺序判定：
 
 | 最新任务状态 | 主 UI 行为 |
 |---|---|
 | 无任务 | 提示尚未对该 exact scope 执行显式解析，不展示 formal metrics |
 | `pending/running` | 展示任务范围、UTC/北京时间快照、进度和等待状态，不把旧正式行显示为此次成功 |
 | `failed/cancelled` | 展示失败/取消原因和失败计数，不把旧正式结果标记为此次成功 |
-| `success` 且有成功 H1 | 展示 formal metrics，并显示任务 snapshot 信息 |
-| `success` 且无成功 H1 | 根据计数区分 `all_failed_h1`、`no_h1` 或 `true_zero`，明确提示而不是统一显示全 0 |
+| `success` 且有成功 H1 | 继续区分 `true_zero` 与 `success_nonzero`，并显示任务 snapshot 信息 |
+| `success` 且成功 H1 为 0、失败 H1 大于 0 | `all_failed_h1`，同时展示 `no_h1_count` |
+| `success` 且成功 H1 为 0、失败 H1 为 0、有原始事件 | `no_h1` |
 
 成功任务的细分必须可测试：
 
-- `all_failed_h1`：存在 H1，但所有 H1 均解析失败；失败 H1 不进入成功指标计数；
-- `no_h1`：扫描到原始事件但 `no_h1_count > 0` 且没有成功 H1；
-- `true_zero`：存在成功 H1，但计划/实际/成功等正式指标确实为 0；
-- `success_nonzero`：存在成功 H1 且至少一个正式指标非零；
-- `no_source`：任务成功但 `total_count = 0`，单独显示范围内没有源事件。
+- `no_source`：任务成功且 `total_count = 0`；
+- `all_failed_h1`：成功 H1 为 0 且 `failed_h1_count > 0`，同时显示 `no_h1_count`；
+- `no_h1`：成功 H1 为 0、`failed_h1_count = 0` 且存在原始事件；
+- `true_zero`：成功 H1 大于 0，但计划/实际/成功等正式指标确实为 0；
+- `success_nonzero`：成功 H1 大于 0 且至少一个正式指标非零。
 
-### 4.4 共享正式表和重叠重解析
+`all_failed_h1`、`no_h1` 和 `true_zero` 互斥，不能用“成功 H1 为 0”同时包含 `true_zero`。
+
+### 4.4 解析计数不变量
+
+按现有 worker 的计数语义，`h1_count` 是成功 H1 与失败 H1 的总数，`failed_h1_count` 是其中失败 H1 的子集；因此只有在测试确认不变量成立时，才允许使用：
+
+```text
+successful_h1_count = h1_count - failed_h1_count
+```
+
+如果现有 worker 或历史任务不能保证该不变量，正式 scope/snapshot 查询必须直接从正式 H1 表按 `status` 计算成功 H1 数，不能由任务计数推断。`decoded_count` 和 `failed_count` 是旧进度字段；本次不修改 worker 语义，新进度 UI 不使用它们，避免把未更新字段显示成可信进度。
+
+### 4.5 共享正式表和重叠重解析
 
 本次不增加正式表 `job_id`，不做结果版本化，不创建迁移，也不承诺不可变的“某任务专属结果”。正式 H1/click 表是共享的已发布解析数据：
 
@@ -174,12 +207,36 @@ formal metrics 查询必须带当前 exact scope，并在有最新成功任务�
 4. 配置和包资料的失败、取消、切换范围行为均由 `LogViewer.test.ts`、`LogMetricsPanel.test.ts`、`PackageProfileCell.test.ts` 和 `LogColumnSettings.test.ts` 覆盖；
 5. 这些保留功能不再依赖旧 summary/details API 的响应行，也不改变旧 summary/details API。
 
+columns preference 的旧 ID 不得由实施者自行猜测映射，固定如下：
+
+| 旧 ID | formal ID/显示位置 | 处理 |
+|---|---|---|
+| `date` | `scope_label` | 显示当前 exact scope，作为 formal 必需项 |
+| `package_name` | `package_name` | 原样保留，作为 formal 必需项 |
+| `alias` | `profile.alias` | `PackageProfileCell` |
+| `company` | `profile.company` | `PackageProfileCell` |
+| `account` | `profile.account` | `PackageProfileCell` |
+| `url` | `config_id` | 显示配置 ID；不伪造真实 URL |
+| `expected_click_count` | `planned_click_count` | H1 `declared_click_count` 计划总数 |
+| `actual_click_count` | `actual_click_count` | click `did_click=true` |
+| `ad_click_count` | `ad_area_actual_count` | `banner + anchored` 的实际点击 |
+| `interstitial_presentation_count` | `interstitial_presentation_count` | 正式 H1 插屏展示数 |
+| `interstitial_click_count` | `interstitial_click_count` | 正式 H1 插屏点击数 |
+| `parse_failure_count` | `failed_h1_count` | 任务/正式 H1 失败数 |
+| `user_count` | 无一一对应项 | 保留为未映射历史设置，不渲染为正式指标 |
+| `flow_count` | 无一一对应项 | 保留为未映射历史设置，不渲染为正式指标 |
+| `average_duration_ms` | 无一一对应项 | H1 流程时长不等于本 formal 指标，保留设置不渲染 |
+| `success_rate` | 无一一对应项 | `LogDecode.is_success` 不等于 click 响应成功率，保留设置不渲染 |
+
+旧设置读取时必须保留未映射 ID（例如放入现有 preference JSON 的 `unmapped_legacy_columns` 或等价兼容字段），不能静默清空；正式设置界面把它们标为“历史列，无正式结果对应项”。用户显式保存后仍保留这些历史 ID 的记录，同时只用映射成功的 formal ID 控制渲染。新增/更新的 columns API 字段属于配置契约，不修改旧 summary/details API。
+
 ## 6. Formal H1/click 计数口径
 
 正式指标服务必须过滤失败 H1：
 
 - `status = failed` 的 H1 不进入成功声明、计划点击、配置分布、计划不一致或成功率等成功指标；
 - 失败 H1 计入任务失败计数，并在 H1 明细/失败区显示 `parse_error` 或脱敏失败原因；
+- 部分失败时，成功 H1 继续进入成功指标，失败 H1 只进入失败计数/明细，不能用总 `h1_count` 直接当成功声明数；
 - 成功 H1 的 click failure 仍按 `navigation_code IS DISTINCT FROM 1` 进入失败明细和失败率；
 - 无 H1、全部 H1 失败和成功 H1 但指标为 0 必须分别返回/展示，不能都由空数组或 0 值表达。
 
@@ -226,15 +283,18 @@ ge_900: duration_s >= 900
 1. analysis 初始 draft 是最近 3 个北京时间自然日；提交超过 7 个北京时间日或非法小时被前后端共同拒绝。
 2. analysis query/refresh/parse 使用当前合法 draft；刷新实际请求不丢包名、日期或小时；usage 空包名仍查全部且 31 天规则不变。
 3. 页面挂载、query、refresh、轮询和指标面板初始化不创建 parse job；只有显式解析按钮 POST。
-4. 最近任务按 `(package_name, range_start_utc, range_end_utc)` 精确匹配，按 `created_at DESC, id DESC` 选最新；无任务返回 `null`。
-5. `ParseJob` 不伪造 date/hour 字段；UTC 范围和 snapshot 上限可可靠转换为北京时间展示。
-6. analysis 主 UI 不再渲染旧 `LogDecode` summary/details；正式指标、包资料和可配指标仍在 `LogMetricsPanel` 正式界面可用。
-7. pending/running 显示进度；failed/cancelled 不把旧结果标成当前任务成功；旧任务完成不会覆盖新 applied scope。
-8. all-failed、no-H1、true-zero、no-source 分别可识别；失败 H1 不进入成功指标计数但可查看失败明细。
-9. formal metrics 只读 exact scope 与合法 snapshot 上限；重叠任务行为按共享正式表语义展示，不宣称任务级不可变结果。
-10. usage 多机型一包仅一行；每设备只计范围内最新累计报告；四个桶边界和 `device_model=null` 兼容字段符合本设计。
-11. `docs/48-SDK-USAGE-DURATION-DESIGN-20260929.md` 写明累计时长和最新设备报告口径。
-12. 真实 PostgreSQL 回归必须执行；若环境没有隔离 PG16，验收报告明确标记“未验证”，不能以编译通过替代。
+4. 未提交 draft 点击解析使用最新 snapshot；非法 draft 不 POST；TaskPanel 只 emit `request-parse`。
+5. 最近任务按 `(package_name, range_start_utc, range_end_utc)` 精确匹配，按 `created_at DESC, id DESC` 选最新；`/latest` 静态路由在 `/{job_id}` 前且请求不会 422；无任务返回 `null`。
+6. `ParseJob` 不伪造 date/hour 字段；UTC 范围和 snapshot 上限可可靠转换为北京时间展示。
+7. analysis 主 UI 不再渲染旧 `LogDecode` summary/details；正式指标、包资料和可配指标仍在 `LogMetricsPanel` 正式界面可用。
+8. pending/running 显示新进度字段；不展示未更新的 `decoded_count/failed_count`；failed/cancelled 不把旧结果标成当前任务成功；旧任务完成不会覆盖新 applied scope。
+9. all-failed、部分失败、no-H1、true-zero、no-source 分别可识别；失败 H1 不进入成功指标计数但可查看失败明细。
+10. `h1_count`/`failed_h1_count` 不变量经过 worker 测试确认后才推导成功 H1，否则按正式表 status 查询。
+11. formal metrics 只读 exact scope 与合法 snapshot 上限；重叠任务行为按共享正式表语义展示，不宣称任务级不可变结果。
+12. usage 多机型一包仅一行；每设备只计范围内最新累计报告；四个桶边界和 `device_model=null` 兼容字段符合本设计。
+13. 旧 columns ID 按固定表映射；无法对应项保留且不渲染，不静默清空用户设置。
+14. `docs/48-SDK-USAGE-DURATION-DESIGN-20260929.md` 写明累计时长和最新设备报告口径。
+15. 真实 PostgreSQL 回归必须执行；若环境没有隔离 PG16，验收报告明确标记“未验证”，不能以编译通过替代。
 
 ## 10. 发布与回滚
 

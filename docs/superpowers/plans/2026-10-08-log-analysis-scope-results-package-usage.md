@@ -48,6 +48,7 @@
 - 测试：`backend/tests/test_log_metrics_api_v2.py`
 - 测试：`backend/tests/test_log_parse_job_service_v2.py`
 - 测试：`backend/tests/test_log_metrics_service_v2.py`
+- 测试：`backend/tests/test_log_parse_worker.py`
 
 ### 步骤
 
@@ -67,7 +68,15 @@
 
 - [ ] **1.2 固定前端 draft/applied 状态**
 
-  `LogViewer.vue` 只保留一个 `appliedAnalysisScope` 作为 analysis 请求来源。`queryAnalysis(value)`、`refreshAnalysis(value)`、`resetAnalysis(value)` 先应用完整快照，再触发任务状态和 formal metrics 加载。不要从旧 `appliedFilters`、旧 `metricScope` 或闭包重建范围。
+  事件链必须固定为：`LogAnalysisFilters` 维护 draft 并通过 `update:modelValue`/`query`/`refresh`/`reset` 上送最新完整 snapshot；`LogParseTaskPanel` 只 emit `request-parse(snapshot)`，不直接 POST；`LogViewer` 从当前最新 draft 校验、保存 `appliedAnalysisScope`，合法后才 POST 并负责轮询/刷新。
+
+  具体 props/events：
+
+  - `LogAnalysisFilters`：props `modelValue`、`appliedValue`；emits `update:modelValue`、`query`、`refresh`、`reset`，每个值都是完整 `LogAnalysisFilterValues`；
+  - `LogParseTaskPanel`：props `draftScope`、`appliedScope`、`job`、`disabled`；仅 emit `request-parse(snapshot: LogAnalysisFilterValues)`；不读取父组件旧 scope、不做 POST、不 emit `refresh`；
+  - `LogViewer`：处理 `request-parse`，从当前 draft 取最新值，校验失败只显示错误且不得 POST；校验成功后保存 applied scope，调用 `postParseJob`，把任务状态传回 TaskPanel/LogMetricsPanel。
+
+  因此未提交 draft 直接点击解析使用最新值；非法 draft 不能绕过校验。`LogViewer.vue` 只保留一个 `appliedAnalysisScope` 作为 analysis 请求来源，不从旧 `appliedFilters`、旧 `metricScope` 或闭包重建范围。
 
   `frontend/src/utils/logAnalysisScope.ts` 只负责默认最近 3 个北京时间自然日、前端合法性校验和显示 scope 到 exact UTC scope 的转换；不发请求、不创建任务。
 
@@ -83,6 +92,9 @@
   - 7 个自然日合法，第 8 个日历日非法；
   - analysis formal metrics 和创建任务都拒绝同一组非法范围；
   - 刷新使用当前完整 draft；
+  - 未提交 draft 点击解析使用最新 snapshot；
+  - 非法 draft 点击解析不产生 POST；
+  - TaskPanel 只 emit `request-parse`，不直接调用 API；
   - 页面挂载、刷新、查询、轮询、指标加载均不 POST parse job；
   - usage 空包名和 31 天规则不受影响。
 
@@ -117,7 +129,7 @@
   LIMIT 1
   ```
 
-  无匹配返回 `200 { code: 0, data: null }`；不得按日期、包名或 overlap 模糊取任务。
+  无匹配返回 `200 { code: 0, data: null }`；不得按日期、包名或 overlap 模糊取任务。把静态 `/latest` 路由注册在 `GET /log-analysis/parse-jobs/{job_id}` 之前，并在 `backend/tests/test_log_metrics_api_v2.py` 增加真实 TestClient 请求，确认 `/latest` 不会被 `{job_id}` 当成整数而返回 422。
 
 - [ ] **2.2 修正 `ParseJob` 类型与时间输出**
 
@@ -171,12 +183,19 @@
   后端/前端测试分别覆盖：
 
   - `no_source`：任务成功、`total_count=0`；
-  - `no_h1`：有源事件但没有成功 H1；
-  - `all_failed_h1`：有 H1 但全部失败；
-  - `true_zero`：有成功 H1，但正式计划/实际/成功指标确实为 0；
-  - `success_nonzero`：至少一个正式指标非零。
+  - `no_h1`：成功 H1 为 0、`failed_h1_count=0` 且有原始事件；
+  - `all_failed_h1`：成功 H1 为 0、`failed_h1_count>0`，同时展示 `no_h1_count`；
+  - `true_zero`：成功 H1 大于 0，但正式计划/实际/成功指标确实为 0；
+  - `success_nonzero`：成功 H1 大于 0 且至少一个正式指标非零；
+  - 部分失败：成功 H1 和失败 H1 均大于 0，成功指标只按成功 H1，失败计数/明细另显。
 
-  页面不得把这些情况统一成“暂无指标”或全 0。
+  页面不得把这些情况统一成“暂无指标”或全 0；`all_failed_h1`、`no_h1`、`true_zero` 必须互斥。
+
+- [ ] **3.5 对照现有 worker 计数，不扩张 worker 语义**
+
+  先在 `backend/tests/test_log_parse_worker.py` 和 `backend/tests/test_log_parse_job_service_v2.py` 对照现有 worker 逻辑，确认 `h1_count = successful_h1_count + failed_h1_count` 且 `failed_h1_count` 是子集。只有确认不变量成立才允许由任务计数计算成功 H1；否则 formal scope/snapshot 查询直接按正式 H1 表 `status` 计算成功 H1。
+
+  `decoded_count`、`failed_count` 是旧进度字段；本次新进度 UI 不展示它们，不修改 worker 更新语义。新增全失败、部分失败、无 H1、真零 fixture 和断言。
 
 ## 4. 移除旧 LogDecode 主 UI，保留正式界面的必要功能
 
@@ -212,7 +231,23 @@
 
   `LogViewer.vue` 继续拥有列配置加载/保存和 modal 生命周期，但入口移动到 `LogMetricsPanel.vue` 正式结果标题区域；`LogColumnSettings.vue` 的当前配置驱动 formal metric cards/tables，不再驱动已删除的 LogDecode 表。
 
-  如现有 `log_analysis_service.py` 的列目录仍是旧 summary 字段，只调整 columns preference 的目录/兼容适配，不修改 summary/details SQL/API；已有 JSON preference 以兼容方式读取，用户保存成功后才更新 formal metric 配置，不做数据库迁移。
+  旧 ID 到 formal ID 固定映射，不允许实施时猜测：
+
+  | 旧 ID | formal ID/处理 |
+  |---|---|
+  | `date` | `scope_label`，formal 必需项 |
+  | `package_name` | `package_name`，formal 必需项 |
+  | `alias/company/account` | `profile.alias/profile.company/profile.account` |
+  | `url` | `config_id`，只显示配置 ID，不伪造 URL |
+  | `expected_click_count` | `planned_click_count` |
+  | `actual_click_count` | `actual_click_count` |
+  | `ad_click_count` | `ad_area_actual_count` |
+  | `interstitial_presentation_count` | `interstitial_presentation_count` |
+  | `interstitial_click_count` | `interstitial_click_count` |
+  | `parse_failure_count` | `failed_h1_count` |
+  | `user_count/flow_count/average_duration_ms/success_rate` | 无一一对应项，保留为未映射历史设置，不渲染 |
+
+  如现有 `log_analysis_service.py` 的列目录仍是旧 summary 字段，只调整 columns preference 的目录/兼容适配，不修改 summary/details SQL/API。读取旧 JSON 时保留未映射 ID（例如 `unmapped_legacy_columns`），正式设置界面标为“历史列，无正式结果对应项”；用户保存后也不得静默清空这些 ID，只用映射成功的 formal ID 控制渲染，不做数据库迁移。
 
 - [ ] **4.4 测试生命周期**
 
