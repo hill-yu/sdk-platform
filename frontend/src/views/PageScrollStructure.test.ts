@@ -21,9 +21,7 @@ vi.mock("@/api/version", () => ({
 
 vi.mock("@/api/logAnalysis", () => ({
   getLogAnalysisColumns: vi.fn().mockResolvedValue({ data: { available_columns: [], default_columns: [], columns: [] } }),
-  getLogAnalysisSummary: vi.fn().mockResolvedValue({ data: { total: 0, page: 1, page_size: 20, items: [] } }),
-  getLogAnalysisDetails: vi.fn(),
-  getLogAnalysisDetail: vi.fn(),
+  getPackageProfile: vi.fn(),
   putLogAnalysisColumns: vi.fn(),
 }));
 
@@ -66,7 +64,7 @@ describe("page wide-content scroll boundaries", () => {
       LogDetail: true,
       LogExportPanel: true,
     } } });
-    expect(wrapper.find(".table-scroll").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='metrics-panel']").exists()).toBe(true);
     await wrapper.get("[data-testid='raw-view-tab']").trigger("click");
     await flushPromises();
     expect(wrapper.find(".table-scroll").exists()).toBe(true);
