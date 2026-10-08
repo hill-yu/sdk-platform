@@ -7,6 +7,7 @@ const { request } = vi.hoisted(() => ({
 vi.mock("@/api/request", () => ({ default: request }));
 
 import {
+  FORMAL_METRIC_COLUMN_MAPPING,
   getLogAnalysisDetail,
   getLogAnalysisDetails,
   getLogAnalysisSummary,
@@ -74,6 +75,21 @@ describe("log analysis API", () => {
 
     expect(request.get).toHaveBeenNthCalledWith(1, "/log-analysis/summary", { params: summary });
     expect(request.get).toHaveBeenNthCalledWith(2, "/log-analysis/details", { params: details });
+  });
+
+  it("keeps a fixed formal metric mapping for legacy preference IDs", () => {
+    expect(FORMAL_METRIC_COLUMN_MAPPING).toEqual({
+      alias: "package_profile.alias",
+      company: "package_profile.company",
+      account: "package_profile.account",
+      url: "config_distribution",
+      expected_click_count: "declaration_and_planned_cards",
+      actual_click_count: "actual_and_response_cards",
+      ad_click_count: "ad_area_actual_card_and_target_table",
+      interstitial_presentation_count: "interstitial_presentation_and_close_rate_cards",
+      interstitial_click_count: "interstitial_non_close_click_rate_card",
+      parse_failure_count: "failed_h1_card",
+    });
   });
 
   it("passes composite detail keys and profile/column payloads unchanged", () => {

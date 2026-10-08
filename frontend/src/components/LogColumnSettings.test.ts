@@ -82,4 +82,18 @@ describe("LogColumnSettings", () => {
     expect(wrapper.get("[data-testid='column-settings-save']").attributes("disabled")).toBeDefined();
     expect(wrapper.text()).toContain("保存失败");
   });
+
+  it("round-trips an unmapped historical column and marks it without dropping it", async () => {
+    const wrapper = mount(LogColumnSettings, {
+      props: {
+        availableColumns: [...available, "legacy_unknown"],
+        defaultColumns: defaults,
+        modelValue: [...defaults, "legacy_unknown"],
+        mappedColumns: ["date", "package_name", "alias"],
+      },
+    });
+    expect(wrapper.text()).toContain("legacy_unknown（历史列，正式视图不展示）");
+    await wrapper.get("[data-testid='column-settings-save']").trigger("click");
+    expect(wrapper.emitted("save")).toEqual([[[...defaults, "legacy_unknown"]]]);
+  });
 });

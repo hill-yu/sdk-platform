@@ -194,4 +194,21 @@ describe("LogMetricsPanel", () => {
     expect(wrapper.find("[data-testid='planned-click-count']").exists()).toBe(false);
     expect(wrapper.find("[data-testid='interstitial-presentation-count']").exists()).toBe(false);
   });
+
+  it("maps formal columns to profile, config, ad-area, and failed-H1 sections", async () => {
+    const wrapper = mount(LogMetricsPanel, {
+      props: {
+        scope,
+        job: { ...successJob, failed_h1_count: 2, h1_count: 4 },
+        profile: { package_name: scope.package_name, alias: "示例", company: "公司", account: "acct" },
+        visibleColumns: ["url", "ad_click_count", "parse_failure_count"],
+      },
+    });
+    await flushPromises();
+    expect(wrapper.findAll("[data-testid='profile-value']")).toHaveLength(0);
+    expect(wrapper.find("[data-testid='config-distribution-section']").exists()).toBe(true);
+    expect(wrapper.get("[data-testid='ad-actual-click-count']").text()).toBe("0");
+    expect(wrapper.get("[data-testid='failed-h1-count']").text()).toBe("2");
+    expect(wrapper.find("[data-testid='target-breakdown-section']").exists()).toBe(true);
+  });
 });

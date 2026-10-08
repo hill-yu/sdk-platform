@@ -191,6 +191,7 @@ def test_usage_summary_and_devices_have_stable_tie_breakers():
     assert "package_name" in summary_sql
     assert "GROUP BY anon_1.package_name" in summary_sql
     assert "GROUP BY anon_1.package_name, anon_1.device_model" not in summary_sql
+    assert "SELECT anon_1.package_name, anon_1.device_model" not in summary_sql
 
     devices_db = Db([Result(scalar=0), Result(rows=[])])
     asyncio.run(get_usage_devices(

@@ -121,7 +121,7 @@ async function save() {
     const profile = responseProfile(response);
     const savedValue = typeof profile[props.field] === "string" ? profile[props.field] as string : value;
     emit("update:modelValue", savedValue);
-    emit("saved", { field: props.field, value: savedValue, profile });
+    emit("saved", { field: props.field, value: savedValue, profile: { ...profile, package_name: props.packageName } });
     editing.value = false;
     draftValue.value = savedValue;
   } catch (error) {

@@ -43,6 +43,7 @@
             :available-columns="availableColumns"
             :default-columns="defaultColumns"
             :model-value="visibleColumns"
+            :mapped-columns="FORMAL_COLUMN_LIST"
             :saving="columnSaving"
             :save-error="columnSaveError"
             @save="saveColumns"
@@ -127,6 +128,7 @@ import type { EventFilterOptions, EventItem, EventQuery, LogLevel } from "@/api/
 import { cancelParseJob, getLatestParseJob, getMetricFailures, getParseJob, postParseJob } from "@/api/logMetrics";
 import type { FailureBreakdownItem, LogMetricScope, ParseJob } from "@/api/logMetrics";
 import { getLogAnalysisColumns, getPackageProfile, putLogAnalysisColumns } from "@/api/logAnalysis";
+import { FORMAL_METRIC_COLUMN_MAPPING } from "@/api/logAnalysis";
 import type { LogAnalysisColumns, PackageProfile } from "@/api/logAnalysis";
 import LogAnalysisFilters, { type LogAnalysisFilterValues } from "@/components/LogAnalysisFilters.vue";
 import LogColumnSettings from "@/components/LogColumnSettings.vue";
@@ -143,7 +145,12 @@ import { analysisScopeUtcRange, validateAnalysisScope } from "@/utils/logAnalysi
 
 type View = "analysis" | "raw" | "usage";
 
-const DEFAULT_COLUMNS = ["date", "package_name", "alias", "url", "company", "account", "user_count", "flow_count", "expected_click_count", "actual_click_count", "ad_click_count", "interstitial_presentation_count", "interstitial_click_count", "average_duration_ms", "success_rate", "parse_failure_count"];
+// The legacy columns endpoint remains unchanged. The formal view maps only
+// these IDs to a visible profile/card/table; other historical IDs round-trip
+// through settings but are explicitly marked as not rendered.
+const DEFAULT_COLUMNS = ["date", "package_name", "alias", "company", "account", "url", "expected_click_count", "actual_click_count", "ad_click_count", "interstitial_presentation_count", "interstitial_click_count", "parse_failure_count"];
+const FORMAL_COLUMN_IDS = new Set(["date", "package_name", ...Object.keys(FORMAL_METRIC_COLUMN_MAPPING)]);
+const FORMAL_COLUMN_LIST = [...FORMAL_COLUMN_IDS];
 
 const view = ref<View>("analysis");
 const feedback = reactive({ error: "", success: "" });
@@ -183,7 +190,9 @@ async function loadColumns() {
     const response = await getLogAnalysisColumns();
     if (requestSequence !== columnsRequestSequence) return;
     const data = responseData<LogAnalysisColumns>(response);
-    availableColumns.value = [...data.available_columns]; defaultColumns.value = [...data.default_columns]; visibleColumns.value = [...data.columns];
+    availableColumns.value = [...new Set([...data.available_columns, ...data.default_columns, ...data.columns])];
+    defaultColumns.value = [...data.default_columns];
+    visibleColumns.value = [...data.columns];
   } catch (error) { if (requestSequence === columnsRequestSequence) setFeedbackError(feedback, error instanceof Error ? error.message : "列配置读取失败"); }
 }
 
@@ -280,6 +289,7 @@ function refreshAnalysis(value: LogAnalysisFilterValues) {
 function resetAnalysis(value: LogAnalysisFilterValues) {
   clearParsePoll();
   ++parseRequestSequence;
+  ++profileRequestSequence;
   parseJob.value = null;
   packageProfile.value = null;
   appliedFilters.value = { ...value };
@@ -293,6 +303,7 @@ async function requestParse(snapshot: LogMetricScope) {
   clearParsePoll();
   parseJob.value = null;
   const requestSequence = ++parseRequestSequence;
+  void loadPackageProfile(scope.package_name);
   parseStarting.value = true;
   try {
     const response = await postParseJob(scope);
@@ -353,6 +364,7 @@ watch(metricScope, () => {
   failureError.value = "";
 }, { deep: true });
 function updatePackageProfile(payload: { field: "alias" | "company" | "account"; value: string; profile: Partial<PackageProfile> }) {
+  if (payload.profile.package_name && payload.profile.package_name !== metricScope.value.package_name) return;
   packageProfile.value = { ...(packageProfile.value ?? { package_name: metricScope.value.package_name, alias: "", company: "", account: "" }), ...payload.profile, [payload.field]: payload.value };
 }
 function showProfileError(message: string) { setFeedbackError(feedback, message); }
@@ -436,7 +448,7 @@ function switchView(nextView: View) { view.value = nextView; if (nextView === "r
 function showCopySuccess(): void { setFeedbackSuccess(feedback, "extra 复制成功"); }
 function showCopyError(message: string): void { setFeedbackError(feedback, message); }
 onMounted(loadAnalysisInitial);
-onBeforeUnmount(() => { ++failureRequestSequence; ++parseRequestSequence; clearParsePoll(); });
+onBeforeUnmount(() => { ++failureRequestSequence; ++parseRequestSequence; ++profileRequestSequence; clearParsePoll(); });
 </script>
 
 <style scoped>

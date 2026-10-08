@@ -142,7 +142,6 @@ async def get_usage_summary(
     )
     grouped = select(
         latest_rows.c.package_name,
-        latest_rows.c.device_model,
         device_count.label("device_count"),
         total_duration.label("total_duration_s"),
         average_duration.label("average_duration_s"),

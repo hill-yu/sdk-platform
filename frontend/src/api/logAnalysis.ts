@@ -5,6 +5,20 @@ export type DecodeStatus = "pending" | "success" | "unsupported" | "failed";
 export type ReparseJobStatus = "pending" | "running" | "success" | "failed" | "cancelled";
 export type LogColumnDefinition = string;
 
+/** Formal-view rendering contract; legacy IDs outside this map remain round-trippable but are not rendered. */
+export const FORMAL_METRIC_COLUMN_MAPPING = {
+  alias: "package_profile.alias",
+  company: "package_profile.company",
+  account: "package_profile.account",
+  url: "config_distribution",
+  expected_click_count: "declaration_and_planned_cards",
+  actual_click_count: "actual_and_response_cards",
+  ad_click_count: "ad_area_actual_card_and_target_table",
+  interstitial_presentation_count: "interstitial_presentation_and_close_rate_cards",
+  interstitial_click_count: "interstitial_non_close_click_rate_card",
+  parse_failure_count: "failed_h1_card",
+} as const;
+
 export interface ApiEnvelope<T> {
   code: number;
   data: T;

@@ -13,7 +13,7 @@
         <h4>可见列</h4>
         <ol class="column-list" data-testid="visible-columns">
           <li v-for="(column, index) in draftColumns" :key="column" :data-testid="`column-${column}-visible`">
-            <span>{{ column }}</span>
+            <span>{{ columnLabel(column) }}</span>
             <span class="column-actions">
               <button
                 :data-testid="`column-${column}-up`"
@@ -45,7 +45,7 @@
         <h4>隐藏列</h4>
         <ul class="column-list" data-testid="hidden-columns">
           <li v-for="column in hiddenColumns" :key="column" :data-testid="`column-${column}-hidden`">
-            <span>{{ column }}</span>
+            <span>{{ columnLabel(column) }}</span>
             <button
               :data-testid="`column-add-${column}`"
               type="button"
@@ -75,10 +75,11 @@ const props = withDefaults(
     availableColumns: string[];
     defaultColumns: string[];
     modelValue: string[];
+    mappedColumns?: string[];
     saving?: boolean;
     saveError?: string | null;
   }>(),
-  { saving: false, saveError: null },
+  { saving: false, saveError: null, mappedColumns: () => [] },
 );
 
 const emit = defineEmits<{
@@ -86,7 +87,7 @@ const emit = defineEmits<{
 }>();
 
 function ensureRequired(columns: string[]) {
-  const selected = columns.filter((column, index) => props.availableColumns.includes(column) && columns.indexOf(column) === index);
+  const selected = columns.filter((column, index) => columns.indexOf(column) === index);
   for (const required of ["date", "package_name"]) {
     if (props.availableColumns.includes(required) && !selected.includes(required)) {
       selected.push(required);
@@ -115,6 +116,11 @@ const hiddenColumns = computed(() => props.availableColumns.filter((column) => !
 
 function isRequired(column: string) {
   return REQUIRED_COLUMNS.has(column);
+}
+
+function columnLabel(column: string) {
+  if (props.mappedColumns.length === 0 || props.mappedColumns.includes(column)) return column;
+  return `${column}（历史列，正式视图不展示）`;
 }
 
 function add(column: string) {
