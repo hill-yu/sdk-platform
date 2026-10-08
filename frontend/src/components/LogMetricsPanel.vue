@@ -6,6 +6,7 @@
     </div>
 
     <p v-if="disabled" data-testid="metrics-disabled" class="empty-state">请输入包名并查询已有结果，或先开始解析任务。</p>
+    <p v-else-if="jobStatusMessage" data-testid="metrics-status" class="empty-state">{{ jobStatusMessage }}</p>
     <p v-else-if="error" data-testid="metrics-error" class="feedback error">{{ error }}</p>
     <p v-else-if="!loading && !overview" data-testid="metrics-empty" class="empty-state">当前条件下暂无指标结果。</p>
     <template v-else-if="overview">
@@ -60,12 +61,12 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { getMetricConfigs, getMetricOverview, getMetricTargets } from "@/api/logMetrics";
-import type { ConfigMetricItem, LogMetricScope, MetricOverview, TargetMetric } from "@/api/logMetrics";
+import type { ConfigMetricItem, LogMetricScope, MetricOverview, ParseJob, TargetMetric } from "@/api/logMetrics";
 
 type MetricViewKind = "web_element" | "ad_area";
 type VisibleTarget = Omit<TargetMetric, "target_kind">;
 
-const props = defineProps<{ scope: LogMetricScope }>();
+const props = defineProps<{ scope: LogMetricScope; job?: ParseJob | null }>();
 const emit = defineEmits<{ "failure-select": [value: { target_kind: MetricViewKind; config_id?: number }] }>();
 
 const overview = ref<MetricOverview | null>(null);
@@ -102,6 +103,25 @@ function unwrap<T>(response: unknown): T {
 
 function validScope(scope: LogMetricScope) { return Boolean(scope.package_name && scope.date_from && scope.date_to); }
 
+const successfulJob = computed(() => props.job?.status === "success");
+const jobStatusMessage = computed(() => {
+  if (!validScope(props.scope)) return "";
+  if (!props.job) return "暂无对应解析任务，当前条件下暂无指标结果。";
+  if (props.job.status === "pending" || props.job.status === "running") return "解析进行中，指标将在任务完成后展示。";
+  if (props.job.status === "failed" || props.job.status === "cancelled") return "解析任务未成功完成，未展示旧指标。";
+  if (props.job.total_count === 0) return "当前范围没有可解析的源数据。";
+  if (props.job.h1_count === 0) return "解析完成，但没有 H1 结果。";
+  if (props.job.failed_h1_count >= props.job.h1_count) return "解析完成，但所有 H1 均失败。";
+  if (props.job.failed_h1_count > 0) return `解析完成，${props.job.failed_h1_count} 个 H1 失败；下方仅展示成功结果。`;
+  if (overview.value && overview.value.declaration_count === 0) return "解析完成，但成功 H1 未产生可展示指标。";
+  return "";
+});
+
+function queryScope(scope: LogMetricScope) {
+  const snapshot = props.job?.snapshot_end_utc;
+  return snapshot ? { ...scope, snapshot_end_utc: snapshot } : scope;
+}
+
 async function loadTargets(scope: LogMetricScope, requestId: number, kind: MetricViewKind) {
   const targetRequest = ++targetRequestId;
   const response = await getMetricTargets(scope);
@@ -114,14 +134,15 @@ async function load() {
   ++targetRequestId;
   const scope = { ...props.scope };
   selectedConfigId.value = null;
-  if (!validScope(scope)) { disabled.value = true; overview.value = null; rawTargets.value = []; return; }
+  if (!validScope(scope) || !successfulJob.value) { disabled.value = !validScope(scope); loading.value = false; overview.value = null; configs.value = []; rawTargets.value = []; return; }
   disabled.value = false; loading.value = true; error.value = "";
+  const scopedQuery = queryScope(scope);
   try {
-    const [overviewResponse, configsResponse] = await Promise.all([getMetricOverview(scope), getMetricConfigs(scope)]);
+    const [overviewResponse, configsResponse] = await Promise.all([getMetricOverview(scopedQuery), getMetricConfigs(scopedQuery)]);
     if (disposed || requestId !== scopeRequestId) return;
     overview.value = unwrap<MetricOverview>(overviewResponse);
     configs.value = unwrap<{ total: number; items: ConfigMetricItem[] }>(configsResponse).items;
-    await loadTargets(scope, requestId, targetKind.value);
+    await loadTargets(scopedQuery, requestId, targetKind.value);
   } catch (cause) {
     if (!disposed && requestId === scopeRequestId) { error.value = cause instanceof Error ? cause.message : "指标读取失败"; rawTargets.value = []; }
   } finally {
@@ -131,9 +152,9 @@ async function load() {
 
 async function selectTarget(kind: MetricViewKind) {
   targetKind.value = kind;
-  if (!validScope(props.scope)) return;
+  if (!validScope(props.scope) || !successfulJob.value) return;
   const requestId = scopeRequestId;
-  const scope = { ...props.scope };
+  const scope = queryScope({ ...props.scope });
   error.value = "";
   try {
     await loadTargets(scope, requestId, kind);
@@ -146,7 +167,7 @@ function selectConfig(configId: number | null) { selectedConfigId.value = config
 function emitFailureSelection() { emit("failure-select", selectedConfigId.value === null ? { target_kind: targetKind.value } : { target_kind: targetKind.value, config_id: selectedConfigId.value }); }
 function formatRate(value: number | null) { return value === null ? "-" : `${Math.round(value * 100)}%`; }
 
-watch(() => props.scope, () => { void load(); }, { deep: true });
+watch(() => [props.scope, props.job], () => { void load(); }, { deep: true });
 onMounted(() => { void load(); });
 onBeforeUnmount(() => { disposed = true; ++scopeRequestId; ++targetRequestId; });
 </script>

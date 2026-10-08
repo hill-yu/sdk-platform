@@ -61,6 +61,18 @@ def test_metric_filters_use_one_package_and_half_open_utc_range():
     assert "package_name = 'com.example.app'" in sql
     assert "event_server_ts >=" in sql
     assert "event_server_ts <" in sql
+    assert "status = 'success'" in sql
+
+
+def test_h1_details_keep_failed_rows_while_aggregates_exclude_them():
+    from app.services.log_metrics_service import build_h1_detail_filters
+
+    filters = build_h1_detail_filters(package_name="com.example.app", range_start=START, range_end=END)
+    sql = " AND ".join(
+        str(item.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+        for item in filters
+    )
+    assert "status" not in sql
 
 
 def test_overview_returns_distinct_click_metrics_and_null_interstitial_rates():

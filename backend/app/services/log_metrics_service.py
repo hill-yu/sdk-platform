@@ -18,6 +18,15 @@ TARGET_KINDS = ("banner", "anchored", "web_element")
 def build_metric_filters(*, package_name: str, range_start: datetime, range_end: datetime):
     return [
         H1Declaration.package_name == package_name,
+        H1Declaration.status == "success",
+        H1Declaration.event_server_ts >= range_start,
+        H1Declaration.event_server_ts < range_end,
+    ]
+
+
+def build_h1_detail_filters(*, package_name: str, range_start: datetime, range_end: datetime):
+    return [
+        H1Declaration.package_name == package_name,
         H1Declaration.event_server_ts >= range_start,
         H1Declaration.event_server_ts < range_end,
     ]
@@ -295,7 +304,7 @@ async def get_h1_details(
 ):
     if page < 1 or page_size < 1 or page_size > 100 or sort_order not in {"asc", "desc"}:
         raise ValueError("分页或排序参数无效")
-    filters = build_metric_filters(package_name=package_name, range_start=range_start, range_end=range_end)
+    filters = build_h1_detail_filters(package_name=package_name, range_start=range_start, range_end=range_end)
     total = int((await db.execute(select(func.count()).select_from(select(H1Declaration.event_id).where(*filters).subquery()))).scalar_one() or 0)
     direction = lambda column: column.asc() if sort_order == "asc" else column.desc()
     order = (
