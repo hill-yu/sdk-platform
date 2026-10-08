@@ -20,6 +20,18 @@ vi.mock("@/api/version", () => ({
 }));
 
 vi.mock("@/api/logAnalysis", () => ({
+  FORMAL_METRIC_COLUMN_MAPPING: {
+    alias: "package_profile.alias",
+    company: "package_profile.company",
+    account: "package_profile.account",
+    url: "config_distribution",
+    expected_click_count: "declaration_and_planned_cards",
+    actual_click_count: "actual_and_response_cards",
+    ad_click_count: "ad_area_actual_card_and_target_table",
+    interstitial_presentation_count: "interstitial_presentation_and_close_rate_cards",
+    interstitial_click_count: "interstitial_non_close_click_rate_card",
+    parse_failure_count: "failed_h1_card",
+  },
   getLogAnalysisColumns: vi.fn().mockResolvedValue({ data: { available_columns: [], default_columns: [], columns: [] } }),
   getPackageProfile: vi.fn(),
   putLogAnalysisColumns: vi.fn(),
