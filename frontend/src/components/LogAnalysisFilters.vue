@@ -46,6 +46,7 @@
 import { computed, reactive, ref, watch } from "vue";
 
 import { defaultRecentThreeDays } from "@/utils/logDateRange";
+import { validateAnalysisScope } from "@/utils/logAnalysisScope";
 import type { LogLevel } from "@/api/dashboard";
 
 export interface LogAnalysisFilterValues {
@@ -124,30 +125,10 @@ function updateField(field: keyof LogAnalysisFilterValues, event: Event) {
   emit("update:modelValue", snapshot());
 }
 
-function calendarDay(value: string): number {
-  const [year, month, day] = value.split("-").map(Number);
-  return Date.UTC(year, month - 1, day);
-}
-
 function validate(): boolean {
   error.value = "";
-  if (!draft.package_name.trim()) {
-    error.value = "包名为必填条件。";
-    return false;
-  }
-  if (!draft.date_from || !draft.date_to || calendarDay(draft.date_to) < calendarDay(draft.date_from)) {
-    error.value = "结束日期不能早于开始日期。";
-    return false;
-  }
-  if (calendarDay(draft.date_to) - calendarDay(draft.date_from) > 6 * 24 * 60 * 60 * 1000) {
-    error.value = "时间范围不能超过 7 天。";
-    return false;
-  }
-  if (draft.date_from === draft.date_to && draft.hour_to < draft.hour_from) {
-    error.value = "结束小时不能早于开始小时。";
-    return false;
-  }
-  return true;
+  error.value = validateAnalysisScope(draft) ?? "";
+  return !error.value;
 }
 
 function query() {

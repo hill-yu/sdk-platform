@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.core.config import get_settings
-from app.core.timezone import business_hour_utc_range
 from app.services.config_crypto import normalize_package_name
+from app.services.log_analysis_scope import resolve_analysis_scope
 
 
 class LogParseJobCreateRequest(BaseModel):
@@ -25,15 +24,15 @@ class LogParseJobCreateRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_range(self) -> "LogParseJobCreateRequest":
-        start, end = self.utc_range()
-        if end - start > timedelta(days=get_settings().LOG_PARSE_MAX_DAYS):
-            raise ValueError("解析范围不能超过 7 天")
+        self.utc_range()
         return self
 
     def utc_range(self) -> tuple[datetime, datetime]:
-        return business_hour_utc_range(
-            self.date_from,
-            self.hour_from,
-            self.date_to,
-            self.hour_to,
+        scope = resolve_analysis_scope(
+            package_name=self.package_name,
+            date_from=self.date_from,
+            hour_from=self.hour_from,
+            date_to=self.date_to,
+            hour_to=self.hour_to,
         )
+        return scope.range_start, scope.range_end

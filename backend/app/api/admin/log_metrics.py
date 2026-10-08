@@ -7,9 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin.deps import require_admin_token
 from app.core.database import get_db_no_commit
-from app.core.timezone import business_hour_utc_range
 from app.schemas.log_metrics_schemas import LogParseJobCreateRequest
-from app.services.config_crypto import normalize_package_name
+from app.services.log_analysis_scope import resolve_analysis_scope
 
 
 router = APIRouter(
@@ -36,20 +35,29 @@ def _metric_scope(
     hour_from: int = Query(..., ge=0, le=23),
     date_to: date = Query(...),
     hour_to: int = Query(..., ge=0, le=23),
+    snapshot_end_utc: datetime | None = Query(None),
 ) -> dict[str, object]:
     try:
-        normalized = normalize_package_name(package_name)
-        range_start, range_end = business_hour_utc_range(
-            date_from,
-            hour_from,
-            date_to,
-            hour_to,
+        scope = resolve_analysis_scope(
+            package_name=package_name,
+            date_from=date_from,
+            hour_from=hour_from,
+            date_to=date_to,
+            hour_to=hour_to,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    range_end = scope.range_end
+    if snapshot_end_utc is not None:
+        if snapshot_end_utc.tzinfo is None or snapshot_end_utc.utcoffset() is None:
+            raise HTTPException(status_code=422, detail="snapshot_end_utc 必须包含时区")
+        snapshot_end = snapshot_end_utc.astimezone(timezone.utc)
+        if snapshot_end <= scope.range_start:
+            raise HTTPException(status_code=422, detail="snapshot_end_utc 必须晚于范围起点")
+        range_end = min(range_end, snapshot_end)
     return {
-        "package_name": normalized,
-        "range_start": range_start,
+        "package_name": scope.package_name,
+        "range_start": scope.range_start,
         "range_end": range_end,
     }
 
@@ -88,6 +96,15 @@ async def create_parse_job(
         await db.rollback()
         raise HTTPException(status_code=500, detail="解析任务创建失败") from None
     return {"code": 0, "data": _service().serialize_parse_job(job)}
+
+
+@router.get("/log-analysis/parse-jobs/latest", response_model=dict)
+async def get_latest_parse_job(
+    scope: dict[str, object] = Depends(_metric_scope),
+    db: AsyncSession = Depends(get_db_no_commit),
+):
+    job = await _service().get_latest_parse_job(db, **scope)
+    return {"code": 0, "data": _service().serialize_parse_job(job) if job is not None else None}
 
 
 @router.get("/log-analysis/parse-jobs/{job_id}", response_model=dict)
