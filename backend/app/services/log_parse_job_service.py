@@ -683,6 +683,27 @@ async def get_parse_job(db: AsyncSession, job_id: int) -> LogReparseJob | None:
     return result.scalar_one_or_none()
 
 
+async def get_latest_parse_job(
+    db: AsyncSession,
+    *,
+    package_name: str,
+    range_start: datetime,
+    range_end: datetime,
+) -> LogReparseJob | None:
+    """Return the newest task for one exact package and UTC half-open scope."""
+    result = await db.execute(
+        select(LogReparseJob)
+        .where(
+            LogReparseJob.package_name == package_name,
+            LogReparseJob.range_start == range_start,
+            LogReparseJob.range_end == range_end,
+        )
+        .order_by(LogReparseJob.created_at.desc(), LogReparseJob.id.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def request_cancel(
     db: AsyncSession,
     job_id: int,
@@ -703,12 +724,25 @@ async def request_cancel(
 
 
 def serialize_parse_job(job: LogReparseJob) -> dict[str, object]:
+    def serialize_utc(value: datetime | None) -> str | None:
+        if value is None:
+            return None
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
     return {
         "id": job.id,
         "package_name": job.package_name,
+        "scope": {
+            "package_name": job.package_name,
+            "range_start_utc": serialize_utc(job.range_start),
+            "range_end_utc": serialize_utc(job.range_end),
+        },
         "range_start": serialize_business_time(job.range_start),
         "range_end": serialize_business_time(job.range_end),
         "snapshot_end": serialize_business_time(job.snapshot_end),
+        "range_start_utc": serialize_utc(job.range_start),
+        "range_end_utc": serialize_utc(job.range_end),
+        "snapshot_end_utc": serialize_utc(job.snapshot_end),
         "status": job.status,
         "total_count": job.total_count,
         "processed_count": job.processed_count,

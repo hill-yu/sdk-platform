@@ -1,14 +1,7 @@
 import { mount } from "@vue/test-utils";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { cancelParseJob, getParseJob, postParseJob } from "@/api/logMetrics";
 import LogParseTaskPanel from "@/components/LogParseTaskPanel.vue";
-
-vi.mock("@/api/logMetrics", () => ({
-  cancelParseJob: vi.fn(),
-  getParseJob: vi.fn(),
-  postParseJob: vi.fn(),
-}));
 
 const scope = {
   package_name: "com.example.app",
@@ -18,95 +11,53 @@ const scope = {
   hour_to: 23,
 };
 
-const job = (status: "pending" | "running" | "success" | "cancelled" | "failed") => ({
+const runningJob = {
   id: 11,
-  ...scope,
+  package_name: scope.package_name,
   range_start: "2026-09-28T00:00:00+08:00",
   range_end: "2026-09-30T23:59:59+08:00",
-  status,
+  status: "running" as const,
   total_count: 10,
-  processed_count: status === "success" ? 10 : 2,
+  processed_count: 2,
   h1_count: 4,
   failed_h1_count: 0,
   no_h1_count: 0,
-});
+};
 
 describe("LogParseTaskPanel", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.mocked(postParseJob).mockResolvedValue({ data: { code: 0, data: job("pending") } } as never);
-    vi.mocked(getParseJob).mockResolvedValue({ data: { code: 0, data: job("success") } } as never);
-    vi.mocked(cancelParseJob).mockResolvedValue({ data: { code: 0, data: job("cancelled") } } as never);
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.clearAllMocks();
-  });
-
-  it("starts one parse job, polls until terminal, and emits refresh on completion", async () => {
-    const wrapper = mount(LogParseTaskPanel, { props: { scope } });
+  it("emits the latest draft for LogViewer to validate instead of posting itself", async () => {
+    const wrapper = mount(LogParseTaskPanel, {
+      props: {
+        draftScope: scope,
+        appliedScope: null,
+        job: null,
+      },
+    });
 
     await wrapper.get("[data-testid='start-parse']").trigger("click");
-    expect(postParseJob).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(getParseJob).toHaveBeenCalledWith(11);
-    expect(wrapper.emitted("refresh")).toHaveLength(1);
-    expect(getParseJob).toHaveBeenCalledTimes(1);
+
+    expect(wrapper.emitted("request-parse")).toEqual([[scope]]);
   });
 
-  it("cancels the active job and clears polling on unmount", async () => {
-    vi.mocked(getParseJob).mockResolvedValue({ data: { code: 0, data: job("running") } } as never);
-    const wrapper = mount(LogParseTaskPanel, { props: { scope } });
-
-    await wrapper.get("[data-testid='start-parse']").trigger("click");
-    await wrapper.get("[data-testid='cancel-parse']").trigger("click");
-    expect(cancelParseJob).toHaveBeenCalledWith(11);
-    wrapper.unmount();
-    await vi.advanceTimersByTimeAsync(5000);
-    expect(getParseJob).not.toHaveBeenCalled();
+  it("renders status and progress supplied by LogViewer", () => {
+    const wrapper = mount(LogParseTaskPanel, {
+      props: { draftScope: scope, appliedScope: scope, job: runningJob },
+    });
+    expect(wrapper.get("[data-testid='parse-status']").text()).toContain("解析中");
+    expect(wrapper.get("[data-testid='parse-status']").text()).toContain("2 / 10");
   });
 
-  it("does not send a duplicate POST while the first start is pending", async () => {
-    let resolve!: (value: unknown) => void;
-    vi.mocked(postParseJob).mockReturnValueOnce(new Promise((nextResolve) => { resolve = nextResolve; }) as never);
-    const wrapper = mount(LogParseTaskPanel, { props: { scope } });
-
-    await wrapper.get("[data-testid='start-parse']").trigger("click");
+  it("does not emit when parsing is disabled", async () => {
+    const wrapper = mount(LogParseTaskPanel, {
+      props: { draftScope: { ...scope, package_name: "" }, appliedScope: null, job: null, disabled: true },
+    });
     expect(wrapper.get("[data-testid='start-parse']").attributes("disabled")).toBeDefined();
-    await wrapper.get("[data-testid='start-parse']").trigger("click");
-    expect(postParseJob).toHaveBeenCalledTimes(1);
-    resolve({ data: { code: 0, data: job("success") } });
-    await vi.runAllTicks();
+    expect(wrapper.emitted("request-parse")).toBeUndefined();
   });
 
-  it("ignores an old start response after a scope change and unmount stops timers", async () => {
-    let resolve!: (value: unknown) => void;
-    vi.mocked(postParseJob).mockReturnValueOnce(new Promise((nextResolve) => { resolve = nextResolve; }) as never);
-    const wrapper = mount(LogParseTaskPanel, { props: { scope } });
-    await wrapper.get("[data-testid='start-parse']").trigger("click");
-    await wrapper.setProps({ scope: { ...scope, package_name: "com.example.next" } });
-    resolve({ data: { code: 0, data: job("success") } });
-    await vi.runAllTicks();
-    expect(wrapper.find("[data-testid='parse-status']").exists()).toBe(false);
-    wrapper.unmount();
-    await vi.advanceTimersByTimeAsync(5000);
-    expect(getParseJob).not.toHaveBeenCalled();
-  });
-
-  it("does not refresh or restart polling when an old poll resolves after scope change", async () => {
-    let resolve!: (value: unknown) => void;
-    vi.mocked(postParseJob).mockResolvedValueOnce({ data: { code: 0, data: job("running") } } as never);
-    vi.mocked(getParseJob).mockReturnValueOnce(new Promise((nextResolve) => { resolve = nextResolve; }) as never);
-    const wrapper = mount(LogParseTaskPanel, { props: { scope } });
-    await wrapper.get("[data-testid='start-parse']").trigger("click");
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(getParseJob).toHaveBeenCalledTimes(1);
-    await wrapper.setProps({ scope: { ...scope, package_name: "com.example.next" } });
-    resolve({ data: { code: 0, data: job("success") } });
-    await vi.runAllTicks();
-    await vi.advanceTimersByTimeAsync(3000);
-    expect(wrapper.emitted("refresh")).toBeUndefined();
-    expect(getParseJob).toHaveBeenCalledTimes(1);
+  it("keeps scope changes presentational until the user starts parsing", async () => {
+    const wrapper = mount(LogParseTaskPanel, { props: { draftScope: scope, appliedScope: scope, job: null } });
+    await wrapper.setProps({ draftScope: { ...scope, package_name: "com.example.next" } });
+    expect(wrapper.emitted("request-parse")).toBeUndefined();
   });
 });

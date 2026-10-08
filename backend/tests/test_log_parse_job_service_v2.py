@@ -175,6 +175,33 @@ def test_serialize_parse_job_includes_snapshot_and_progress() -> None:
     assert data["cursor_event_id"] is None
 
 
+def test_get_latest_parse_job_matches_exact_scope_and_orders_newest_first() -> None:
+    from app.models.log_analysis import LogReparseJob
+    from app.services.log_parse_job_service import get_latest_parse_job
+
+    class LatestDb:
+        async def execute(self, statement):
+            self.statement = statement
+            return Result(scalar=LogReparseJob(id=8))
+
+    db = LatestDb()
+    result = asyncio.run(
+        get_latest_parse_job(
+            db,
+            package_name="com.example.app",
+            range_start=RANGE_START,
+            range_end=RANGE_END,
+        )
+    )
+
+    sql = str(db.statement.compile(dialect=postgresql.dialect()))
+    assert result.id == 8
+    assert "sdk_log_reparse_jobs.package_name" in sql
+    assert "sdk_log_reparse_jobs.range_start" in sql
+    assert "sdk_log_reparse_jobs.range_end" in sql
+    assert "ORDER BY sdk_log_reparse_jobs.created_at DESC, sdk_log_reparse_jobs.id DESC" in sql
+
+
 def test_build_rows_splits_h1_and_each_pa_attempt() -> None:
     from app.models.event import SdkEvent
     from app.services.log_parse_job_service import build_h1_and_click_rows

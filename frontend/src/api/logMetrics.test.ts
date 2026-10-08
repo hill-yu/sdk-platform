@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { request } = vi.hoisted(() => ({ request: { get: vi.fn(), post: vi.fn() } }));
 vi.mock("@/api/request", () => ({ default: request }));
 
-import { getMetricOverview, getParseJob, postParseJob } from "@/api/logMetrics";
+import { getLatestParseJob, getMetricOverview, getParseJob, postParseJob } from "@/api/logMetrics";
 
 describe("log metrics API", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -13,9 +13,11 @@ describe("log metrics API", () => {
     getMetricOverview(scope);
     postParseJob(scope);
     getParseJob(7);
+    getLatestParseJob(scope);
 
     expect(request.get).toHaveBeenNthCalledWith(1, "/log-analysis/metrics/overview", { params: scope });
     expect(request.post).toHaveBeenCalledWith("/log-analysis/parse-jobs", scope);
     expect(request.get).toHaveBeenNthCalledWith(2, "/log-analysis/parse-jobs/7");
+    expect(request.get).toHaveBeenNthCalledWith(3, "/log-analysis/parse-jobs/latest", { params: scope });
   });
 });

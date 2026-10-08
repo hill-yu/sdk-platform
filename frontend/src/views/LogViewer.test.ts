@@ -16,6 +16,7 @@ const {
   getMetricConfigs,
   getMetricTargets,
   getMetricFailures,
+  getLatestParseJob,
   postParseJob,
   getParseJob,
   cancelParseJob,
@@ -37,6 +38,7 @@ const {
   getMetricConfigs: vi.fn(),
   getMetricTargets: vi.fn(),
   getMetricFailures: vi.fn(),
+  getLatestParseJob: vi.fn(),
   postParseJob: vi.fn(),
   getParseJob: vi.fn(),
   cancelParseJob: vi.fn(),
@@ -63,6 +65,7 @@ vi.mock("@/api/logMetrics", () => ({
   getMetricConfigs,
   getMetricTargets,
   getMetricFailures,
+  getLatestParseJob,
   postParseJob,
   getParseJob,
   cancelParseJob,
@@ -137,6 +140,7 @@ function respondMetrics() {
   getMetricConfigs.mockResolvedValue({ data: { code: 0, data: { total: 2, items: [{ config_id: "unknown", declaration_count: 1, share: 0.5 }, { config_id: 8, declaration_count: 1, share: 0.5 }] } } });
   getMetricTargets.mockResolvedValue({ data: { code: 0, data: { items: [{ target_kind: "web_element", planned_count: 2, actual_count: 1, success_count: 1, failure_count: 0, actual_rate: 0.5, success_rate: 1, failure_rate: 0 }] } } });
   getMetricFailures.mockResolvedValue({ data: { code: 0, data: [{ failure_category: "timeout", failure_count: 1, share: 1 }] } });
+  getLatestParseJob.mockResolvedValue({ data: { code: 0, data: { id: 9, package_name: "com.example.app", status: "success", range_start: "", range_end: "", snapshot_end_utc: "2026-09-30T15:59:59Z", total_count: 1, processed_count: 1, h1_count: 1, failed_h1_count: 0, no_h1_count: 0 } } });
   postParseJob.mockResolvedValue({ data: { code: 0, data: { id: 9, package_name: "com.example.app", date_from: "2026-09-28", hour_from: 0, date_to: "2026-09-30", hour_to: 23, status: "success", range_start: "", range_end: "", total_count: 1, processed_count: 1, h1_count: 1, failed_h1_count: 0, no_h1_count: 0 } } });
   getParseJob.mockResolvedValue({ data: { code: 0, data: { id: 9, status: "success" } } });
   cancelParseJob.mockResolvedValue({ data: { code: 0, data: { id: 9, status: "cancelled" } } });
@@ -245,6 +249,7 @@ describe("LogViewer", () => {
 
   it("keeps summary rows when a later analysis query fails", async () => {
     const wrapper = await mountAnalysisViewer();
+    await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
     getLogAnalysisSummary.mockRejectedValueOnce(new Error("summary unavailable"));
     await wrapper.get("[data-testid='filter-refresh']").trigger("click");
     await flushPromises();
@@ -263,7 +268,7 @@ describe("LogViewer", () => {
     expect(getUsageSummary).toHaveBeenCalledWith(expect.objectContaining({ date_from: expect.any(String), hour_from: 0, date_to: expect.any(String), hour_to: 23 }));
   });
 
-  it("refreshes every analysis surface from applied A, not an unsubmitted draft B", async () => {
+  it("refreshes every analysis surface from the current legal draft", async () => {
     const wrapper = await mountAnalysisViewer();
     await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
     await wrapper.get("[data-testid='filter-query-existing']").trigger("click");
@@ -274,10 +279,8 @@ describe("LogViewer", () => {
     await wrapper.get("[data-testid='filter-refresh']").trigger("click");
     await flushPromises();
 
-    expect(getLogAnalysisSummary).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.app" }));
-    expect(getMetricOverview).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.app" }));
-    expect(getMetricConfigs).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.app" }));
-    expect(getMetricTargets).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.app" }));
+    expect(getLogAnalysisSummary).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.next" }));
+    expect(getLatestParseJob).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.next" }));
 
     await wrapper.get("[data-testid='filter-query-existing']").trigger("click");
     await flushPromises();

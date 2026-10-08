@@ -5,110 +5,33 @@
       <p>按当前北京时间范围生成或刷新结构化解析结果。</p>
     </div>
     <div class="task-actions">
-      <button v-if="!active" data-testid="start-parse" type="button" :disabled="disabled || !scope.package_name || starting" @click="start">{{ starting ? "创建中…" : "开始解析" }}</button>
-      <button v-else data-testid="cancel-parse" type="button" class="ghost" :disabled="cancelling" @click="cancel">取消任务</button>
+      <button v-if="!active" data-testid="start-parse" type="button" :disabled="disabled || !draftScope.package_name" @click="requestParse">开始解析</button>
     </div>
     <p v-if="job" data-testid="parse-status" class="task-status">状态：{{ statusLabel(job.status) }} · {{ job.processed_count }} / {{ job.total_count }} 条</p>
-    <p v-if="error" data-testid="parse-error" class="task-error">{{ error }}</p>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed } from "vue";
 
-import { cancelParseJob, getParseJob, postParseJob } from "@/api/logMetrics";
 import type { LogMetricScope, ParseJob } from "@/api/logMetrics";
 
-const props = withDefaults(defineProps<{ scope: LogMetricScope; disabled?: boolean }>(), { disabled: false });
-const emit = defineEmits<{ refresh: []; status: [job: ParseJob] }>();
+const props = withDefaults(defineProps<{
+  draftScope: LogMetricScope;
+  appliedScope?: LogMetricScope | null;
+  job?: ParseJob | null;
+  disabled?: boolean;
+}>(), { appliedScope: null, job: null, disabled: false });
+const emit = defineEmits<{ "request-parse": [snapshot: LogMetricScope] }>();
 
-const job = ref<ParseJob | null>(null);
-const error = ref("");
-const starting = ref(false);
-const cancelling = ref(false);
-let timer: ReturnType<typeof setTimeout> | null = null;
-let disposed = false;
-let lifecycleId = 0;
+const active = computed(() => props.job?.status === "pending" || props.job?.status === "running");
 
-const active = computed(() => job.value?.status === "pending" || job.value?.status === "running");
-
-function unwrap<T>(response: unknown): T {
-  let value = response && typeof response === "object" && "data" in response ? (response as { data?: unknown }).data : response;
-  if (value && typeof value === "object" && "code" in value && "data" in value) value = (value as { data: unknown }).data;
-  return value as T;
+function requestParse() {
+  if (props.disabled || active.value || !props.draftScope.package_name) return;
+  emit("request-parse", { ...props.draftScope });
 }
-
-function clearTimer() {
-  if (timer !== null) { clearTimeout(timer); timer = null; }
-}
-
-function schedulePoll(generation: number) {
-  clearTimer();
-  if (disposed || generation !== lifecycleId || !active.value || !job.value) return;
-  timer = setTimeout(() => { timer = null; if (!disposed && generation === lifecycleId) void poll(generation); }, 1000);
-}
-
-function finish(nextJob: ParseJob, generation: number) {
-  if (disposed || generation !== lifecycleId) return;
-  job.value = nextJob;
-  emit("status", nextJob);
-  if (nextJob.status === "success") emit("refresh");
-  schedulePoll(generation);
-}
-
-async function start() {
-  if (starting.value || active.value || props.disabled || !props.scope.package_name) return;
-  starting.value = true;
-  error.value = "";
-  const generation = ++lifecycleId;
-  const scope = { ...props.scope };
-  try {
-    const response = await postParseJob(scope);
-    finish(unwrap<ParseJob>(response), generation);
-  } catch (cause) {
-    if (!disposed && generation === lifecycleId) error.value = cause instanceof Error ? cause.message : "解析任务创建失败";
-  } finally {
-    if (!disposed && generation === lifecycleId) starting.value = false;
-  }
-}
-
-async function poll(generation: number) {
-  if (disposed || generation !== lifecycleId || !job.value || !active.value) return;
-  try {
-    const response = await getParseJob(job.value.id);
-    finish(unwrap<ParseJob>(response), generation);
-  } catch (cause) {
-    if (!disposed && generation === lifecycleId) { error.value = cause instanceof Error ? cause.message : "解析任务状态读取失败"; schedulePoll(generation); }
-  }
-}
-
-async function cancel() {
-  if (!job.value || !active.value || cancelling.value) return;
-  cancelling.value = true;
-  clearTimer();
-  const generation = lifecycleId;
-  try {
-    const response = await cancelParseJob(job.value.id);
-    finish(unwrap<ParseJob>(response), generation);
-  } catch (cause) {
-    if (!disposed && generation === lifecycleId) { error.value = cause instanceof Error ? cause.message : "解析任务取消失败"; schedulePoll(generation); }
-  } finally {
-    if (!disposed && generation === lifecycleId) cancelling.value = false;
-  }
-}
-
-watch(() => props.scope, () => {
-  ++lifecycleId;
-  clearTimer();
-  job.value = null;
-  starting.value = false;
-  cancelling.value = false;
-  error.value = "";
-}, { deep: true });
 
 function statusLabel(status: ParseJob["status"]) { return { pending: "排队中", running: "解析中", success: "已完成", failed: "失败", cancelled: "已取消" }[status]; }
-
-onBeforeUnmount(() => { disposed = true; ++lifecycleId; clearTimer(); });
 </script>
 
 <style scoped>

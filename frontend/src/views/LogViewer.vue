@@ -25,8 +25,13 @@
         />
       </section>
 
-      <LogParseTaskPanel :scope="metricScope" @refresh="refreshMetrics" />
-      <LogMetricsPanel :scope="metricScope" @failure-select="openFailureDrawer" />
+      <LogParseTaskPanel
+        :draft-scope="analysisScopeFromFilters(draftFilters)"
+        :applied-scope="metricScope"
+        :job="parseJob"
+        @request-parse="requestParse"
+      />
+      <LogMetricsPanel :scope="metricScope" :job="parseJob" @failure-select="openFailureDrawer" />
       <LogFailureDrawer :open="failureDrawerOpen" :items="failureItems" :loading="failureLoading" :error="failureError" @close="closeFailureDrawer" />
 
       <section class="panel analysis-panel" data-testid="analysis-view">
@@ -181,8 +186,8 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 
 import { getEventFilterOptions, getEvents } from "@/api/dashboard";
 import type { EventFilterOptions, EventItem, EventQuery, LogLevel } from "@/api/dashboard";
-import { getMetricFailures } from "@/api/logMetrics";
-import type { FailureBreakdownItem, LogMetricScope } from "@/api/logMetrics";
+import { getLatestParseJob, getMetricFailures, getParseJob, postParseJob } from "@/api/logMetrics";
+import type { FailureBreakdownItem, LogMetricScope, ParseJob } from "@/api/logMetrics";
 import { getLogAnalysisColumns, getLogAnalysisDetail, getLogAnalysisDetails, getLogAnalysisSummary, putLogAnalysisColumns } from "@/api/logAnalysis";
 import type { DetailKey, DetailsQuery, LogAnalysisColumns, LogAnalysisSummaryItem, LogDecodeItem, SummaryQuery } from "@/api/logAnalysis";
 import LogAnalysisDetail from "@/components/LogAnalysisDetail.vue";
@@ -198,6 +203,7 @@ import UsageDurationPanel from "@/components/UsageDurationPanel.vue";
 import { formatBusinessTime } from "@/utils/dateTime";
 import { beginFeedback, setFeedbackError, setFeedbackSuccess } from "@/utils/feedback";
 import { defaultRecentThreeDays } from "@/utils/logDateRange";
+import { validateAnalysisScope } from "@/utils/logAnalysisScope";
 
 type AnalysisList = { total: number; page: number; page_size: number; items: LogAnalysisSummaryItem[] };
 type DetailList = { total: number; page: number; page_size: number; items: LogDecodeItem[] };
@@ -213,6 +219,7 @@ const recentAnalysisRange = defaultRecentThreeDays();
 const draftFilters = ref<LogAnalysisFilterValues>({ date_from: recentAnalysisRange.date_from, hour_from: recentAnalysisRange.hour_from, date_to: recentAnalysisRange.date_to, hour_to: recentAnalysisRange.hour_to, package_name: "", device_id: "", log_level: "" });
 const appliedFilters = ref<LogAnalysisFilterValues>({ ...draftFilters.value });
 const metricScope = ref<LogMetricScope>({ package_name: "", date_from: recentAnalysisRange.date_from, hour_from: recentAnalysisRange.hour_from, date_to: recentAnalysisRange.date_to, hour_to: recentAnalysisRange.hour_to });
+const parseJob = ref<ParseJob | null>(null);
 const failureDrawerOpen = ref(false);
 const failureItems = ref<FailureBreakdownItem[]>([]);
 const failureLoading = ref(false);
@@ -238,6 +245,8 @@ let columnsRequestSequence = 0;
 let detailsRequestSequence = 0;
 let detailRequestSequence = 0;
 let failureRequestSequence = 0;
+let parseRequestSequence = 0;
+let parsePollTimer: ReturnType<typeof setTimeout> | null = null;
 
 function responseData<T>(response: unknown): T {
   let value = response && typeof response === "object" && "data" in response ? (response as { data?: unknown }).data : response;
@@ -275,20 +284,104 @@ async function loadColumns() {
 }
 
 function loadAnalysisInitial() { void Promise.all([loadColumns(), loadSummary({ resetPage: true })]); }
-function setMetricScope(value: LogAnalysisFilterValues) {
-  if (!value.package_name) return;
-  metricScope.value = { package_name: value.package_name, date_from: value.date_from, hour_from: value.hour_from, date_to: value.date_to, hour_to: value.hour_to };
+function analysisScopeFromFilters(value: LogAnalysisFilterValues): LogMetricScope {
+  return { package_name: value.package_name, date_from: value.date_from, hour_from: value.hour_from, date_to: value.date_to, hour_to: value.hour_to };
 }
-function queryAnalysis(value: LogAnalysisFilterValues) { appliedFilters.value = { ...value }; setMetricScope(value); void loadSummary({ resetPage: true }); }
-function refreshAnalysis() { void loadSummary(); refreshMetrics(); }
-function resetAnalysis(value: LogAnalysisFilterValues) { appliedFilters.value = { ...value }; metricScope.value = { package_name: "", date_from: value.date_from, hour_from: value.hour_from, date_to: value.date_to, hour_to: value.hour_to }; void loadSummary({ resetPage: true }); }
+async function loadLatestParseJob(scope: LogMetricScope) {
+  const requestSequence = ++parseRequestSequence;
+  clearParsePoll();
+  if (!scope.package_name) { parseJob.value = null; return; }
+  try {
+    const response = await getLatestParseJob(scope);
+    if (requestSequence !== parseRequestSequence) return;
+    parseJob.value = responseData<ParseJob | null>(response);
+    scheduleParsePoll(scope, requestSequence);
+  } catch (error) {
+    if (requestSequence === parseRequestSequence) setFeedbackError(feedback, error instanceof Error ? error.message : "解析任务状态读取失败");
+  }
+}
+
+function clearParsePoll() { if (parsePollTimer !== null) { clearTimeout(parsePollTimer); parsePollTimer = null; } }
+
+function scheduleParsePoll(scope: LogMetricScope, requestSequence: number) {
+  clearParsePoll();
+  if (requestSequence !== parseRequestSequence || !parseJob.value || !["pending", "running"].includes(parseJob.value.status)) return;
+  parsePollTimer = setTimeout(() => { parsePollTimer = null; void pollParseJob(scope, requestSequence); }, 1000);
+}
+
+async function pollParseJob(scope: LogMetricScope, requestSequence: number) {
+  if (requestSequence !== parseRequestSequence || !parseJob.value) return;
+  try {
+    const response = await getParseJob(parseJob.value.id);
+    if (requestSequence !== parseRequestSequence) return;
+    parseJob.value = responseData<ParseJob>(response);
+    if (parseJob.value.status === "success") {
+      refreshMetrics();
+      void loadSummary({ resetPage: true });
+    }
+    scheduleParsePoll(scope, requestSequence);
+  } catch (error) {
+    if (requestSequence === parseRequestSequence) {
+      setFeedbackError(feedback, error instanceof Error ? error.message : "解析任务状态读取失败");
+      scheduleParsePoll(scope, requestSequence);
+    }
+  }
+}
+
+function applyAnalysisScope(value: LogAnalysisFilterValues): LogMetricScope | null {
+  const scope = analysisScopeFromFilters(value);
+  const error = validateAnalysisScope(scope);
+  if (error) { setFeedbackError(feedback, error); return null; }
+  appliedFilters.value = { ...value };
+  metricScope.value = scope;
+  return scope;
+}
+
+function queryAnalysis(value: LogAnalysisFilterValues) {
+  const scope = applyAnalysisScope(value);
+  if (!scope) return;
+  void loadSummary({ resetPage: true });
+  void loadLatestParseJob(scope);
+}
+
+function refreshAnalysis(value: LogAnalysisFilterValues) {
+  const scope = applyAnalysisScope(value);
+  if (!scope) return;
+  void loadSummary({ resetPage: true });
+  void loadLatestParseJob(scope);
+  refreshMetrics();
+}
+
+function resetAnalysis(value: LogAnalysisFilterValues) {
+  clearParsePoll();
+  ++parseRequestSequence;
+  parseJob.value = null;
+  appliedFilters.value = { ...value };
+  metricScope.value = { package_name: "", date_from: value.date_from, hour_from: value.hour_from, date_to: value.date_to, hour_to: value.hour_to };
+  void loadSummary({ resetPage: true });
+}
+
+async function requestParse(snapshot: LogMetricScope) {
+  const scope = applyAnalysisScope({ ...draftFilters.value, ...snapshot });
+  if (!scope) return;
+  clearParsePoll();
+  const requestSequence = ++parseRequestSequence;
+  try {
+    const response = await postParseJob(scope);
+    if (requestSequence !== parseRequestSequence) return;
+    parseJob.value = responseData<ParseJob>(response);
+    scheduleParsePoll(scope, requestSequence);
+  } catch (error) {
+    if (requestSequence === parseRequestSequence) setFeedbackError(feedback, error instanceof Error ? error.message : "解析任务创建失败");
+  }
+}
 function refreshMetrics() { metricScope.value = { ...metricScope.value }; }
 async function openFailureDrawer(selection: { target_kind: "web_element" | "ad_area"; config_id?: number }) {
   const requestSequence = ++failureRequestSequence;
   const scope = { ...metricScope.value };
   failureDrawerOpen.value = true; failureLoading.value = true; failureError.value = ""; failureItems.value = [];
   try {
-    const response = await getMetricFailures({ ...scope, ...selection });
+    const response = await getMetricFailures({ ...scope, ...(parseJob.value?.snapshot_end_utc ? { snapshot_end_utc: parseJob.value.snapshot_end_utc } : {}), ...selection });
     if (requestSequence !== failureRequestSequence) return;
     let value: unknown = response;
     if (value && typeof value === "object" && "data" in value) value = (value as { data: unknown }).data;
@@ -427,7 +520,7 @@ function switchView(nextView: View) { view.value = nextView; if (nextView === "r
 function showCopySuccess(): void { setFeedbackSuccess(feedback, "extra 复制成功"); }
 function showCopyError(message: string): void { setFeedbackError(feedback, message); }
 onMounted(loadAnalysisInitial);
-onBeforeUnmount(() => { ++failureRequestSequence; });
+onBeforeUnmount(() => { ++failureRequestSequence; ++parseRequestSequence; clearParsePoll(); });
 </script>
 
 <style scoped>
