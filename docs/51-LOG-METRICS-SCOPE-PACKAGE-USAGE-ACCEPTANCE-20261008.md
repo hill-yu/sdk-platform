@@ -38,7 +38,7 @@
   - `ad_click_count` → 广告区域实际与目标表；
   - `interstitial_*` → 插屏指标卡片；
   - `parse_failure_count` → failed H1 卡片。
-- `user_count`、`flow_count`、`average_duration_ms`、`success_rate` 等暂无正式组件映射的历史列不会伪装成正式指标；设置页会原样保留并标注“历史列，正式视图不展示”，未知 ID 可安全 round-trip。
+- `user_count`、`flow_count`、`average_duration_ms`、`success_rate` 等暂无正式组件映射的历史列不会伪装成正式指标；设置页会原样保留并标注“历史列，正式视图不展示”。在现有 columns 契约允许的历史 ID 范围内，未映射 ID 可安全 round-trip；不宣称任意未知 ID 均被后端接受。
 - 包画像在合法查询、刷新和 parse 流程加载；reset/unmount、切包、迟到 GET 和迟到 save 不会污染当前包名。
 - 使用时长汇总按 `(package_name, device_id)` 选 `server_ts DESC, id DESC` 的最新记录，再按包名聚合；同包多机型只返回一行，`device_model: null` 作为兼容字段。设备明细的机型过滤改为可选。
 
@@ -62,11 +62,13 @@ frontend: npm run build
 ✓ built in 5.21s
 ```
 
-补充的真实数据库相关测试：
+补充的数据库相关测试（其中仅 integration 测试连接真实 PostgreSQL，其余为 service/API 单元测试）：
 
 ```text
 python -m pytest -q backend/tests/test_log_scope_and_usage_integration.py backend/tests/test_usage_duration_summary.py backend/tests/test_usage_duration_admin_api.py
 17 passed in 0.65s
+
+其中 `test_log_scope_and_usage_integration.py` 为 1 个真实数据库测试；同一命令中的其余 16 个测试使用 mock/编译 SQL 验证，不应计作真实数据库执行。
 ```
 
 `git diff --check` 通过。前端构建仅有既有 bundle size warning，无编译错误。
@@ -88,7 +90,7 @@ pg_ctl (PostgreSQL) 14.22
 - 专用数据库：`sdk_scope_test_a499aa5c`
 - 专用测试 role：`sdk_test`
 
-真实数据库测试通过：`17 passed in 0.65s`。测试 fixture 实际创建表并插入重叠 parse tasks、成功/失败 H1、true-zero H1、跨机型历史使用时长，然后执行真实 SQL 查询。
+真实数据库 integration 测试通过。其 fixture 实际创建表并插入：重叠 parse tasks、1 条成功且 true-zero 的 H1、3 条跨机型历史使用时长记录，然后执行 latest parse、metrics overview 和 usage summary 的真实 SQL 查询。失败 H1、全部 bucket 边界、同 `server_ts` tie-break 等其余场景由单元测试覆盖，不宣称本次 fixture 已实测这些组合。
 
 测试结束后执行：
 
