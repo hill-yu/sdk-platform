@@ -8,6 +8,14 @@ export interface AnalysisScopeDraft {
   hour_to: number;
 }
 
+export function analysisScopeUtcRange(scope: AnalysisScopeDraft): { range_start_utc: string; range_end_utc: string } {
+  const [startYear, startMonth, startDay] = scope.date_from.split("-").map(Number);
+  const [endYear, endMonth, endDay] = scope.date_to.split("-").map(Number);
+  const start = new Date(Date.UTC(startYear, startMonth - 1, startDay, scope.hour_from) - 8 * 60 * 60 * 1000);
+  const end = new Date(Date.UTC(endYear, endMonth - 1, endDay, scope.hour_to + 1) - 8 * 60 * 60 * 1000);
+  return { range_start_utc: start.toISOString(), range_end_utc: end.toISOString() };
+}
+
 export function defaultAnalysisScope(now = new Date()): AnalysisScopeDraft {
   return { package_name: "", ...defaultRecentThreeDays(now) };
 }

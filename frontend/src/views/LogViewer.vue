@@ -29,7 +29,10 @@
         :draft-scope="analysisScopeFromFilters(draftFilters)"
         :applied-scope="metricScope"
         :job="parseJob"
+        :starting="parseStarting"
+        :cancelling="parseCancelling"
         @request-parse="requestParse"
+        @request-cancel="requestCancel"
       />
       <LogMetricsPanel :scope="metricScope" :job="parseJob" @failure-select="openFailureDrawer" />
       <LogFailureDrawer :open="failureDrawerOpen" :items="failureItems" :loading="failureLoading" :error="failureError" @close="closeFailureDrawer" />
@@ -186,7 +189,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 
 import { getEventFilterOptions, getEvents } from "@/api/dashboard";
 import type { EventFilterOptions, EventItem, EventQuery, LogLevel } from "@/api/dashboard";
-import { getLatestParseJob, getMetricFailures, getParseJob, postParseJob } from "@/api/logMetrics";
+import { cancelParseJob, getLatestParseJob, getMetricFailures, getParseJob, postParseJob } from "@/api/logMetrics";
 import type { FailureBreakdownItem, LogMetricScope, ParseJob } from "@/api/logMetrics";
 import { getLogAnalysisColumns, getLogAnalysisDetail, getLogAnalysisDetails, getLogAnalysisSummary, putLogAnalysisColumns } from "@/api/logAnalysis";
 import type { DetailKey, DetailsQuery, LogAnalysisColumns, LogAnalysisSummaryItem, LogDecodeItem, SummaryQuery } from "@/api/logAnalysis";
@@ -203,7 +206,7 @@ import UsageDurationPanel from "@/components/UsageDurationPanel.vue";
 import { formatBusinessTime } from "@/utils/dateTime";
 import { beginFeedback, setFeedbackError, setFeedbackSuccess } from "@/utils/feedback";
 import { defaultRecentThreeDays } from "@/utils/logDateRange";
-import { validateAnalysisScope } from "@/utils/logAnalysisScope";
+import { analysisScopeUtcRange, validateAnalysisScope } from "@/utils/logAnalysisScope";
 
 type AnalysisList = { total: number; page: number; page_size: number; items: LogAnalysisSummaryItem[] };
 type DetailList = { total: number; page: number; page_size: number; items: LogDecodeItem[] };
@@ -220,6 +223,8 @@ const draftFilters = ref<LogAnalysisFilterValues>({ date_from: recentAnalysisRan
 const appliedFilters = ref<LogAnalysisFilterValues>({ ...draftFilters.value });
 const metricScope = ref<LogMetricScope>({ package_name: "", date_from: recentAnalysisRange.date_from, hour_from: recentAnalysisRange.hour_from, date_to: recentAnalysisRange.date_to, hour_to: recentAnalysisRange.hour_to });
 const parseJob = ref<ParseJob | null>(null);
+const parseStarting = ref(false);
+const parseCancelling = ref(false);
 const failureDrawerOpen = ref(false);
 const failureItems = ref<FailureBreakdownItem[]>([]);
 const failureLoading = ref(false);
@@ -290,15 +295,24 @@ function analysisScopeFromFilters(value: LogAnalysisFilterValues): LogMetricScop
 async function loadLatestParseJob(scope: LogMetricScope) {
   const requestSequence = ++parseRequestSequence;
   clearParsePoll();
+  parseJob.value = null;
   if (!scope.package_name) { parseJob.value = null; return; }
   try {
     const response = await getLatestParseJob(scope);
     if (requestSequence !== parseRequestSequence) return;
-    parseJob.value = responseData<ParseJob | null>(response);
+    const candidate = responseData<ParseJob | null>(response);
+    parseJob.value = candidate && latestJobMatchesScope(candidate, scope) ? candidate : null;
     scheduleParsePoll(scope, requestSequence);
   } catch (error) {
     if (requestSequence === parseRequestSequence) setFeedbackError(feedback, error instanceof Error ? error.message : "解析任务状态读取失败");
   }
+}
+
+function latestJobMatchesScope(job: ParseJob, scope: LogMetricScope): boolean {
+  const expected = analysisScopeUtcRange(scope);
+  return job.package_name === scope.package_name
+    && Date.parse(job.range_start_utc ?? "") === Date.parse(expected.range_start_utc)
+    && Date.parse(job.range_end_utc ?? "") === Date.parse(expected.range_end_utc);
 }
 
 function clearParsePoll() { if (parsePollTimer !== null) { clearTimeout(parsePollTimer); parsePollTimer = null; } }
@@ -314,7 +328,9 @@ async function pollParseJob(scope: LogMetricScope, requestSequence: number) {
   try {
     const response = await getParseJob(parseJob.value.id);
     if (requestSequence !== parseRequestSequence) return;
-    parseJob.value = responseData<ParseJob>(response);
+    const candidate = responseData<ParseJob>(response);
+    if (!latestJobMatchesScope(candidate, scope)) { parseJob.value = null; return; }
+    parseJob.value = candidate;
     if (parseJob.value.status === "success") {
       refreshMetrics();
       void loadSummary({ resetPage: true });
@@ -362,18 +378,34 @@ function resetAnalysis(value: LogAnalysisFilterValues) {
 }
 
 async function requestParse(snapshot: LogMetricScope) {
+  if (parseStarting.value || parseCancelling.value) return;
   const scope = applyAnalysisScope({ ...draftFilters.value, ...snapshot });
   if (!scope) return;
   clearParsePoll();
+  parseJob.value = null;
   const requestSequence = ++parseRequestSequence;
+  parseStarting.value = true;
   try {
     const response = await postParseJob(scope);
     if (requestSequence !== parseRequestSequence) return;
-    parseJob.value = responseData<ParseJob>(response);
+    const candidate = responseData<ParseJob>(response);
+    parseJob.value = latestJobMatchesScope(candidate, scope) ? candidate : null;
     scheduleParsePoll(scope, requestSequence);
   } catch (error) {
     if (requestSequence === parseRequestSequence) setFeedbackError(feedback, error instanceof Error ? error.message : "解析任务创建失败");
-  }
+  } finally { parseStarting.value = false; }
+}
+
+async function requestCancel(jobId: number) {
+  if (parseCancelling.value) return;
+  clearParsePoll();
+  parseCancelling.value = true;
+  try {
+    const response = await cancelParseJob(jobId);
+    parseJob.value = responseData<ParseJob>(response);
+  } catch (error) {
+    setFeedbackError(feedback, error instanceof Error ? error.message : "解析任务取消失败");
+  } finally { parseCancelling.value = false; }
 }
 function refreshMetrics() { metricScope.value = { ...metricScope.value }; }
 async function openFailureDrawer(selection: { target_kind: "web_element" | "ad_area"; config_id?: number }) {

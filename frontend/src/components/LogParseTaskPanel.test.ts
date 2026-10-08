@@ -60,4 +60,14 @@ describe("LogParseTaskPanel", () => {
     await wrapper.setProps({ draftScope: { ...scope, package_name: "com.example.next" } });
     expect(wrapper.emitted("request-parse")).toBeUndefined();
   });
+
+  it("emits cancel and disables duplicate starts while the parent request is pending", async () => {
+    const wrapper = mount(LogParseTaskPanel, {
+      props: { draftScope: scope, appliedScope: scope, job: null, starting: true },
+    });
+    expect(wrapper.get("[data-testid='start-parse']").attributes("disabled")).toBeDefined();
+    await wrapper.setProps({ job: runningJob, starting: false });
+    await wrapper.get("[data-testid='cancel-parse']").trigger("click");
+    expect(wrapper.emitted("request-cancel")).toEqual([[runningJob.id]]);
+  });
 });

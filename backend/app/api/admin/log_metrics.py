@@ -29,14 +29,14 @@ def _metrics_service():
     return log_metrics_service
 
 
-def _metric_scope(
+def _analysis_scope(
     package_name: str = Query(..., min_length=1, max_length=255),
     date_from: date = Query(...),
     hour_from: int = Query(..., ge=0, le=23),
     date_to: date = Query(...),
     hour_to: int = Query(..., ge=0, le=23),
     snapshot_end_utc: datetime | None = Query(None),
-) -> dict[str, object]:
+) -> tuple[object, object, str]:
     try:
         scope = resolve_analysis_scope(
             package_name=package_name,
@@ -47,17 +47,37 @@ def _metric_scope(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    range_end = scope.range_end
+    return scope.range_start, scope.range_end, scope.package_name
+
+
+def _metric_scope(
+    package_name: str = Query(..., min_length=1, max_length=255),
+    date_from: date = Query(...),
+    hour_from: int = Query(..., ge=0, le=23),
+    date_to: date = Query(...),
+    hour_to: int = Query(..., ge=0, le=23),
+    snapshot_end_utc: datetime | None = Query(None),
+) -> dict[str, object]:
+    range_start, requested_range_end, normalized_package = _analysis_scope(
+        package_name=package_name,
+        date_from=date_from,
+        hour_from=hour_from,
+        date_to=date_to,
+        hour_to=hour_to,
+    )
+    range_end = requested_range_end
     if snapshot_end_utc is not None:
         if snapshot_end_utc.tzinfo is None or snapshot_end_utc.utcoffset() is None:
             raise HTTPException(status_code=422, detail="snapshot_end_utc 必须包含时区")
         snapshot_end = snapshot_end_utc.astimezone(timezone.utc)
-        if snapshot_end <= scope.range_start:
+        if snapshot_end <= range_start:
             raise HTTPException(status_code=422, detail="snapshot_end_utc 必须晚于范围起点")
-        range_end = min(range_end, snapshot_end)
+        if snapshot_end > requested_range_end:
+            raise HTTPException(status_code=422, detail="snapshot_end_utc 不能晚于请求范围终点")
+        range_end = snapshot_end
     return {
-        "package_name": scope.package_name,
-        "range_start": scope.range_start,
+        "package_name": normalized_package,
+        "range_start": range_start,
         "range_end": range_end,
     }
 
@@ -100,10 +120,14 @@ async def create_parse_job(
 
 @router.get("/log-analysis/parse-jobs/latest", response_model=dict)
 async def get_latest_parse_job(
-    scope: dict[str, object] = Depends(_metric_scope),
+    analysis_scope: tuple[object, object, str] = Depends(_analysis_scope),
+    snapshot_end_utc: datetime | None = Query(None),
     db: AsyncSession = Depends(get_db_no_commit),
 ):
-    job = await _service().get_latest_parse_job(db, **scope)
+    if snapshot_end_utc is not None:
+        raise HTTPException(status_code=422, detail="latest 任务状态不接受 snapshot_end_utc")
+    range_start, range_end, package_name = analysis_scope
+    job = await _service().get_latest_parse_job(db, package_name=package_name, range_start=range_start, range_end=range_end)
     return {"code": 0, "data": _service().serialize_parse_job(job) if job is not None else None}
 
 

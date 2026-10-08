@@ -5,7 +5,8 @@
       <p>按当前北京时间范围生成或刷新结构化解析结果。</p>
     </div>
     <div class="task-actions">
-      <button v-if="!active" data-testid="start-parse" type="button" :disabled="disabled || !draftScope.package_name" @click="requestParse">开始解析</button>
+      <button v-if="!activeJob" data-testid="start-parse" type="button" :disabled="disabled || starting || cancelling || !draftScope.package_name" @click="requestParse">{{ starting ? "创建中…" : "开始解析" }}</button>
+      <button v-if="activeJob" data-testid="cancel-parse" class="ghost" type="button" :disabled="cancelling" @click="requestCancel">{{ cancelling ? "取消中…" : "取消任务" }}</button>
     </div>
     <p v-if="job" data-testid="parse-status" class="task-status">状态：{{ statusLabel(job.status) }} · {{ job.processed_count }} / {{ job.total_count }} 条</p>
   </section>
@@ -21,14 +22,22 @@ const props = withDefaults(defineProps<{
   appliedScope?: LogMetricScope | null;
   job?: ParseJob | null;
   disabled?: boolean;
-}>(), { appliedScope: null, job: null, disabled: false });
-const emit = defineEmits<{ "request-parse": [snapshot: LogMetricScope] }>();
+  starting?: boolean;
+  cancelling?: boolean;
+}>(), { appliedScope: null, job: null, disabled: false, starting: false, cancelling: false });
+const emit = defineEmits<{ "request-parse": [snapshot: LogMetricScope]; "request-cancel": [jobId: number] }>();
 
-const active = computed(() => props.job?.status === "pending" || props.job?.status === "running");
+const activeJob = computed(() => props.job?.status === "pending" || props.job?.status === "running");
+const active = computed(() => props.starting || activeJob.value);
 
 function requestParse() {
-  if (props.disabled || active.value || !props.draftScope.package_name) return;
+  if (props.disabled || props.starting || props.cancelling || active.value || !props.draftScope.package_name) return;
   emit("request-parse", { ...props.draftScope });
+}
+
+function requestCancel() {
+  if (props.cancelling || !props.job || !active.value) return;
+  emit("request-cancel", props.job.id);
 }
 
 function statusLabel(status: ParseJob["status"]) { return { pending: "排队中", running: "解析中", success: "已完成", failed: "失败", cancelled: "已取消" }[status]; }

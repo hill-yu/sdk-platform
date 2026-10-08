@@ -122,6 +122,35 @@ def test_latest_parse_job_route_is_registered_before_id_route(monkeypatch):
     assert calls[0]["range_end"].isoformat() == "2026-10-07T16:00:00+00:00"
 
 
+def test_latest_parse_job_does_not_accept_snapshot_cap(monkeypatch):
+    from app.admin_main import app
+    from app.api.admin import log_metrics
+
+    async def fake_latest(_db, **kwargs):
+        return None
+
+    monkeypatch.setattr(log_metrics._service(), "get_latest_parse_job", fake_latest)
+    app.dependency_overrides[get_db_no_commit] = override_db
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/admin/log-analysis/parse-jobs/latest",
+                params={
+                    "package_name": "com.example.app",
+                    "date_from": "2026-10-01",
+                    "hour_from": 0,
+                    "date_to": "2026-10-01",
+                    "hour_to": 23,
+                    "snapshot_end_utc": "2026-10-01T04:00:00Z",
+                },
+                headers={"Authorization": f"Bearer {TOKEN}"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+
+
 def test_metrics_scope_caps_formal_queries_at_parse_snapshot(monkeypatch):
     from app.admin_main import app
     from app.api.admin import log_metrics
@@ -171,7 +200,7 @@ def test_metrics_scope_rejects_snapshot_after_requested_range(monkeypatch):
                     "hour_from": 0,
                     "date_to": "2026-10-01",
                     "hour_to": 23,
-                    "snapshot_end_utc": "2026-09-30T15:00:00Z",
+                    "snapshot_end_utc": "2026-10-02T00:00:00Z",
                 },
                 headers={"Authorization": f"Bearer {TOKEN}"},
             )

@@ -11,7 +11,7 @@ vi.mock("@/api/logMetrics", () => ({
 }));
 
 const scope = { package_name: "com.example.app", date_from: "2026-09-28", hour_from: 0, date_to: "2026-09-30", hour_to: 23 };
-const successJob = { id: 11, package_name: scope.package_name, range_start: "2026-09-27T16:00:00Z", range_end: "2026-09-30T15:59:59Z", snapshot_end_utc: "2026-09-30T15:59:59Z", status: "success" as const, total_count: 10, processed_count: 10, h1_count: 4, failed_h1_count: 0, no_h1_count: 0 };
+const successJob = { id: 11, package_name: scope.package_name, range_start: "2026-09-27T16:00:00Z", range_end: "2026-09-30T15:59:59Z", range_start_utc: "2026-09-27T16:00:00.000Z", range_end_utc: "2026-09-30T16:00:00.000Z", snapshot_end_utc: "2026-09-30T15:59:59Z", status: "success" as const, total_count: 10, processed_count: 10, h1_count: 4, failed_h1_count: 0, no_h1_count: 0 };
 
 describe("LogMetricsPanel", () => {
   beforeEach(() => {
@@ -96,7 +96,7 @@ describe("LogMetricsPanel", () => {
     vi.mocked(getMetricConfigs).mockResolvedValue({ data: { code: 0, data: { total: 0, items: [] } } } as never);
     vi.mocked(getMetricTargets).mockResolvedValue({ data: { code: 0, data: { items: [{ target_kind: "web_element", planned_count: 2, actual_count: 1, success_count: 1, failure_count: 0, actual_rate: 0.5, success_rate: 0.5, failure_rate: 0 }] } } } as never);
     const wrapper = mount(LogMetricsPanel, { props: { scope: { ...scope, package_name: "a" }, job: { ...successJob, package_name: "a" } } });
-    await wrapper.setProps({ scope: { ...scope, package_name: "b" } });
+    await wrapper.setProps({ scope: { ...scope, package_name: "b" }, job: { ...successJob, package_name: "b" } });
     overviewB.resolve({ data: { code: 0, data: { ...({ declaration_count: 2, planned_click_count: 2, actual_click_count: 1, response_success_count: 1, plan_mismatch_count: 0, interstitial_presentation_count: 0, interstitial_click_count: 0, interstitial_close_count: 0, interstitial_close_rate: null, interstitial_non_close_click_rate: null, target_breakdown: {} }) } } });
     await flushPromises();
     overviewA.resolve({ data: { code: 0, data: { declaration_count: 1, planned_click_count: 1, actual_click_count: 0, response_success_count: 0, plan_mismatch_count: 0, interstitial_presentation_count: 0, interstitial_click_count: 0, interstitial_close_count: 0, interstitial_close_rate: null, interstitial_non_close_click_rate: null, target_breakdown: {} } } });
@@ -138,5 +138,38 @@ describe("LogMetricsPanel", () => {
     await flushPromises();
     expect(getMetricOverview).not.toHaveBeenCalled();
     expect(wrapper.get("[data-testid='metrics-status']").text()).toContain("解析进行中");
+  });
+
+  it("does not query formal metrics for a successful job with another scope", async () => {
+    const wrapper = mount(LogMetricsPanel, { props: { scope, job: { ...successJob, range_end_utc: "2026-10-01T16:00:00.000Z" } } });
+    await flushPromises();
+    expect(getMetricOverview).not.toHaveBeenCalled();
+    expect(wrapper.get("[data-testid='metrics-status']").text()).toContain("不匹配");
+  });
+
+  it("shows partial-failure warning together with successful formal metrics", async () => {
+    const wrapper = mount(LogMetricsPanel, { props: { scope, job: { ...successJob, failed_h1_count: 1, h1_count: 4 } } });
+    await flushPromises();
+    expect(wrapper.get("[data-testid='metrics-status']").text()).toContain("1 个 H1 失败");
+    expect(wrapper.get("[data-testid='declaration-count']").text()).toBe("10");
+  });
+
+  it.each([
+    [{ total_count: 0, h1_count: 0, failed_h1_count: 0 }, "没有可解析的源数据"],
+    [{ total_count: 2, h1_count: 0, failed_h1_count: 0 }, "没有 H1 结果"],
+    [{ total_count: 2, h1_count: 2, failed_h1_count: 2 }, "所有 H1 均失败"],
+  ])("distinguishes terminal parse state %j", async (counts, message) => {
+    const wrapper = mount(LogMetricsPanel, { props: { scope, job: { ...successJob, ...counts } } });
+    await flushPromises();
+    expect(wrapper.get("[data-testid='metrics-status']").text()).toContain(message);
+    expect(wrapper.find("[data-testid='declaration-count']").exists()).toBe(false);
+  });
+
+  it("labels true zero while retaining zero-valued formal cards", async () => {
+    vi.mocked(getMetricOverview).mockResolvedValueOnce({ data: { code: 0, data: { declaration_count: 0, planned_click_count: 0, actual_click_count: 0, response_success_count: 0, plan_mismatch_count: 0, interstitial_presentation_count: 0, interstitial_click_count: 0, interstitial_close_count: 0, interstitial_close_rate: null, interstitial_non_close_click_rate: null, target_breakdown: {} } } } as never);
+    const wrapper = mount(LogMetricsPanel, { props: { scope, job: { ...successJob, h1_count: 1 } } });
+    await flushPromises();
+    expect(wrapper.get("[data-testid='metrics-status']").text()).toContain("未产生可展示指标");
+    expect(wrapper.get("[data-testid='declaration-count']").text()).toBe("0");
   });
 });

@@ -2,6 +2,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EventItem } from "@/api/dashboard";
+import { analysisScopeUtcRange } from "@/utils/logAnalysisScope";
 
 const {
   getEvents,
@@ -140,9 +141,9 @@ function respondMetrics() {
   getMetricConfigs.mockResolvedValue({ data: { code: 0, data: { total: 2, items: [{ config_id: "unknown", declaration_count: 1, share: 0.5 }, { config_id: 8, declaration_count: 1, share: 0.5 }] } } });
   getMetricTargets.mockResolvedValue({ data: { code: 0, data: { items: [{ target_kind: "web_element", planned_count: 2, actual_count: 1, success_count: 1, failure_count: 0, actual_rate: 0.5, success_rate: 1, failure_rate: 0 }] } } });
   getMetricFailures.mockResolvedValue({ data: { code: 0, data: [{ failure_category: "timeout", failure_count: 1, share: 1 }] } });
-  getLatestParseJob.mockResolvedValue({ data: { code: 0, data: { id: 9, package_name: "com.example.app", status: "success", range_start: "", range_end: "", snapshot_end_utc: "2026-09-30T15:59:59Z", total_count: 1, processed_count: 1, h1_count: 1, failed_h1_count: 0, no_h1_count: 0 } } });
-  postParseJob.mockResolvedValue({ data: { code: 0, data: { id: 9, package_name: "com.example.app", date_from: "2026-09-28", hour_from: 0, date_to: "2026-09-30", hour_to: 23, status: "success", range_start: "", range_end: "", total_count: 1, processed_count: 1, h1_count: 1, failed_h1_count: 0, no_h1_count: 0 } } });
-  getParseJob.mockResolvedValue({ data: { code: 0, data: { id: 9, status: "success" } } });
+  getLatestParseJob.mockImplementation((scope) => ({ data: { code: 0, data: { id: 9, package_name: scope.package_name, ...analysisScopeUtcRange(scope), status: "success", range_start: "", range_end: "", snapshot_end_utc: "2026-09-30T15:59:59Z", total_count: 1, processed_count: 1, h1_count: 1, failed_h1_count: 0, no_h1_count: 0 } } }) as never);
+  postParseJob.mockImplementation((scope) => ({ data: { code: 0, data: { id: 9, package_name: scope.package_name, ...analysisScopeUtcRange(scope), status: "success", date_from: scope.date_from, hour_from: scope.hour_from, date_to: scope.date_to, hour_to: scope.hour_to, range_start: "", range_end: "", total_count: 1, processed_count: 1, h1_count: 1, failed_h1_count: 0, no_h1_count: 0 } } }) as never);
+  getParseJob.mockImplementation((id) => ({ data: { code: 0, data: { id, package_name: "com.example.app", status: "success", total_count: 1, processed_count: 1, h1_count: 1, failed_h1_count: 0, no_h1_count: 0 } } }) as never);
   cancelParseJob.mockResolvedValue({ data: { code: 0, data: { id: 9, status: "cancelled" } } });
 }
 
@@ -288,6 +289,40 @@ describe("LogViewer", () => {
     expect(getMetricOverview).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.next" }));
     expect(getMetricConfigs).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.next" }));
     expect(getMetricTargets).toHaveBeenLastCalledWith(expect.objectContaining({ package_name: "com.example.next" }));
+  });
+
+  it("does not let an older latest-job response publish its snapshot after scope changes", async () => {
+    const latestA = deferred<unknown>();
+    const latestB = deferred<unknown>();
+    getLatestParseJob.mockReset();
+    getLatestParseJob.mockReturnValueOnce(latestA.promise as never).mockReturnValueOnce(latestB.promise as never);
+    const wrapper = await mountAnalysisViewer();
+    await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
+    await wrapper.get("[data-testid='filter-query-existing']").trigger("click");
+    await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.next");
+    await wrapper.get("[data-testid='filter-query-existing']").trigger("click");
+    const oldScope = getLatestParseJob.mock.calls[0][0];
+    latestA.resolve({ data: { code: 0, data: { id: 1, package_name: oldScope.package_name, ...analysisScopeUtcRange(oldScope), snapshot_end_utc: "2026-10-01T01:00:00Z", status: "success", total_count: 1, processed_count: 1, h1_count: 1, failed_h1_count: 0, no_h1_count: 0 } } });
+    latestB.resolve({ data: { code: 0, data: null } });
+    await flushPromises();
+    expect(getMetricOverview).not.toHaveBeenCalled();
+    expect(wrapper.find("[data-testid='declaration-count']").exists()).toBe(false);
+  });
+
+  it("prevents duplicate parse creation and preserves parent-owned cancellation", async () => {
+    const pending = deferred<unknown>();
+    postParseJob.mockReturnValueOnce(pending.promise as never);
+    const wrapper = await mountAnalysisViewer();
+    await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
+    const start = wrapper.get("[data-testid='start-parse']");
+    await start.trigger("click");
+    await start.trigger("click");
+    expect(postParseJob).toHaveBeenCalledTimes(1);
+    const scope = postParseJob.mock.calls[0][0];
+    pending.resolve({ data: { code: 0, data: { id: 9, package_name: scope.package_name, ...analysisScopeUtcRange(scope), status: "running", range_start: "", range_end: "", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
+    await flushPromises();
+    await wrapper.get("[data-testid='cancel-parse']").trigger("click");
+    expect(cancelParseJob).toHaveBeenCalledWith(9);
   });
 
   it("composes scoped metrics and failure details without clearing the legacy summary", async () => {

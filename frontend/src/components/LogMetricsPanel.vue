@@ -6,10 +6,11 @@
     </div>
 
     <p v-if="disabled" data-testid="metrics-disabled" class="empty-state">请输入包名并查询已有结果，或先开始解析任务。</p>
-    <p v-else-if="jobStatusMessage" data-testid="metrics-status" class="empty-state">{{ jobStatusMessage }}</p>
+    <p v-else-if="metricsBlocked" data-testid="metrics-status" class="empty-state">{{ jobStatusMessage }}</p>
     <p v-else-if="error" data-testid="metrics-error" class="feedback error">{{ error }}</p>
     <p v-else-if="!loading && !overview" data-testid="metrics-empty" class="empty-state">当前条件下暂无指标结果。</p>
     <template v-else-if="overview">
+      <p v-if="jobStatusMessage" data-testid="metrics-status" class="mismatch-alert">{{ jobStatusMessage }}</p>
       <div class="metric-cards">
         <article><span>声明点击数</span><strong data-testid="declaration-count">{{ overview.declaration_count }}</strong></article>
         <article><span>计划点击数</span><strong data-testid="planned-click-count">{{ overview.planned_click_count }}</strong></article>
@@ -62,6 +63,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { getMetricConfigs, getMetricOverview, getMetricTargets } from "@/api/logMetrics";
 import type { ConfigMetricItem, LogMetricScope, MetricOverview, ParseJob, TargetMetric } from "@/api/logMetrics";
+import { analysisScopeUtcRange } from "@/utils/logAnalysisScope";
 
 type MetricViewKind = "web_element" | "ad_area";
 type VisibleTarget = Omit<TargetMetric, "target_kind">;
@@ -103,12 +105,24 @@ function unwrap<T>(response: unknown): T {
 
 function validScope(scope: LogMetricScope) { return Boolean(scope.package_name && scope.date_from && scope.date_to); }
 
-const successfulJob = computed(() => props.job?.status === "success");
+const scopeMatchesJob = computed(() => {
+  if (!props.job) return false;
+  const expected = analysisScopeUtcRange(props.scope);
+  return props.job.package_name === props.scope.package_name
+    && Date.parse(props.job.range_start_utc ?? "") === Date.parse(expected.range_start_utc)
+    && Date.parse(props.job.range_end_utc ?? "") === Date.parse(expected.range_end_utc);
+});
+const successfulJob = computed(() => props.job?.status === "success" && scopeMatchesJob.value);
+const metricsBlocked = computed(() => {
+  if (!props.job || !successfulJob.value) return true;
+  return props.job.total_count === 0 || props.job.h1_count === 0 || props.job.failed_h1_count >= props.job.h1_count;
+});
 const jobStatusMessage = computed(() => {
   if (!validScope(props.scope)) return "";
   if (!props.job) return "暂无对应解析任务，当前条件下暂无指标结果。";
   if (props.job.status === "pending" || props.job.status === "running") return "解析进行中，指标将在任务完成后展示。";
   if (props.job.status === "failed" || props.job.status === "cancelled") return "解析任务未成功完成，未展示旧指标。";
+  if (!scopeMatchesJob.value) return "当前解析任务与查询范围不匹配，未展示指标。";
   if (props.job.total_count === 0) return "当前范围没有可解析的源数据。";
   if (props.job.h1_count === 0) return "解析完成，但没有 H1 结果。";
   if (props.job.failed_h1_count >= props.job.h1_count) return "解析完成，但所有 H1 均失败。";
