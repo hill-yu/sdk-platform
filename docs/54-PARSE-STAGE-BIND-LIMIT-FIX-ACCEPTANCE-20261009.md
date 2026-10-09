@@ -17,7 +17,7 @@
 ### TDD 与测试
 
 1. 修复前红测：3 failed（helper 不存在、worker 无安全日志）。
-2. 定向测试：`python -m pytest -q backend/tests/test_log_parse_job_service_v2.py backend/tests/test_log_parse_worker.py` → `40 passed`。
+2. 定向测试：`python -m pytest -q backend/tests/test_log_parse_job_service_v2.py backend/tests/test_log_parse_worker.py backend/tests/test_log_parse_stage_integration.py -rs` → `43 passed, 1 skipped`（默认未设置专用 PostgreSQL URL）。
 3. 全后端测试：`python -m pytest -q backend/tests -rs` → `433 passed, 3 skipped`。
 4. 跳过原因：
    - `SDK_LOG_SCOPE_TEST_DATABASE_URL` 未设置，真实 PostgreSQL scope 回归跳过。
