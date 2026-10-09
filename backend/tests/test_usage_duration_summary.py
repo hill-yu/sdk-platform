@@ -98,24 +98,34 @@ def test_usage_devices_query_keeps_all_models_when_model_is_omitted():
     assert "device_model =" not in sql
 
 
-def test_usage_summary_uses_only_latest_device_and_computes_four_buckets():
+def test_usage_summary_uses_only_latest_device_and_computes_seven_buckets_with_totals():
     from app.services.usage_duration_service import get_usage_summary
 
     db = Db(
         [
-            Result(scalar=2),
-            Result(rows=[SimpleNamespace(
-                package_name="com.example.app",
-                device_model=None,
-                device_count=2,
-                total_duration_s=540,
-                average_duration_s=270,
-                le_300_count=1,
-                between_301_600_count=1,
-                between_601_899_count=0,
-                ge_900_count=0,
-                last_report_at=datetime(2026, 9, 29, 8, tzinfo=timezone.utc),
-            )]),
+            Result(scalar=1),
+                Result(rows=[{
+                    "package_name": "com.example.app",
+                    "device_model": None,
+                    "device_count": 3,
+                    "total_duration_s": 1020,
+                    "average_duration_s": 340,
+                    "le_120_count": 1,
+                    "121_300_count": 1,
+                    "301_600_count": 1,
+                    "601_899_count": 0,
+                    "900_1199_count": 0,
+                    "1200_1499_count": 0,
+                    "ge_1500_count": 0,
+                    "le_120_duration_s": 120,
+                    "121_300_duration_s": 300,
+                    "301_600_duration_s": 600,
+                    "601_899_duration_s": 0,
+                    "900_1199_duration_s": 0,
+                    "1200_1499_duration_s": 0,
+                    "ge_1500_duration_s": 0,
+                    "last_report_at": datetime(2026, 9, 29, 8, tzinfo=timezone.utc),
+                }]),
         ]
     )
 
@@ -133,15 +143,37 @@ def test_usage_summary_uses_only_latest_device_and_computes_four_buckets():
     )
 
     item = result["items"][0]
-    assert item["total_duration_s"] == 540
-    assert item["device_count"] == 2
-    assert item["average_duration_s"] == 270
-    assert [(bucket["key"], bucket["count"], bucket["share"]) for bucket in item["buckets"]] == [
-        ("le_300", 1, 0.5),
-        ("301_600", 1, 0.5),
-        ("601_899", 0, 0.0),
-        ("ge_900", 0, 0.0),
+    assert item["total_duration_s"] == 1020
+    assert item["device_count"] == 3
+    assert item["average_duration_s"] == 340
+    assert [(bucket["key"], bucket["count"], bucket["share"], bucket["total_duration_s"]) for bucket in item["buckets"]] == [
+        ("le_120", 1, 1 / 3, 120),
+        ("121_300", 1, 1 / 3, 300),
+        ("301_600", 1, 1 / 3, 600),
+        ("601_899", 0, 0.0, 0),
+        ("900_1199", 0, 0.0, 0),
+        ("1200_1499", 0, 0.0, 0),
+        ("ge_1500", 0, 0.0, 0),
     ]
+
+
+def test_usage_summary_sql_has_mutually_exclusive_boundary_cases_and_duration_sums():
+    from app.services.usage_duration_service import get_usage_summary
+
+    db = Db([Result(scalar=0), Result(rows=[])])
+    asyncio.run(get_usage_summary(
+        db,
+        package_name=None,
+        range_start=START,
+        range_end=END,
+        page=1,
+        page_size=20,
+        sort_by="package_name",
+        sort_order="asc",
+    ))
+    sql = str(db.statements[1].compile(dialect=postgresql.dialect()))
+    for label in ("le_120_count", '"121_300_count"', '"301_600_count"', '"601_899_count"', '"900_1199_count"', '"1200_1499_count"', "ge_1500_count", "le_120_duration_s", '"121_300_duration_s"', '"301_600_duration_s"', '"601_899_duration_s"', '"900_1199_duration_s"', '"1200_1499_duration_s"', "ge_1500_duration_s"):
+        assert label in sql
 
 
 def test_usage_devices_returns_latest_rows_for_expanded_package_and_model():

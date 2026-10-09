@@ -15,11 +15,11 @@ const summary = {
   page: 1,
   page_size: 20,
   items: [
-    { package_name: "com.a", device_model: "Pixel", device_count: 2, total_duration_s: 540, average_duration_s: 270, buckets: [
-      { key: "le_300", count: 1, share: 0.5 }, { key: "301_600", count: 1, share: 0.5 }, { key: "601_899", count: 0, share: 0 }, { key: "ge_900", count: 0, share: 0 },
+    { package_name: "com.a", device_model: null, device_count: 3, total_duration_s: 1020, average_duration_s: 340, buckets: [
+      { key: "le_120", count: 1, share: 0.333, total_duration_s: 120 }, { key: "121_300", count: 1, share: 0.333, total_duration_s: 300 }, { key: "301_600", count: 1, share: 0.333, total_duration_s: 600 }, { key: "601_899", count: 0, share: 0, total_duration_s: 0 }, { key: "900_1199", count: 0, share: 0, total_duration_s: 0 }, { key: "1200_1499", count: 0, share: 0, total_duration_s: 0 }, { key: "ge_1500", count: 0, share: 0, total_duration_s: 0 },
     ], last_report_at: "2026-09-30 10:00:00" },
-    { package_name: "com.b", device_model: "iPhone", device_count: 1, total_duration_s: 900, average_duration_s: 900, buckets: [
-      { key: "le_300", count: 0, share: 0 }, { key: "301_600", count: 0, share: 0 }, { key: "601_899", count: 0, share: 0 }, { key: "ge_900", count: 1, share: 1 },
+    { package_name: "com.b", device_model: null, device_count: 1, total_duration_s: 1500, average_duration_s: 1500, buckets: [
+      { key: "le_120", count: 0, share: 0, total_duration_s: 0 }, { key: "121_300", count: 0, share: 0, total_duration_s: 0 }, { key: "301_600", count: 0, share: 0, total_duration_s: 0 }, { key: "601_899", count: 0, share: 0, total_duration_s: 0 }, { key: "900_1199", count: 0, share: 0, total_duration_s: 0 }, { key: "1200_1499", count: 0, share: 0, total_duration_s: 0 }, { key: "ge_1500", count: 1, share: 1, total_duration_s: 1500 },
     ], last_report_at: "2026-09-30 11:00:00" },
   ],
 };
@@ -44,10 +44,10 @@ describe("UsageDurationPanel", () => {
     expect(getUsageSummary).toHaveBeenCalledWith(summaryScope);
     expect((wrapper.get("[data-testid='usage-date-from']").element as HTMLInputElement).value).toBe("2026-09-28");
     expect((wrapper.get("[data-testid='usage-date-to']").element as HTMLInputElement).value).toBe("2026-09-30");
-    expect(wrapper.get("[data-testid='usage-summary-row']").text()).toContain("540 秒");
-    expect(wrapper.get("[data-testid='usage-summary-row']").text()).toContain("9 分钟");
-    expect(wrapper.get("[data-testid='usage-bucket-le_300']").text()).toContain("1");
-    expect(wrapper.get("[data-testid='usage-bucket-ge_900']").text()).toContain("0");
+    expect(wrapper.get("[data-testid='usage-summary-row']").text()).toContain("1020 秒");
+    expect(wrapper.get("[data-testid='usage-summary-row']").text()).toContain("17 分钟");
+    expect(wrapper.get("[data-testid='usage-bucket-le_120']").text()).toContain("120 秒");
+    expect(wrapper.get("[data-testid='usage-bucket-ge_1500']").text()).toContain("0");
   });
 
   it("loads one row's devices on expand, caches collapse/re-expand, and preserves applied scope", async () => {

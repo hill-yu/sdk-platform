@@ -67,10 +67,15 @@ def test_isolated_postgres_scope_and_usage_regression() -> None:
                     package_name="com.example.app", device_id="device-1", declared_click_count=0,
                     status="success", decoder_version="test",
                 ))
+                durations = [1, 120, 121, 300, 301, 600, 601, 899, 900, 1199, 1200, 1499, 1500, 3600]
                 session.add_all([
-                    SdkUsageDuration(package_name="com.example.app", device_id="device-1", device_model="Pixel", os="14", app_version="1", sdk_version="1", duration_s=100, server_ts=start + timedelta(hours=1)),
-                    SdkUsageDuration(package_name="com.example.app", device_id="device-1", device_model="Galaxy", os="14", app_version="1", sdk_version="1", duration_s=301, server_ts=start + timedelta(hours=2)),
-                    SdkUsageDuration(package_name="com.example.app", device_id="device-2", device_model="iPhone", os="17", app_version="1", sdk_version="1", duration_s=900, server_ts=start + timedelta(hours=3)),
+                    SdkUsageDuration(package_name="com.example.app", device_id=f"device-{duration}", device_model="Pixel" if duration % 2 else "Galaxy", os="14", app_version="1", sdk_version="1", duration_s=duration, server_ts=start + timedelta(hours=1))
+                    for duration in durations
+                ])
+                session.add_all([
+                    SdkUsageDuration(package_name="com.example.app", device_id="device-tie", device_model="Old", os="14", app_version="1", sdk_version="1", duration_s=1, server_ts=start + timedelta(hours=4)),
+                    SdkUsageDuration(package_name="com.example.app", device_id="device-tie", device_model="New", os="14", app_version="1", sdk_version="1", duration_s=3600, server_ts=start + timedelta(hours=4)),
+                    SdkUsageDuration(package_name="other.package", device_id="device-other", device_model="Pixel", os="14", app_version="1", sdk_version="1", duration_s=3600, server_ts=start + timedelta(hours=1)),
                 ])
                 await session.commit()
 
@@ -87,9 +92,12 @@ def test_isolated_postgres_scope_and_usage_regression() -> None:
                 assert summary["total"] == 1
                 item = summary["items"][0]
                 assert item["device_model"] is None
-                assert item["device_count"] == 2
-                assert item["total_duration_s"] == 1201
-                assert [bucket["count"] for bucket in item["buckets"]] == [0, 1, 0, 1]
+                assert item["device_count"] == 15
+                assert item["total_duration_s"] == sum(durations) + 3600
+                assert [bucket["count"] for bucket in item["buckets"]] == [2, 2, 2, 2, 2, 2, 3]
+                assert [bucket["total_duration_s"] for bucket in item["buckets"]] == [121, 421, 901, 1500, 2099, 2699, 8700]
+                assert sum(bucket["count"] for bucket in item["buckets"]) == item["device_count"]
+                assert sum(bucket["total_duration_s"] for bucket in item["buckets"]) == item["total_duration_s"]
         finally:
             await engine.dispose()
 
