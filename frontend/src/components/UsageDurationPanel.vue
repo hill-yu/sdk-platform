@@ -21,17 +21,17 @@
     <div v-else-if="summary" class="table-scroll usage-table-scroll">
       <table class="table usage-summary-table">
         <caption class="sr-only">使用时长汇总</caption>
-        <thead><tr><th>包名</th><th>设备数</th><th>总时长</th><th>平均时长</th><th>≤300 秒</th><th>301–600 秒</th><th>601–899 秒</th><th>≥900 秒</th><th>最后上报</th><th>明细</th></tr></thead>
+        <thead><tr><th>包名</th><th>设备数</th><th>总时长</th><th>平均时长</th><th>≤120 秒</th><th>121–300 秒</th><th>301–600 秒</th><th>601–899 秒</th><th>900–1199 秒</th><th>1200–1499 秒</th><th>≥1500 秒</th><th>最后上报</th><th>明细</th></tr></thead>
         <tbody>
           <template v-for="(item, index) in summary.items" :key="`${item.package_name}-${item.device_model}`">
             <tr data-testid="usage-summary-row">
               <td>{{ item.package_name }}</td><td>{{ item.device_count }}</td>
               <td>{{ formatDuration(item.total_duration_s) }}</td><td>{{ formatDuration(item.average_duration_s) }}</td>
-              <td v-for="bucket in item.buckets" :key="bucket.key" :data-testid="`usage-bucket-${bucket.key}`">{{ bucket.count }}（{{ formatShare(bucket.share) }}）</td>
+              <td v-for="bucket in item.buckets" :key="bucket.key" :data-testid="`usage-bucket-${bucket.key}`">{{ bucket.count }}（{{ formatShare(bucket.share) }}） · {{ formatDuration(bucket.total_duration_s) }}</td>
               <td>{{ item.last_report_at ?? "-" }}</td>
               <td><button :data-testid="`usage-expand-${index}`" class="ghost" type="button" :aria-expanded="expandedKey === rowKey(item)" @click="toggleRow(item)">{{ expandedKey === rowKey(item) ? "收起" : "展开" }}</button></td>
             </tr>
-            <tr v-if="expandedKey === rowKey(item)" data-testid="usage-detail-container"><td colspan="10">
+            <tr v-if="expandedKey === rowKey(item)" data-testid="usage-detail-container"><td colspan="13">
               <p v-if="detailCache[rowKey(item)]?.loading" class="muted">设备明细加载中…</p>
               <p v-else-if="detailCache[rowKey(item)]?.error" class="error">{{ detailCache[rowKey(item)]?.error }}</p>
               <p v-else-if="!detailCache[rowKey(item)]?.items.length" class="empty-state">暂无设备明细。</p>
@@ -158,7 +158,7 @@ onBeforeUnmount(() => { disposed = true; ++scopeRequestId; ++detailRequestId; })
 .usage-filters button:disabled, .usage-filters input:disabled, .usage-filters select:disabled { cursor: not-allowed; opacity: .5; }
 .usage-table-scroll, .usage-detail-scroll { overflow: auto; max-height: 420px; }
 .usage-detail-scroll { max-height: 240px; }
-.table { width: 100%; border-collapse: collapse; min-width: 1180px; }
+.table { width: 100%; border-collapse: collapse; min-width: 1500px; }
 .table th, .table td { padding: 10px; border-bottom: 1px solid rgba(255, 255, 255, .08); text-align: left; white-space: nowrap; }
 .ghost { border: 1px solid var(--border-soft); border-radius: 8px; color: var(--text-primary); background: transparent; padding: 6px 10px; cursor: pointer; }
 .error { color: var(--danger, #d9785d); }

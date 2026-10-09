@@ -15,6 +15,15 @@ from app.models.usage_duration import SdkUsageDuration
 
 MAX_QUERY_DAYS = 31
 SUMMARY_SORT_COLUMNS = {"package_name", "device_model", "device_count", "total_duration_s", "average_duration_s", "last_report_at"}
+SUMMARY_BUCKETS = (
+    ("le_120", None, 120),
+    ("121_300", 121, 300),
+    ("301_600", 301, 600),
+    ("601_899", 601, 899),
+    ("900_1199", 900, 1199),
+    ("1200_1499", 1200, 1499),
+    ("ge_1500", 1500, None),
+)
 
 
 def resolve_usage_date_range(date_from: date | None, date_to: date | None):
@@ -103,14 +112,23 @@ def _value(row: Any, name: str, default=None):
 
 def _bucket_items(row: Any, device_count: int) -> list[dict[str, object]]:
     return [
-        {"key": key, "count": int(_value(row, column, 0) or 0), "share": (int(_value(row, column, 0) or 0) / device_count if device_count else None)}
-        for key, column in (
-            ("le_300", "le_300_count"),
-            ("301_600", "between_301_600_count"),
-            ("601_899", "between_601_899_count"),
-            ("ge_900", "ge_900_count"),
-        )
+        {
+            "key": key,
+            "count": count,
+            "share": (count / device_count if device_count else None),
+            "total_duration_s": int(_value(row, f"{key}_duration_s", 0) or 0),
+        }
+        for key, _, _ in SUMMARY_BUCKETS
+        for count in (int(_value(row, f"{key}_count", 0) or 0),)
     ]
+
+
+def _bucket_condition(duration_s, lower: int | None, upper: int | None):
+    if lower is None:
+        return duration_s <= upper
+    if upper is None:
+        return duration_s >= lower
+    return duration_s.between(lower, upper)
 
 
 async def get_usage_summary(
@@ -140,15 +158,19 @@ async def get_usage_summary(
     average_duration = func.round(
         cast(total_duration, Numeric) / func.nullif(device_count, 0)
     )
+    bucket_columns = []
+    for key, lower, upper in SUMMARY_BUCKETS:
+        condition = _bucket_condition(latest_rows.c.duration_s, lower, upper)
+        bucket_columns.extend((
+            func.coalesce(func.sum(case((condition, 1), else_=0)), 0).label(f"{key}_count"),
+            func.coalesce(func.sum(case((condition, latest_rows.c.duration_s), else_=0)), 0).label(f"{key}_duration_s"),
+        ))
     grouped = select(
         latest_rows.c.package_name,
         device_count.label("device_count"),
         total_duration.label("total_duration_s"),
         average_duration.label("average_duration_s"),
-        func.sum(case((latest_rows.c.duration_s <= 300, 1), else_=0)).label("le_300_count"),
-        func.sum(case((latest_rows.c.duration_s.between(301, 600), 1), else_=0)).label("between_301_600_count"),
-        func.sum(case((latest_rows.c.duration_s.between(601, 899), 1), else_=0)).label("between_601_899_count"),
-        func.sum(case((latest_rows.c.duration_s >= 900, 1), else_=0)).label("ge_900_count"),
+        *bucket_columns,
         func.max(latest_rows.c.server_ts).label("last_report_at"),
     ).group_by(latest_rows.c.package_name)
     total = int((await db.execute(select(func.count()).select_from(grouped.subquery()))).scalar_one() or 0)
