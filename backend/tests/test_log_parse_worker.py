@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import signal
 from datetime import datetime, timezone
 from types import SimpleNamespace
+
+from sqlalchemy.exc import StatementError
 
 
 async def _job_for_test(job):
@@ -223,6 +226,49 @@ def test_worker_marks_unexpected_batch_failure_and_cleans_up(monkeypatch) -> Non
     assert session.rollbacks == 1
     assert failures[0][0] == 91
     assert isinstance(failures[0][1], RuntimeError)
+
+
+def test_worker_logs_safe_failure_context_without_exception_message(monkeypatch, caplog) -> None:
+    from app.workers import log_parse_worker
+
+    class Session:
+        async def rollback(self):
+            pass
+
+        async def commit(self):
+            pass
+
+    job = SimpleNamespace(id=91, status="running", cancel_requested_at=None)
+
+    async def fake_claim(_db, **kwargs):
+        return job
+
+    async def fake_process(_db, _job_id, **kwargs):
+        cause = RuntimeError("driver secret payload token=do-not-log")
+        cause.sqlstate = "22001"
+        raise StatementError(
+            "statement failed with sensitive params",
+            "INSERT ... VALUES (:token)",
+            {"token": "secret-token-value"},
+            cause,
+        )
+
+    async def fake_mark_failed(_db, _job_id, _error, **kwargs):
+        pass
+
+    monkeypatch.setattr(log_parse_worker, "claim_parse_job", fake_claim)
+    monkeypatch.setattr(log_parse_worker, "process_parse_job_batch", fake_process)
+    monkeypatch.setattr(log_parse_worker, "mark_parse_job_failed", fake_mark_failed)
+
+    with caplog.at_level(logging.ERROR, logger=log_parse_worker.__name__):
+        asyncio.run(log_parse_worker.run_worker_once(Session(), worker_id="worker-1"))
+
+    assert "job_id=91" in caplog.text
+    assert "StatementError <- RuntimeError[sqlstate=22001]" in caplog.text
+    assert "secret payload" not in caplog.text
+    assert "do-not-log" not in caplog.text
+    assert "secret-token-value" not in caplog.text
+    assert "INSERT" not in caplog.text
 
 
 def test_worker_stop_finishes_and_commits_current_batch_then_releases_job(monkeypatch) -> None:
