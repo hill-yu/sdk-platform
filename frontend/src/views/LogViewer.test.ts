@@ -312,6 +312,8 @@ describe("LogViewer", () => {
     const wrapper = await mountAnalysisViewer();
     await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
     const scopeA = { package_name: "com.example.app", date_from: "2026-10-06", hour_from: 0, date_to: "2026-10-08", hour_to: 23 };
+    await wrapper.get("[data-testid='filter-date-from']").setValue(scopeA.date_from);
+    await wrapper.get("[data-testid='filter-date-to']").setValue(scopeA.date_to);
     postParseJob.mockResolvedValueOnce({ data: { code: 0, data: { id: 91, package_name: scopeA.package_name, ...analysisScopeUtcRange(scopeA), status: "running", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
     await wrapper.get("[data-testid='start-parse']").trigger("click");
     await flushPromises();
@@ -326,10 +328,13 @@ describe("LogViewer", () => {
 
   it("polls after cancellation returns running until the worker reports cancelled", async () => {
     vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-08T12:00:00+08:00"));
     try {
       const wrapper = await mountAnalysisViewer();
       await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
       const scope = { package_name: "com.example.app", date_from: "2026-10-06", hour_from: 0, date_to: "2026-10-08", hour_to: 23 };
+      await wrapper.get("[data-testid='filter-date-from']").setValue(scope.date_from);
+      await wrapper.get("[data-testid='filter-date-to']").setValue(scope.date_to);
       postParseJob.mockResolvedValueOnce({ data: { code: 0, data: { id: 92, package_name: scope.package_name, ...analysisScopeUtcRange(scope), status: "running", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
       cancelParseJob.mockResolvedValueOnce({ data: { code: 0, data: { id: 92, package_name: scope.package_name, ...analysisScopeUtcRange(scope), status: "running", cancel_requested_at: "2026-10-08T00:00:00Z", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
       getParseJob.mockResolvedValueOnce({ data: { code: 0, data: { id: 92, package_name: scope.package_name, ...analysisScopeUtcRange(scope), status: "cancelled", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
@@ -346,10 +351,13 @@ describe("LogViewer", () => {
 
   it("restores polling when cancellation fails", async () => {
     vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-08T12:00:00+08:00"));
     try {
       const wrapper = await mountAnalysisViewer();
       await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
       const scope = { package_name: "com.example.app", date_from: "2026-10-06", hour_from: 0, date_to: "2026-10-08", hour_to: 23 };
+      await wrapper.get("[data-testid='filter-date-from']").setValue(scope.date_from);
+      await wrapper.get("[data-testid='filter-date-to']").setValue(scope.date_to);
       postParseJob.mockResolvedValueOnce({ data: { code: 0, data: { id: 93, package_name: scope.package_name, ...analysisScopeUtcRange(scope), status: "running", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
       cancelParseJob.mockRejectedValueOnce(new Error("cancel unavailable"));
       getParseJob.mockResolvedValueOnce({ data: { code: 0, data: { id: 93, package_name: scope.package_name, ...analysisScopeUtcRange(scope), status: "running", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
