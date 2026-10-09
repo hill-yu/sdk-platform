@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlparse
 
 import pytest
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.database import Base
@@ -23,9 +24,14 @@ def _database_url() -> str:
     value = os.environ.get("SDK_PARSE_STAGE_TEST_DATABASE_URL")
     if not value:
         pytest.skip("SDK_PARSE_STAGE_TEST_DATABASE_URL is not set; isolated PostgreSQL regression unverified")
-    host = urlparse(value.replace("postgresql+asyncpg://", "postgresql://", 1)).hostname
+    parsed = make_url(value)
+    host = parsed.host
     if host not in {"127.0.0.1", "localhost", "::1"}:
         pytest.skip("SDK_PARSE_STAGE_TEST_DATABASE_URL must point to a dedicated loopback PostgreSQL database")
+    if parsed.database is None or not re.fullmatch(r"sdk_parse_stage_test_[0-9a-f]{4,32}", parsed.database):
+        pytest.skip("SDK_PARSE_STAGE_TEST_DATABASE_URL must use a database named sdk_parse_stage_test_[0-9a-f]{4,32}")
+    if parsed.database in {"sdk_platform", "postgres", "template0", "template1"}:
+        pytest.skip("production and template databases are not permitted for this regression")
     return value
 
 
@@ -51,6 +57,31 @@ def _click_row(index: int) -> dict[str, object]:
     }
 
 
+def _h1_row(index: int) -> dict[str, object]:
+    return {
+        "job_id": 880,
+        "event_id": index + 1,
+        "event_server_ts": datetime(2026, 10, 9, tzinfo=timezone.utc) + timedelta(seconds=index),
+        "record_index": 1,
+        "package_name": "integration.pkg",
+        "device_id": "d",
+        "sdk_version": "1",
+        "config_id": 1,
+        "window": "old",
+        "declared_click_count": 18,
+        "interstitial_presentation_count": 0,
+        "interstitial_click_count": 0,
+        "interstitial_close_count": 0,
+        "flow_duration_ms": 1,
+        "final_reason": "old",
+        "status": "success",
+        "parse_error": None,
+        "decoder_version": "2.0.0",
+        "parsed_at": datetime(2026, 10, 9, tzinfo=timezone.utc),
+        "decoded_payload": {"integration": True},
+    }
+
+
 @pytest.mark.asyncio
 async def test_parse_stage_chunking_and_process_failure_rollback() -> None:
     database_url = _database_url()
@@ -60,18 +91,24 @@ async def test_parse_stage_chunking_and_process_failure_rollback() -> None:
     extra = "H1|i=GC|p=18|pa=" + ",".join(["b11hfn1"] * 18)
 
     async with engine.connect() as connection:
-        async with connection.begin():
+        transaction = await connection.begin()
+        try:
             await connection.run_sync(lambda sync: Base.metadata.create_all(sync, tables=tables))
             Session = async_sessionmaker(bind=connection, expire_on_commit=False)
 
             async with Session() as session:
                 await service._insert_stage_rows_in_chunks(
                     session,
+                    H1DeclarationStage,
+                    [_h1_row(index) for index in range(1833)],
+                )
+                await service._insert_stage_rows_in_chunks(
+                    session,
                     LogClickAttemptStage,
                     [_click_row(index) for index in range(3590)],
                 )
+                assert await session.scalar(select(func.count()).select_from(H1DeclarationStage).where(H1DeclarationStage.job_id == 880)) == 1833
                 assert await session.scalar(select(func.count()).select_from(LogClickAttemptStage)) == 3590
-                await session.execute(delete(LogClickAttemptStage))
 
                 job = LogReparseJob(
                     id=991,
@@ -175,8 +212,14 @@ async def test_parse_stage_chunking_and_process_failure_rollback() -> None:
                 assert await session.scalar(select(func.count()).select_from(LogClickAttemptStage).where(LogClickAttemptStage.job_id == 991)) == 1
                 assert current_job.processed_count == 0
                 assert current_job.h1_count == 0
+                assert current_job.failed_h1_count == 0
+                assert current_job.no_h1_count == 0
                 assert current_job.cursor_event_id is None
+                assert current_job.cursor_server_ts is None
                 assert current_job.lease_owner == "integration-worker"
+                assert current_job.lease_expires_at == base + timedelta(hours=1)
                 assert current_job.last_heartbeat_at == base
+        finally:
+            await transaction.rollback()
 
     await engine.dispose()

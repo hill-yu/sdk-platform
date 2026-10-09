@@ -28,21 +28,22 @@
 
 测试文件：`backend/tests/test_log_parse_stage_integration.py`。
 
-默认跳过；仅当 `SDK_PARSE_STAGE_TEST_DATABASE_URL` 指向 `localhost`、`127.0.0.1` 或 `::1` 的专用测试库时运行。测试使用事务内 `Base.metadata.create_all`，不调用 `drop_all`，外层事务结束后回滚，不连接生产库。
+默认跳过；仅当 `SDK_PARSE_STAGE_TEST_DATABASE_URL` 指向 loopback 且数据库名严格匹配 `sdk_parse_stage_test_[0-9a-f]{4,32}` 的专用测试库时运行，明确拒绝 `sdk_platform`、`postgres` 和 template 数据库。测试使用事务内 `Base.metadata.create_all`，不调用 `drop_all` 或全表 DELETE，外层事务结束后回滚，不连接生产库。
 
 本次手工验收环境：PostgreSQL 14.22（Windows，UTF-8，loopback 临时集群，端口 55432）。执行的核心命令：
 
 ```powershell
 $env:PYTHONPATH='backend'
-$env:SDK_PARSE_STAGE_TEST_DATABASE_URL='postgresql+asyncpg://postgres@127.0.0.1:55432/postgres'
+$env:SDK_PARSE_STAGE_TEST_DATABASE_URL='postgresql+asyncpg://postgres@127.0.0.1:55432/sdk_parse_stage_test_ab12'
 python -m pytest -q backend/tests/test_log_parse_stage_integration.py -m integration
 ```
 
-实际验证结果：
+实际验证结果（连续运行两次，均 `1 passed in 2.1s`）：
 
-- 3,590 条 Click 暂存记录实际分段写入成功。
+- 1,833 条 H1 和 3,590 条 Click 暂存记录实际分段写入成功。
 - 注入第二个 Click chunk 失败后，旧 H1/Click 暂存行仍保留。
 - `processed_count`、`h1_count`、cursor、lease、heartbeat 均保持原值。
 - 整批事务回滚，无部分写入。
+- 两次运行后查询专用库用户表数量为 `0`，证明外层事务显式 rollback 且无残留 DDL/数据。
 
 生产 PostgreSQL 16 尚未执行该测试；生产任务未重跑，服务未重启，未部署本提交。
