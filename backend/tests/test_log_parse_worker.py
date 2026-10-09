@@ -271,6 +271,20 @@ def test_worker_logs_safe_failure_context_without_exception_message(monkeypatch,
     assert "INSERT" not in caplog.text
 
 
+def test_safe_exception_chain_is_bounded_and_cycle_safe() -> None:
+    from app.workers.log_parse_worker import _safe_exception_chain
+
+    first = RuntimeError("first secret")
+    second = ValueError("second secret")
+    second.sqlstate = "22001"
+    first.__cause__ = second
+    second.__cause__ = first
+
+    summary = _safe_exception_chain(first)
+
+    assert summary == "RuntimeError <- ValueError[sqlstate=22001]"
+
+
 def test_worker_stop_finishes_and_commits_current_batch_then_releases_job(monkeypatch) -> None:
     from app.workers import log_parse_worker
 
