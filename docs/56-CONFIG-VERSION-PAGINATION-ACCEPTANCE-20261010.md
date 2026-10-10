@@ -1,0 +1,28 @@
+# ConfigManager 版本分页验收记录
+
+- 基线：`f4a9827531e74f8f12a59ec28d7da3a48f22a301`
+- 分支：`codex/config-version-pagination-20261010`
+- 范围：仅 `frontend/src/views/ConfigManager.vue` 与对应测试；未部署、未推送。
+
+## 自动化验证
+
+- TDD red：首轮分页测试在实现前失败，列表期望 10 条但实际 25 条，且分页选择器不存在。
+- 定向测试：`ConfigManager.test.ts`，23/23 通过。
+- 全量前端测试：31 个测试文件，196/196 通过。
+- 构建：`vue-tsc --noEmit && vite build` 通过；Vite 仅保留既有的大 chunk 警告。
+
+覆盖点包括默认 10 条、20/50 条选项、51 条数据的 50/1 切页、空列表与边界禁用、筛选重置、刷新后页码收敛、保存/发布真实 API 调用与刷新、创建草稿定位、JSON/树形编辑状态和翻页不触发详情请求。
+
+## 浏览器核验
+
+使用本地 Vite、临时 mock API、Chrome CDP，在 1280×720 桌面和 390×844 移动视口执行：
+
+- 桌面：列表 `scrollHeight=950`、`clientHeight=284`；列表滚动后标题 top `274.71875`、分页 top `616` 均保持不变；翻页后显示 `2 / 3`、10 条；下拉选项为 `10/20/50`。
+- 移动：列表 `scrollHeight=950`、`clientHeight=248`；下拉选项仍为 `10/20/50`，页面宽度没有横向溢出。
+- 截图：`desktop-config-pagination.png` 与 `mobile-config-pagination.png`（本地验收输出，未纳入提交）。
+
+树形编辑器的自然内容在 720px 短屏下会将其操作按钮延伸到视口下方；本次只限制版本列表自身高度，编辑器没有被列表容器裁切，也未扩大范围重做编辑器布局。
+
+## 说明
+
+`impeccable` 的上下文脚本与参考资源在当前环境不存在，因此沿用仓库现有主题与布局变量，未做全局设计系统改动。

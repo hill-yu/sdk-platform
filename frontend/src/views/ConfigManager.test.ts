@@ -193,6 +193,164 @@ describe("ConfigManager tree editing", () => {
   });
 });
 
+describe("ConfigManager version pagination", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    listResponse({ drafts: Array.from({ length: 25 }, (_, index) => item(index + 1)) });
+    api.getConfig.mockResolvedValue({ data: detail(1, firstData) });
+  });
+
+  it("renders ten versions per page and navigates the final five", async () => {
+    const wrapper = await mountManager();
+
+    expect(wrapper.findAll(".list-item")).toHaveLength(10);
+    expect(wrapper.findAll(".list-item")[0].text()).toContain("v1");
+    expect(wrapper.get("[data-testid='version-prev']").attributes("disabled")).toBeDefined();
+
+    await wrapper.get("[data-testid='version-next']").trigger("click");
+    expect(wrapper.findAll(".list-item")).toHaveLength(10);
+    expect(wrapper.findAll(".list-item")[0].text()).toContain("v11");
+
+    await wrapper.get("[data-testid='version-next']").trigger("click");
+    expect(wrapper.findAll(".list-item")).toHaveLength(5);
+    expect(wrapper.findAll(".list-item")[0].text()).toContain("v21");
+    expect(wrapper.get("[data-testid='version-next']").attributes("disabled")).toBeDefined();
+    expect(wrapper.get("[data-testid='version-page']").text()).toContain("3 / 3");
+  });
+
+  it("offers twenty and fifty page sizes and keeps the editor untouched while paging", async () => {
+    const wrapper = await mountManager();
+
+    const pageSize = wrapper.get<HTMLSelectElement>("[data-testid='version-page-size']");
+    expect(Array.from(pageSize.element.options).map((option) => option.value)).toEqual(["10", "20", "50"]);
+    await wrapper.get("[data-testid='json-mode']").trigger("click");
+    await wrapper.get("[data-testid='json-editor']").setValue(JSON.stringify({ unsaved: true }));
+    const getConfigCalls = api.getConfig.mock.calls.length;
+
+    await wrapper.get("[data-testid='version-next']").trigger("click");
+
+    expect(wrapper.get<HTMLTextAreaElement>("[data-testid='json-editor']").element.value).toBe(JSON.stringify({ unsaved: true }));
+    expect(api.getConfig).toHaveBeenCalledTimes(getConfigCalls);
+    await pageSize.setValue("20");
+    expect(wrapper.findAll(".list-item")).toHaveLength(20);
+    expect(wrapper.get("[data-testid='version-page']").text()).toContain("1 / 2");
+    await pageSize.setValue("50");
+    expect(wrapper.findAll(".list-item")).toHaveLength(25);
+    expect(wrapper.get("[data-testid='version-page']").text()).toContain("1 / 1");
+  });
+
+  it("keeps tree file, change log, and editor state while paging a fifty-one-row list", async () => {
+    listResponse({ drafts: Array.from({ length: 51 }, (_, index) => item(index + 1)) });
+    const wrapper = await mountManager();
+    await wrapper.findAll("[data-testid='config-file-tab']")[1].trigger("click");
+    await wrapper.get("[data-testid='replace-tree-value']").trigger("click");
+    await wrapper.get("input[placeholder='变更说明']").setValue("keep while paging");
+    const getConfigCalls = api.getConfig.mock.calls.length;
+    const pageSize = wrapper.get<HTMLSelectElement>("[data-testid='version-page-size']");
+
+    await pageSize.setValue("50");
+    expect(wrapper.findAll(".list-item")).toHaveLength(50);
+    await wrapper.get("[data-testid='version-next']").trigger("click");
+
+    expect(wrapper.findAll(".list-item")).toHaveLength(1);
+    expect(wrapper.get("[data-testid='config-file-tab'].active").text()).toBe("newTouchConfig");
+    expect(treeValue(wrapper)).toEqual({ updated: true });
+    expect(wrapper.get<HTMLInputElement>("input[placeholder='变更说明']").element.value).toBe("keep while paging");
+    expect(api.getConfig).toHaveBeenCalledTimes(getConfigCalls);
+  });
+
+  it("supports an empty list and disables both page boundaries", async () => {
+    listResponse({ published: [], drafts: [], history: [] });
+    const wrapper = await mountManager();
+
+    expect(wrapper.findAll(".list-item")).toHaveLength(0);
+    expect(wrapper.get("[data-testid='version-page']").text()).toContain("1 / 1");
+    expect(wrapper.get("[data-testid='version-prev']").attributes("disabled")).toBeDefined();
+    expect(wrapper.get("[data-testid='version-next']").attributes("disabled")).toBeDefined();
+  });
+
+  it("resets to page one for an explicit package filter and clamps a refreshed final page", async () => {
+    const filtered = [item(101), item(102)];
+    api.getConfigs.mockReset()
+      .mockResolvedValueOnce({ data: { published: [], drafts: Array.from({ length: 25 }, (_, index) => item(index + 1)), history: [] } })
+      .mockResolvedValueOnce({ data: { published: [], drafts: filtered, history: [] } });
+    const wrapper = await mountManager();
+    await wrapper.get("[data-testid='version-next']").trigger("click");
+    await wrapper.get("input[placeholder='com.example.app']").setValue("com.filtered");
+    await wrapper.find(".toolbar .ghost").trigger("click");
+
+    expect(wrapper.get("[data-testid='version-page']").text()).toContain("1 / 1");
+    expect(wrapper.findAll(".list-item")).toHaveLength(2);
+    expect(wrapper.findAll(".list-item")[0].text()).toContain("v101");
+  });
+
+  it("keeps page two and unsaved JSON when saving or publishing refreshes the list", async () => {
+    const all = Array.from({ length: 25 }, (_, index) => item(index + 1));
+    api.getConfigs.mockResolvedValue({ data: { published: [], drafts: all, history: [] } });
+    const wrapper = await mountManager();
+    await wrapper.get("[data-testid='version-next']").trigger("click");
+    await wrapper.get("[data-testid='json-mode']").trigger("click");
+    const edited = JSON.stringify({
+      mainConfig: { keep: "unsaved" },
+      newTouchConfig: {},
+      newTextRuleConfig: {},
+    });
+    await wrapper.get("[data-testid='json-editor']").setValue(edited);
+
+    await wrapper.get("[data-testid='save-config']").trigger("click");
+    await flushPromises();
+    expect(api.updateConfig).toHaveBeenCalledWith(1, {
+      config_data: { mainConfig: { keep: "unsaved" }, newTouchConfig: {}, newTextRuleConfig: {} },
+      change_log: "change-1",
+    });
+    expect(wrapper.get("[data-testid='version-page']").text()).toContain("2 / 3");
+    expect(wrapper.get<HTMLTextAreaElement>("[data-testid='json-editor']").element.value).toBe(edited);
+
+    await publishButton(wrapper).trigger("click");
+    await flushPromises();
+    expect(api.publishConfig).toHaveBeenCalledWith(1);
+    expect(api.getConfigs).toHaveBeenCalledTimes(3);
+    expect(wrapper.get("[data-testid='version-page']").text()).toContain("2 / 3");
+    expect(wrapper.get<HTMLTextAreaElement>("[data-testid='json-editor']").element.value).toBe(edited);
+  });
+
+  it("clamps the current page when a refresh removes the old final page", async () => {
+    api.getConfigs.mockReset()
+      .mockResolvedValueOnce({ data: { published: [], drafts: Array.from({ length: 25 }, (_, index) => item(index + 1)), history: [] } })
+      .mockResolvedValueOnce({ data: { published: [], drafts: Array.from({ length: 12 }, (_, index) => item(index + 1)), history: [] } });
+    const wrapper = await mountManager();
+    await wrapper.get("[data-testid='version-next']").trigger("click");
+    await wrapper.get("[data-testid='version-next']").trigger("click");
+
+    await wrapper.get("[data-testid='save-config']").trigger("click");
+    await flushPromises();
+
+    expect(api.updateConfig).toHaveBeenCalledWith(1, expect.any(Object));
+    expect(api.getConfigs).toHaveBeenCalledTimes(2);
+    expect(wrapper.get("[data-testid='version-page']").text()).toContain("2 / 2");
+    expect(wrapper.findAll(".list-item")).toHaveLength(2);
+  });
+
+  it("locates a new draft on the page containing its returned id", async () => {
+    const firstPage = Array.from({ length: 25 }, (_, index) => item(index + 1));
+    const withDraft = [...firstPage, item(26)];
+    api.getConfigs.mockReset()
+      .mockResolvedValueOnce({ data: { published: [], drafts: firstPage, history: [] } })
+      .mockResolvedValueOnce({ data: { published: [], drafts: withDraft, history: [] } });
+    api.createConfig.mockResolvedValue({ data: { id: 26 } });
+    api.getConfig.mockImplementation((id: number) => Promise.resolve({ data: detail(id, firstData) }));
+    const wrapper = await mountManager();
+    await wrapper.get("input[placeholder='com.example.app']").setValue("com.example");
+    await wrapper.get(".toolbar .primary").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get("[data-testid='version-page']").text()).toContain("3 / 3");
+    expect(wrapper.findAll(".list-item")).toHaveLength(6);
+    expect(wrapper.findAll(".list-item").some((entry) => entry.text().includes("v26"))).toBe(true);
+    expect(api.getConfig).toHaveBeenLastCalledWith(26);
+  });
+});
+
 describe("ConfigManager tree and JSON modes", () => {
   const specialData: ConfigData = {
     mainConfig: { "a.b": [{ "中文 字段": 1, "a[0]": true }] },
