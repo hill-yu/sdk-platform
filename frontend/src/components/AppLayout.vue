@@ -1,5 +1,5 @@
 <template>
-  <div class="shell" :class="{ 'home-light': route.name === 'dashboard' }">
+  <div class="shell light-shell">
     <aside class="sidebar">
       <div class="brand">
         <span class="brand-kicker">SDK PLATFORM</span>
@@ -18,16 +18,10 @@
       </nav>
     </aside>
 
-    <main class="content" :class="{ 'home-light-content': route.name === 'dashboard' }">
+    <main class="content light-content">
       <header class="topbar">
-        <div>
-          <p v-if="route.name === 'dashboard'" class="breadcrumb">运营中台&nbsp; / &nbsp;数据大盘</p>
-          <template v-else><p class="eyebrow">Admin Console</p><h2>{{ routeTitle }}</h2></template>
-        </div>
-        <div v-if="route.name === 'dashboard'" class="home-meta">北京时间 UTC+8</div>
-        <div v-else class="token-tip">
-          当前使用本地 `admin_token`
-        </div>
+        <p class="breadcrumb">运营中台&nbsp; / &nbsp;{{ routeTitle }}</p>
+        <div class="home-meta">北京时间 UTC+8</div>
       </header>
       <section class="page">
         <RouterView />
@@ -57,33 +51,28 @@ const routeTitle = computed(() => {
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 224px minmax(0, 1fr);
   overflow: hidden;
-  background:
-    radial-gradient(circle at top left, rgba(214, 140, 69, 0.28), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(75, 122, 91, 0.22), transparent 32%),
-    var(--bg-primary);
+  background: var(--bg-primary);
 }
 
-.shell.home-light { grid-template-columns: 224px minmax(0, 1fr); background: #f5f7fa; }
+.light-shell { background: var(--bg-primary); }
 
 .sidebar {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  padding: 32px 24px;
+  padding: 20px 10px;
   border-right: 1px solid var(--border-soft);
-  background: linear-gradient(180deg, rgba(16, 27, 26, 0.95), rgba(24, 36, 34, 0.78));
-  backdrop-filter: blur(14px);
+  background: var(--bg-secondary);
 }
 
-.home-light .sidebar { padding: 20px 10px; border-right: 1px solid #e5e7eb; background: #fff; backdrop-filter: none; }
-.home-light .brand { padding: 0 16px; }
-.home-light .brand-kicker { display: none; }
-.home-light .brand-title { display: flex; align-items: center; gap: 10px; }
-.home-light .brand-mark { width: 26px; height: 26px; flex: 0 0 auto; }
-.home-light .brand h1 { color: #0f172a; font-size: 20px; letter-spacing: -0.02em; white-space: nowrap; }
-.home-light .brand p { color: #64748b; font-size: 12px; }
+.brand { padding: 0 16px; }
+.brand-kicker { display: none; }
+.brand-title { display: flex; align-items: center; gap: 10px; }
+.brand-mark { width: 26px; height: 26px; flex: 0 0 auto; }
+.brand h1 { color: var(--text-primary); font-size: 20px; letter-spacing: -0.02em; white-space: nowrap; }
+.brand p { color: var(--text-muted); font-size: 12px; }
 
 .brand-kicker,
 .eyebrow {
@@ -110,30 +99,26 @@ const routeTitle = computed(() => {
   gap: 12px;
 }
 
-.home-light .nav { margin-top: 26px; gap: 4px; }
+.nav { margin-top: 26px; gap: 4px; }
 
 .nav-link {
-  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #334155;
   text-decoration: none;
   border: 1px solid transparent;
-  padding: 14px 16px;
-  border-radius: 16px;
+  padding: 12px 16px;
+  border-radius: 6px;
   transition: all 0.25s ease;
-  background: rgba(255, 255, 255, 0.03);
+  background: transparent;
 }
 
-.home-light .nav-link { display: flex; align-items: center; gap: 12px; color: #334155; border-radius: 6px; padding: 12px 16px; background: transparent; }
-.home-light .nav-icon { width: 20px; color: #64748b; font-size: 20px; line-height: 1; text-align: center; }
-.home-light .nav-link:hover, .home-light .nav-link:focus-visible { color: #1d4ed8; background: #eff6ff; outline: 2px solid #93c5fd; outline-offset: 2px; }
-.home-light .nav-link:hover .nav-icon, .home-light .nav-link.router-link-active .nav-icon { color: #2563eb; }
+.nav-icon { width: 20px; color: var(--text-muted); font-size: 20px; line-height: 1; text-align: center; }
+.nav-link:hover, .nav-link:focus-visible { color: #1d4ed8; background: var(--hover-bg); outline: 2px solid var(--hover-border); outline-offset: 2px; }
+.nav-link:hover .nav-icon, .nav-link.router-link-active .nav-icon { color: var(--accent); }
 
-.nav-link.router-link-active {
-  background: linear-gradient(135deg, rgba(214, 140, 69, 0.22), rgba(86, 145, 114, 0.18));
-  border-color: rgba(214, 140, 69, 0.35);
-  box-shadow: 0 18px 32px rgba(0, 0, 0, 0.16);
-}
-
-.home-light .nav-link.router-link-active { color: #2563eb; background: #e8f1ff; border-color: transparent; box-shadow: none; }
+.nav-link.router-link-active { color: var(--accent); background: #e8f1ff; border-color: transparent; box-shadow: none; }
 
 .content {
   min-width: 0;
@@ -141,12 +126,12 @@ const routeTitle = computed(() => {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
-  padding: 24px;
+  padding: 0 22px 22px;
 }
 
-.home-light-content { padding: 0 22px 22px; background: #f5f7fa; }
-.home-light-content .topbar { min-height: 48px; margin: 0 -22px 18px; padding: 0 22px; align-items: center; border-bottom: 1px solid #e5e7eb; background: #fff; }
-.breadcrumb, .home-meta { margin: 0; color: #64748b; font-size: 14px; }
+.light-content { background: var(--bg-primary); }
+.light-content .topbar { min-height: 48px; margin: 0 -22px 18px; padding: 0 22px; align-items: center; border-bottom: 1px solid var(--border-soft); background: var(--bg-secondary); }
+.breadcrumb, .home-meta { margin: 0; color: var(--text-muted); font-size: 14px; }
 
 .topbar {
   display: flex;
@@ -156,15 +141,10 @@ const routeTitle = computed(() => {
   margin-bottom: 20px;
 }
 
-.token-tip {
-  color: var(--text-muted);
-  font-size: 13px;
-}
-
 .page {
   min-width: 0;
   min-height: 0;
-  overflow-x: hidden;
+  overflow-x: auto;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -185,11 +165,11 @@ const routeTitle = computed(() => {
     align-items: flex-start;
   }
 
-  .shell.home-light { grid-template-columns: minmax(0, 1fr); }
-  .home-light .sidebar { padding: 12px 10px; }
-  .home-light .brand { padding: 0 12px; }
-  .home-light .nav { flex-direction: row; justify-content: space-between; gap: 0; overflow: visible; margin-top: 12px; }
-  .home-light .nav-link { flex: 0 1 auto; gap: 6px; padding: 10px 7px; font-size: 14px; white-space: nowrap; }
-  .home-light .nav-icon { width: 16px; font-size: 17px; }
+  .light-shell { grid-template-columns: minmax(0, 1fr); }
+  .sidebar { padding: 12px 10px; }
+  .brand { padding: 0 12px; }
+  .nav { flex-direction: row; gap: 0; overflow-x: auto; margin-top: 12px; }
+  .nav-link { flex: 0 0 auto; gap: 6px; padding: 10px 7px; font-size: 14px; white-space: nowrap; }
+  .nav-icon { width: 16px; font-size: 17px; }
 }
 </style>

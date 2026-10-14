@@ -14,17 +14,17 @@ import AppLayout from "@/components/AppLayout.vue";
 import appLayoutSource from "@/components/AppLayout.vue?raw";
 
 describe("AppLayout internal scroll structure", () => {
-  it("scopes the light theme and hides the token hint only on the home route", async () => {
+  it("uses the light shell and route title on every route", async () => {
     const wrapper = mount(AppLayout);
 
     expect(wrapper.find(".brand-mark").exists()).toBe(true);
     expect(wrapper.text()).toContain("SDK 运营中台");
-    expect(wrapper.find(".shell.home-light").exists()).toBe(true);
-    expect(wrapper.find(".token-tip").exists()).toBe(false);
-    route.name = "logs";
-    await nextTick();
-    expect(wrapper.find(".shell.home-light").exists()).toBe(false);
-    expect(wrapper.find(".token-tip").exists()).toBe(true);
+    for (const name of ["dashboard", "logs", "config", "version"]) {
+      route.name = name;
+      await nextTick();
+      expect(wrapper.find(".shell.light-shell").exists()).toBe(true);
+      expect(wrapper.find(".token-tip").exists()).toBe(false);
+    }
     route.name = "dashboard";
   });
 
@@ -42,6 +42,6 @@ describe("AppLayout internal scroll structure", () => {
     expect(appLayoutSource).toContain("100dvh");
     expect(appLayoutSource).toContain("overflow-y: auto");
     expect(appLayoutSource).toContain("overflow: hidden");
-    expect(appLayoutSource).toContain("overflow: visible");
+    expect(appLayoutSource).toContain("overflow-x: auto");
   });
 });

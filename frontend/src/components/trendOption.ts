@@ -2,7 +2,7 @@ export type TrendOptionInput = { title: string; labels: string[]; counts: number
 export type TrendOptionConfig = { reducedMotion?: boolean };
 
 export function buildTrendOption(input: TrendOptionInput, config: TrendOptionConfig = {}) {
-  const light = input.light === true;
+  const light = input.light !== false;
   const reducedMotion = config.reducedMotion === true;
   const textColor = light ? "#334155" : "#f3efe8";
   const mutedColor = light ? "#64748b" : "#c7c2b6";

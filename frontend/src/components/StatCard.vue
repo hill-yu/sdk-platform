@@ -1,5 +1,5 @@
 <template>
-  <article class="card" :class="{ light: props.light }">
+  <article class="card light" :class="{ dark-compat: props.light === false }">
     <p class="label">{{ title }}</p>
     <div class="value-row">
       <strong>{{ formattedValue }}</strong>
@@ -26,21 +26,21 @@ const trendText = computed(() => `${props.trend >= 0 ? "▲" : "▼"} ${Math.abs
 <style scoped>
 .card {
   padding: 20px;
-  border-radius: 20px;
-  background: linear-gradient(180deg, rgba(255, 248, 239, 0.06), rgba(255, 255, 255, 0.03));
+  border-radius: 6px;
+  background: var(--panel-bg);
   border: 1px solid var(--border-soft);
   box-shadow: var(--panel-shadow);
 }
 
-.card.light { padding: 18px 22px; border-radius: 0; background: #fff; border: 0; border-right: 1px solid #e5e7eb; box-shadow: none; }
+.card.light { padding: 18px 22px; border: 0; border-right: 1px solid var(--border-soft); box-shadow: none; }
 .card.light:last-child { border-right: 0; }
-.card.light .label { color: #64748b; }
-.card.light strong { color: #1f2937; }
+.card.light .label { color: var(--text-muted); }
+.card.light strong { color: var(--text-primary); }
 .card.light .trend { padding: 0; border-radius: 0; background: transparent; }
 .card.light .trend-wrap { display: inline-flex; align-items: baseline; gap: 8px; white-space: nowrap; }
-.card.light .trend-label { color: #64748b; font-size: 13px; }
-.card.light .positive { color: #059669; }
-.card.light .negative { color: #dc2626; }
+.card.light .trend-label { color: var(--text-muted); font-size: 13px; }
+.card.light .positive { color: var(--success-text); }
+.card.light .negative { color: var(--error-text); }
 
 .label {
   margin: 0 0 10px;
@@ -65,15 +65,8 @@ strong {
   font-size: 12px;
 }
 
-.positive {
-  background: rgba(83, 168, 123, 0.18);
-  color: #8fe3b2;
-}
-
-.negative {
-  background: rgba(209, 89, 89, 0.18);
-  color: #ffb0a8;
-}
+.positive { background: var(--success-bg); color: var(--success-text); }
+.negative { background: var(--error-bg); color: var(--error-text); }
 
 @media (max-width: 720px) {
   .card.light .value-row { align-items: flex-start; flex-direction: column; gap: 4px; }
