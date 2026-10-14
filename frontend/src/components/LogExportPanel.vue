@@ -145,9 +145,9 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .export-panel { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin-top: 14px; }
-.export-mode-label { display: grid; gap: 5px; color: var(--text-secondary); font-size: 12px; }
-.export-mode-label select { border: 1px solid var(--border-soft); border-radius: 8px; color: var(--text-primary); background: rgba(255, 255, 255, .05); padding: 8px 10px; }
+.export-mode-label { display: grid; gap: 5px; color: var(--text-muted); font-size: 12px; }
+.export-mode-label select { border: 1px solid var(--border-soft); border-radius: 6px; color: var(--text-primary); background: var(--panel-bg); padding: 8px 10px; }
 .export-mode-label select:disabled { cursor: not-allowed; opacity: .55; }
-.export-note { color: var(--text-secondary); font-size: 12px; }
-.export-error { color: #ffb0a8; }
+.export-note { color: var(--text-muted); font-size: 12px; }
+.export-error { color: var(--error-text); }
 </style>

@@ -151,14 +151,14 @@ function reset() {
 <style scoped>
 .analysis-filters { display: grid; gap: 14px; }
 .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
-label { display: grid; gap: 6px; color: var(--text-secondary); font-size: 12px; }
-input, select { width: 100%; box-sizing: border-box; border: 1px solid var(--border-soft); border-radius: 8px; background: rgba(8, 13, 13, .5); color: var(--text-primary); padding: 8px 10px; }
+label { display: grid; gap: 6px; color: var(--text-muted); font-size: 12px; }
+input, select { width: 100%; box-sizing: border-box; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--panel-bg); color: var(--text-primary); padding: 8px 10px; }
 .filter-actions { display: flex; gap: 8px; }
-button { border: 1px solid var(--border-soft); border-radius: 8px; background: rgba(8, 13, 13, .5); color: var(--text-primary); padding: 8px 14px; cursor: pointer; }
+button { border: 1px solid var(--border-soft); border-radius: 6px; background: var(--panel-bg); color: var(--text-primary); padding: 8px 14px; cursor: pointer; }
 button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity: .55; }
-.filter-note, .filter-error, .effective-conditions { margin: 0; color: var(--text-secondary); font-size: 12px; }
-.filter-error { color: var(--danger, #d9785d); }
+.filter-note, .filter-error, .effective-conditions { margin: 0; color: var(--text-muted); font-size: 12px; }
+.filter-error { color: var(--danger, var(--error-text)); }
 .effective-conditions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .effective-title { color: var(--text-primary); font-weight: 600; }
-.condition { border-radius: 999px; background: rgba(182, 98, 43, .18); padding: 4px 8px; }
+.condition { border-radius: 999px; background: var(--hover-bg); padding: 4px 8px; }
 </style>

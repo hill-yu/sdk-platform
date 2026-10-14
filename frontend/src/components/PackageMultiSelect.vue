@@ -60,8 +60,8 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer); });
 <style scoped>
 .package-picker { position: relative; display: grid; gap: 8px; min-width: 360px; }
 .selected-packages { display: flex; flex-wrap: wrap; gap: 6px; }
-.package-chip { padding: 5px 8px; border-radius: 10px; background: rgba(214,140,69,.18); }
+.package-chip { padding: 5px 8px; border-radius: 6px; background: var(--warning-bg); }
 .package-chip button { padding: 0 3px; border: 0; background: transparent; }
-.package-options { position: absolute; z-index: 5; top: 100%; width: 100%; display: grid; padding: 6px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--panel-bg); }
+.package-options { position: absolute; z-index: 5; top: 100%; width: 100%; display: grid; padding: 6px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--panel-bg); }
 .package-options button { text-align: left; }
 </style>

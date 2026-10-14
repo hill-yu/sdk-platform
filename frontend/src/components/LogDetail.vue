@@ -98,8 +98,8 @@ pre {
   overflow: auto;
   margin: 12px 0 0;
   padding: 14px;
-  border-radius: 14px;
-  background: rgba(0, 0, 0, 0.22);
+  border-radius: 6px;
+  background: var(--code-bg);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-family: Consolas, "SFMono-Regular", monospace;
@@ -108,9 +108,9 @@ pre {
 .ghost {
   padding: 8px 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: 6px;
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--panel-bg);
 }
 
 .empty-state {

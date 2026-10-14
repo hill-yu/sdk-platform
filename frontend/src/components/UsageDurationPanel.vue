@@ -149,19 +149,19 @@ onBeforeUnmount(() => { disposed = true; ++scopeRequestId; ++detailRequestId; })
 .panel-header, .usage-filters, .filter-actions { display: flex; align-items: center; gap: 12px; }
 .panel-header { justify-content: space-between; }
 .panel-header h3 { margin: 0; }
-.timezone-note, .muted { color: var(--text-secondary); font-size: 12px; }
+.timezone-note, .muted { color: var(--text-muted); font-size: 12px; }
 .usage-filters { flex-wrap: wrap; align-items: end; }
-.usage-filters label { display: grid; gap: 6px; color: var(--text-secondary); font-size: 12px; }
-.usage-filters input, .usage-filters select, .usage-filters button { border: 1px solid var(--border-soft); border-radius: 8px; color: var(--text-primary); background: rgba(255, 255, 255, .05); padding: 8px 10px; }
+.usage-filters label { display: grid; gap: 6px; color: var(--text-muted); font-size: 12px; }
+.usage-filters input, .usage-filters select, .usage-filters button { border: 1px solid var(--border-soft); border-radius: 6px; color: var(--text-primary); background: var(--panel-bg); padding: 8px 10px; }
 .usage-filters button { cursor: pointer; }
-.usage-filters .primary { background: rgba(214, 140, 69, .24); }
+.usage-filters .primary { background: var(--hover-bg); }
 .usage-filters button:disabled, .usage-filters input:disabled, .usage-filters select:disabled { cursor: not-allowed; opacity: .5; }
 .usage-table-scroll, .usage-detail-scroll { overflow: auto; max-height: 420px; }
 .usage-detail-scroll { max-height: 240px; }
 .table { width: 100%; border-collapse: collapse; min-width: 1500px; }
-.table th, .table td { padding: 10px; border-bottom: 1px solid rgba(255, 255, 255, .08); text-align: left; white-space: nowrap; }
-.ghost { border: 1px solid var(--border-soft); border-radius: 8px; color: var(--text-primary); background: transparent; padding: 6px 10px; cursor: pointer; }
-.error { color: var(--danger, #d9785d); }
-.empty-state { color: var(--text-secondary); text-align: center; }
+.table th, .table td { padding: 10px; border-bottom: 1px solid var(--border-soft); text-align: left; white-space: nowrap; }
+.ghost { border: 1px solid var(--border-soft); border-radius: 6px; color: var(--text-primary); background: transparent; padding: 6px 10px; cursor: pointer; }
+.error { color: var(--danger, var(--error-text)); }
+.empty-state { color: var(--text-muted); text-align: center; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
 </style>

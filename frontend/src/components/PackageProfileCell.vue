@@ -137,9 +137,9 @@ async function save() {
 <style scoped>
 .profile-cell { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 90px; }
 .profile-value { min-width: 24px; min-height: 20px; cursor: text; }
-input { min-width: 110px; box-sizing: border-box; border: 1px solid var(--border-soft); border-radius: 6px; background: rgba(8, 13, 13, .5); color: var(--text-primary); padding: 5px 7px; }
-button { border: 1px solid var(--border-soft); border-radius: 6px; background: rgba(8, 13, 13, .5); color: var(--text-primary); padding: 5px 7px; cursor: pointer; }
+input { min-width: 110px; box-sizing: border-box; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--panel-bg); color: var(--text-primary); padding: 5px 7px; }
+button { border: 1px solid var(--border-soft); border-radius: 6px; background: var(--panel-bg); color: var(--text-primary); padding: 5px 7px; cursor: pointer; }
 button:disabled, input:disabled { cursor: not-allowed; opacity: .55; }
 .edit-actions { display: inline-flex; gap: 4px; }
-.profile-error { flex-basis: 100%; color: #ef8f82; font-size: 12px; }
+.profile-error { flex-basis: 100%; color: var(--error-text); font-size: 12px; }
 </style>

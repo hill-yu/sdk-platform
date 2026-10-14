@@ -44,13 +44,13 @@ function statusLabel(status: ParseJob["status"]) { return { pending: "排队中"
 </script>
 
 <style scoped>
-.task-panel { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px; border: 1px solid var(--border-soft); border-radius: 10px; background: rgba(8, 13, 13, .26); }
+.task-panel { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--panel-bg); }
 .task-copy h4, .task-copy p { margin: 0; }
-.task-copy p, .task-status { color: var(--text-secondary); font-size: 12px; }
+.task-copy p, .task-status { color: var(--text-muted); font-size: 12px; }
 .task-actions { display: flex; gap: 8px; flex: none; }
-button { border: 1px solid var(--border-soft); border-radius: 8px; background: var(--accent, #b6622b); color: var(--text-primary); padding: 8px 14px; cursor: pointer; }
+button { border: 1px solid var(--border-soft); border-radius: 6px; background: var(--accent, var(--accent)); color: var(--text-primary); padding: 8px 14px; cursor: pointer; }
 button.ghost { background: transparent; }
 button:disabled { cursor: not-allowed; opacity: .55; }
 .task-status { margin: 0; }
-.task-error { color: var(--danger, #d9785d); font-size: 12px; }
+.task-error { color: var(--danger, var(--error-text)); font-size: 12px; }
 </style>
