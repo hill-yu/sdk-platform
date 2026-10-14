@@ -1,7 +1,7 @@
 <template>
   <div class="layout">
     <section class="panel toolbar">
-      <label>包名 <input v-model.trim="packageFilter" class="input" placeholder="com.example.app" /></label>
+      <label class="package-label">包名 <input v-model.trim="packageFilter" class="input" placeholder="com.example.app" /></label>
       <button class="ghost" @click="loadConfigs({ resetPage: true })">筛选</button>
       <button class="primary" @click="createDraft">新建草稿</button>
     </section>
@@ -231,8 +231,27 @@ onMounted(loadConfigs);
 </script>
 
 <style scoped>
-.layout { display:flex; flex-direction:column; gap:20px; }.content-grid{display:grid;grid-template-columns:340px 1fr;gap:18px;align-items:start}.panel{padding:22px;border-radius:24px;background:var(--panel-bg);border:1px solid var(--border-soft);box-shadow:var(--panel-shadow)}.toolbar,.panel-header,.actions,.mode{display:flex;gap:12px;align-items:center}.toolbar label{display:flex;gap:10px;align-items:center;flex:1}.input,.editor,button{border-radius:12px;border:1px solid var(--border-soft);background:rgba(8,13,13,.5);color:var(--text-primary);padding:10px}.input{width:100%}.editor{width:100%;min-height:min(420px,45vh);margin:14px 0;font-family:"Cascadia Code",Consolas,monospace}.list-panel{display:flex;flex-direction:column;max-height:min(720px,calc(100dvh - 270px));overflow:hidden}.list-panel h3,.version-pagination{flex-shrink:0}.version-list{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}.list-item{display:flex;flex-direction:column;width:100%;margin-top:10px;text-align:left}.list-item.active{border-color:#d68c45}.version-pagination{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}.version-pagination select{border-radius:10px;border:1px solid var(--border-soft);background:rgba(8,13,13,.5);color:var(--text-primary);padding:8px}.version-total{margin-left:auto;color:var(--text-muted)}.primary{background:#b6622b}.feedback{padding:12px;border-radius:12px}.error{color:#ffb0a8}.success{color:#8fe3b2}@media(max-width:1000px){.content-grid{grid-template-columns:1fr}.list-panel{max-height:min(55vh,520px)}}
-.layout,.panel,.content-grid,.content-grid > *, .editor-panel,.list-panel { min-width: 0; }
-.layout,.content-grid,.editor-panel,.list-panel { min-height: 0; }
-.editor { max-width: 100%; min-width: 0; overflow: auto; }
+.layout { display: flex; flex-direction: column; gap: 20px; min-width: 0; min-height: 0; }
+.content-grid { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 18px; align-items: start; min-width: 0; min-height: 0; }
+.content-grid > *, .editor-panel, .list-panel { min-width: 0; }
+.panel { padding: 22px; border-radius: 6px; background: var(--panel-bg); border: 1px solid var(--border-soft); box-shadow: var(--panel-shadow); min-width: 0; }
+.toolbar, .panel-header, .actions, .mode { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.toolbar label { display: flex; gap: 10px; align-items: center; flex: 1; min-width: 0; }
+.package-label { flex-shrink: 0; white-space: nowrap; }
+.input, .editor, button { border-radius: 6px; border: 1px solid var(--border-soft); background: var(--panel-bg); color: var(--text-primary); padding: 10px; }
+.input { width: 100%; min-width: 0; }
+.editor { width: 100%; max-width: 100%; min-width: 0; min-height: min(420px, 45vh); margin: 14px 0; overflow: auto; font-family: "Cascadia Code", Consolas, monospace; background: var(--code-bg); }
+.list-panel { display: flex; flex-direction: column; max-height: min(720px, calc(100dvh - 270px)); overflow: hidden; }
+.list-panel h3, .version-pagination { flex-shrink: 0; }
+.version-list { flex: 1 1 auto; min-height: 0; max-width: 100%; overflow-y: auto; overscroll-behavior: contain; }
+.list-item { display: flex; flex-direction: column; width: 100%; margin-top: 10px; text-align: left; }
+.list-item.active { border-color: var(--accent); }
+.version-pagination { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+.version-pagination select { border-radius: 6px; border: 1px solid var(--border-soft); background: var(--panel-bg); color: var(--text-primary); padding: 8px; }
+.version-total { margin-left: auto; color: var(--text-muted); }
+.primary { background: var(--accent); color: #fff; }
+.feedback { padding: 12px; border-radius: 6px; }
+.error { color: var(--error-text); }
+.success { color: var(--success-text); }
+@media (max-width: 1000px) { .content-grid { grid-template-columns: minmax(0, 1fr); } .list-panel { max-height: min(55vh, 520px); } }
 </style>

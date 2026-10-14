@@ -3,6 +3,15 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const files = [
+  "components/AppLayout.vue",
+  "components/StatCard.vue",
+  "components/trendOption.ts",
+  "views/Dashboard.vue",
+  "views/ConfigManager.vue",
+  "views/VersionManager.vue",
+  "components/ConfigFileTabs.vue",
+  "components/ConfigTreeNode.vue",
+  "components/ConfigTreeEditor.vue",
   "views/LogViewer.vue",
   "components/LogAnalysisFilters.vue",
   "components/LogMetricsPanel.vue",
@@ -32,5 +41,13 @@ describe("light theme component contracts", () => {
     expect(source).toContain("var(--panel-bg)");
     expect(source).toContain("var(--error-text)");
     expect(source).toContain("var(--success-text)");
+  });
+
+  it("defines one real keyboard focus contract for all interactive controls", () => {
+    const variables = readFileSync(resolve(process.cwd(), "src/styles/variables.css"), "utf8");
+    expect(variables).toMatch(/button:focus-visible[\s\S]*input:focus-visible[\s\S]*select:focus-visible/);
+    expect(variables).toContain("var(--focus-ring)");
+    expect(variables).toContain("[role=\"tab\"]:focus-visible");
+    expect(variables).toContain("summary:focus-visible");
   });
 });

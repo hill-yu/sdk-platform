@@ -24,7 +24,7 @@ const configFiles: ConfigFileName[] = ["mainConfig", "newTouchConfig", "newTextR
 </script>
 
 <style scoped>
-.config-file-tabs { display: flex; gap: 8px; margin: 14px 0; }
-button { border-radius: 10px; border: 1px solid var(--border-soft); background: rgba(8, 13, 13, .5); color: var(--text-primary); padding: 9px 12px; }
-button.active { border-color: #d68c45; background: rgba(182, 98, 43, .35); }
+.config-file-tabs { display: flex; gap: 8px; margin: 14px 0; min-width: 0; max-width: 100%; overflow-x: auto; }
+button { border-radius: 6px; border: 1px solid var(--border-soft); background: var(--panel-bg); color: var(--text-primary); padding: 9px 12px; white-space: nowrap; }
+button.active { border-color: var(--accent); background: var(--hover-bg); color: var(--accent); }
 </style>

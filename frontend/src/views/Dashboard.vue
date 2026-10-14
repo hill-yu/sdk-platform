@@ -223,8 +223,8 @@ onMounted(async () => {
 
 .dashboard-page { gap: 16px; }
 .dashboard-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
-.dashboard-heading h2 { margin: 0; color: #0f172a; font-size: 26px; letter-spacing: -0.03em; }
-.dashboard-heading span { color: #64748b; font-size: 13px; }
+.dashboard-heading h2 { margin: 0; color: var(--text-primary); font-size: 26px; letter-spacing: -0.03em; }
+.dashboard-heading span { color: var(--text-muted); font-size: 13px; }
 
 .stats-grid,
 .dual-grid {
@@ -236,7 +236,7 @@ onMounted(async () => {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.light-stats { padding: 0; overflow: hidden; border: 1px solid #e5e7eb; border-radius: 6px; background: #fff; }
+.light-stats { padding: 0; overflow: hidden; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--panel-bg); }
 
 .dual-grid {
   grid-template-columns: 1fr 3fr;
@@ -265,9 +265,9 @@ onMounted(async () => {
   box-shadow: var(--panel-shadow);
 }
 
-.light-panel { padding: 18px; border-radius: 6px; background: #fff; border-color: #e5e7eb; box-shadow: 0 1px 2px rgba(15, 23, 42, .03); }
+.light-panel { padding: 18px; border-radius: 6px; background: var(--panel-bg); border-color: var(--border-soft); box-shadow: var(--panel-shadow); }
 .light-panel select, .light-panel input, .light-panel .ghost { border-radius: 6px; }
-.dashboard-page h3 { color: #1f2937; }
+.dashboard-page h3 { color: var(--text-primary); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 .panel-header,
@@ -292,14 +292,14 @@ onMounted(async () => {
 select,
 .ghost,
 input {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--panel-bg);
   color: var(--text-primary);
   border: 1px solid var(--border-soft);
   border-radius: 12px;
   padding: 10px 12px;
 }
 
-.light-panel select, .light-panel input, .light-panel .ghost { color: #334155; background: #fff; border-color: #cbd5e1; }
+.light-panel select, .light-panel input, .light-panel .ghost { color: var(--text-primary); background: var(--panel-bg); border-color: var(--border-soft); }
 .light-panel .filters input { min-width: 0; flex: 1 1 130px; }
 .light-panel .filters select, .light-panel .filters .ghost { flex: 0 1 auto; }
 .light-panel select:focus-visible, .light-panel input:focus-visible, .light-panel button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
@@ -308,12 +308,12 @@ input {
   margin: 0;
   padding: 12px 14px;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
 }
 
 .feedback.error {
-  background: rgba(209, 89, 89, 0.18);
-  color: #ffb0a8;
+  background: var(--error-bg);
+  color: var(--error-text);
 }
 
 .table-scroll {
@@ -332,7 +332,7 @@ input {
 .table td {
   text-align: left;
   padding: 12px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .clickable-row {
@@ -353,10 +353,10 @@ input {
   text-align: center;
 }
 
-.light-panel .empty-state { color: #64748b; padding: 32px 12px; }
-.light-panel .table th, .light-panel .table td { padding: 3px 10px; border-bottom-color: #e5e7eb; color: #334155; }
-.light-panel .expanded-row pre { color: #475569; background: #f8fafc; }
-.light-panel .pager { color: #64748b; }
+.light-panel .empty-state { color: var(--text-muted); padding: 32px 12px; }
+.light-panel .table th, .light-panel .table td { padding: 3px 10px; border-bottom-color: var(--border-soft); color: var(--text-primary); }
+.light-panel .expanded-row pre { color: var(--text-secondary); background: var(--code-bg); }
+.light-panel .pager { color: var(--text-muted); }
 .dashboard-page :deep(.chart) { height: 220px; }
 .dashboard-page .table { min-width: 680px; }
 
@@ -373,7 +373,7 @@ input {
 
 @media (max-width: 720px) {
   .light-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .light-stats > * { border-bottom: 1px solid #e5e7eb; }
+  .light-stats > * { border-bottom: 1px solid var(--border-soft); }
   .light-stats > *:nth-child(even) { border-right: 0; }
   .dual-grid { gap: 12px; }
   .panel-header, .controls { flex-wrap: wrap; }

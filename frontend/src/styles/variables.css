@@ -75,3 +75,27 @@ select:disabled {
 button {
   cursor: pointer;
 }
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible,
+[role="tab"]:focus-visible,
+[role="button"]:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--focus-ring) !important;
+  outline-offset: 2px !important;
+}
+
+button:focus,
+input:focus,
+select:focus,
+textarea:focus,
+a:focus,
+[role="tab"]:focus,
+[role="button"]:focus,
+summary:focus {
+  outline: 2px solid var(--focus-ring) !important;
+  outline-offset: 2px !important;
+}

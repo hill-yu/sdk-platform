@@ -115,7 +115,7 @@ const routeTitle = computed(() => {
 }
 
 .nav-icon { width: 20px; color: var(--text-muted); font-size: 20px; line-height: 1; text-align: center; }
-.nav-link:hover, .nav-link:focus-visible { color: #1d4ed8; background: var(--hover-bg); outline: 2px solid var(--hover-border); outline-offset: 2px; }
+.nav-link:hover, .nav-link:focus-visible { color: #1d4ed8; background: var(--hover-bg); outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .nav-link:hover .nav-icon, .nav-link.router-link-active .nav-icon { color: var(--accent); }
 
 .nav-link.router-link-active { color: var(--accent); background: #e8f1ff; border-color: transparent; box-shadow: none; }

@@ -1,5 +1,5 @@
 <template>
-  <article class="card light" :class="{ dark-compat: props.light === false }">
+  <article class="card light">
     <p class="label">{{ title }}</p>
     <div class="value-row">
       <strong>{{ formattedValue }}</strong>

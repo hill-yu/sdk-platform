@@ -456,7 +456,7 @@ onBeforeUnmount(() => { ++failureRequestSequence; ++parseRequestSequence; ++prof
 .panel { padding: 22px; border: 1px solid var(--border-soft); border-radius: 24px; background: var(--panel-bg); box-shadow: var(--panel-shadow); }
 .view-tabs, .filters, .panel-header, .pager, .analysis-toolbar { display: flex; align-items: center; gap: 12px; }
 .view-tabs button, .ghost, .primary { border: 1px solid var(--border-soft); border-radius: 6px; color: var(--text-primary); background: var(--panel-bg); padding: 10px 14px; cursor: pointer; }
-.view-tabs button.active, .primary { border-color: rgba(214, 140, 69, .5); background: var(--hover-bg); }
+.view-tabs button.active, .primary { border-color: var(--accent); background: var(--hover-bg); }
 .filters { flex-wrap: wrap; }.filters-panel .panel-header, .panel-header { justify-content: space-between; }.panel-header h3 { margin: 0; }.count { color: var(--text-muted); }
 .analysis-toolbar { justify-content: flex-end; margin: 14px 0 0; color: var(--text-muted); font-size: 12px; }.analysis-toolbar label { display: inline-flex; align-items: center; gap: 6px; }
 select, input, button { border: 1px solid var(--border-soft); border-radius: 6px; color: var(--text-primary); background: var(--panel-bg); padding: 10px 12px; }
@@ -466,6 +466,6 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
 .clickable-row { cursor: pointer; }.clickable-row.selected { background: var(--hover-bg); }.message-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .level-tag { display: inline-block; padding: 4px 8px; border-radius: 999px; background: var(--border-soft); }.level-debug { color: var(--text-muted); }.level-info { color: var(--accent); }.level-warn { color: var(--warning-text); }.level-error { color: var(--error-text); }
 .empty-state { color: var(--text-muted); text-align: center; }.pager { justify-content: space-between; margin-top: 16px; }.feedback { margin: 0; padding: 12px 14px; border-radius: 6px; background: var(--panel-bg); }.feedback.error { color: var(--error-text); background: var(--error-bg); }.feedback.success { color: var(--success-text); background: var(--success-bg); }
-.modal-backdrop { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 20px; background: rgba(0, 0, 0, .55); }.modal-panel { width: min(760px, 100%); max-height: calc(100dvh - 40px); min-width: 0; overflow: auto; }
+.modal-backdrop { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 20px; background: var(--overlay); }.modal-panel { width: min(760px, 100%); max-height: calc(100dvh - 40px); min-width: 0; overflow: auto; }
 @media (max-width: 1200px) { .viewer-grid { grid-template-columns: 1fr; } }
 </style>
