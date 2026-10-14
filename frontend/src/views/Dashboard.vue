@@ -2,6 +2,10 @@
   <div class="stack dashboard-page">
     <p v-if="errorMessage" data-testid="dashboard-error" class="feedback error">{{ errorMessage }}</p>
     <p v-if="loading" data-testid="dashboard-loading" class="feedback">正在加载数据...</p>
+    <div class="dashboard-heading">
+      <h2>数据大盘</h2>
+      <span>示例数据 · 非生产环境</span>
+    </div>
     <section class="stats-grid light-stats">
       <StatCard title="今日 PV" :value="summary.today_pv" :trend="trend(summary.today_pv, summary.yesterday_pv)" light />
       <StatCard title="今日 UV" :value="summary.today_uv" :trend="trend(summary.today_uv, summary.yesterday_uv)" light />
@@ -18,8 +22,8 @@
     </section>
 
     <section class="panel light-panel">
-      <div class="panel-header">
-        <h3>趋势图</h3>
+      <div class="panel-header panel-toolbar">
+        <span class="sr-only">事件趋势</span>
         <div class="controls">
           <select v-model="trendRange" @change="loadTrend">
             <option value="24h">24 小时</option>
@@ -40,14 +44,14 @@
     <div class="dual-grid">
       <section class="panel light-panel">
         <div class="panel-header">
-          <h3>事件分布</h3>
+          <span class="sr-only">事件分布</span>
           <select v-model="breakdownDimension" @change="loadBreakdown">
             <option value="event_type">事件类型</option>
             <option value="page">页面</option>
             <option value="element">元素</option>
           </select>
         </div>
-        <TrendChart v-if="breakdownLabels.length" :title="'分布图'" :labels="breakdownLabels" :counts="breakdownCounts" pie light />
+        <TrendChart v-if="breakdownLabels.length" :title="'事件分布'" :labels="breakdownLabels" :counts="breakdownCounts" pie light />
         <p v-if="breakdownLabels.length === 0" class="empty-state">当前没有可展示的分布数据。</p>
       </section>
 
@@ -218,6 +222,9 @@ onMounted(async () => {
 }
 
 .dashboard-page { gap: 16px; }
+.dashboard-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.dashboard-heading h2 { margin: 0; color: #0f172a; font-size: 26px; letter-spacing: -0.03em; }
+.dashboard-heading span { color: #64748b; font-size: 13px; }
 
 .stats-grid,
 .dual-grid {
@@ -232,7 +239,7 @@ onMounted(async () => {
 .light-stats { padding: 0; overflow: hidden; border: 1px solid #e5e7eb; border-radius: 6px; background: #fff; }
 
 .dual-grid {
-  grid-template-columns: 1.1fr 1fr;
+  grid-template-columns: 1fr 3fr;
 }
 
 .stats-grid > *,
@@ -259,7 +266,9 @@ onMounted(async () => {
 }
 
 .light-panel { padding: 18px; border-radius: 6px; background: #fff; border-color: #e5e7eb; box-shadow: 0 1px 2px rgba(15, 23, 42, .03); }
+.light-panel select, .light-panel input, .light-panel .ghost { border-radius: 6px; }
 .dashboard-page h3 { color: #1f2937; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 .panel-header,
 .controls,
@@ -276,6 +285,9 @@ onMounted(async () => {
 .pager {
   justify-content: space-between;
 }
+
+.panel-toolbar .controls,
+.light-panel > .panel-header > select { margin-left: auto; }
 
 select,
 .ghost,
@@ -342,9 +354,11 @@ input {
 }
 
 .light-panel .empty-state { color: #64748b; padding: 32px 12px; }
-.light-panel .table th, .light-panel .table td { border-bottom-color: #e5e7eb; color: #334155; }
+.light-panel .table th, .light-panel .table td { padding: 3px 10px; border-bottom-color: #e5e7eb; color: #334155; }
 .light-panel .expanded-row pre { color: #475569; background: #f8fafc; }
 .light-panel .pager { color: #64748b; }
+.dashboard-page :deep(.chart) { height: 220px; }
+.dashboard-page .table { min-width: 680px; }
 
 @media (prefers-reduced-motion: reduce) {
   .dashboard-page *, .dashboard-page *::before, .dashboard-page *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
@@ -363,6 +377,11 @@ input {
   .light-stats > *:nth-child(even) { border-right: 0; }
   .dual-grid { gap: 12px; }
   .panel-header, .controls { flex-wrap: wrap; }
+  .dashboard-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .card.light .value-row { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .card.light .trend-wrap { gap: 6px; }
+  .panel-toolbar .controls { width: 100%; margin-left: 0; }
+  .panel-toolbar .controls select { flex: 1 1 0; min-width: 0; }
   .light-panel { overflow: hidden; }
   .light-panel .chart { max-width: 100%; }
   .filters { align-items: stretch; }

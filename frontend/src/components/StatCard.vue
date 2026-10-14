@@ -2,8 +2,8 @@
   <article class="card" :class="{ light: props.light }">
     <p class="label">{{ title }}</p>
     <div class="value-row">
-      <strong>{{ value }}</strong>
-      <span :class="trendClass">{{ trendText }}</span>
+      <strong>{{ formattedValue }}</strong>
+      <span class="trend-wrap"><span class="trend-label">较昨日</span><span :class="trendClass">{{ trendText }}</span></span>
     </div>
   </article>
 </template>
@@ -19,7 +19,8 @@ const props = defineProps<{
 }>();
 
 const trendClass = computed(() => (props.trend >= 0 ? "trend positive" : "trend negative"));
-const trendText = computed(() => `${props.trend >= 0 ? "↑" : "↓"} ${Math.abs(props.trend).toFixed(1)}%`);
+const formattedValue = computed(() => typeof props.value === "number" ? new Intl.NumberFormat("zh-CN").format(props.value) : props.value);
+const trendText = computed(() => `${props.trend >= 0 ? "▲" : "▼"} ${Math.abs(props.trend).toFixed(1)}%`);
 </script>
 
 <style scoped>
@@ -36,6 +37,8 @@ const trendText = computed(() => `${props.trend >= 0 ? "↑" : "↓"} ${Math.abs
 .card.light .label { color: #64748b; }
 .card.light strong { color: #1f2937; }
 .card.light .trend { padding: 0; border-radius: 0; background: transparent; }
+.card.light .trend-wrap { display: inline-flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.card.light .trend-label { color: #64748b; font-size: 13px; }
 .card.light .positive { color: #059669; }
 .card.light .negative { color: #dc2626; }
 
@@ -70,5 +73,10 @@ strong {
 .negative {
   background: rgba(209, 89, 89, 0.18);
   color: #ffb0a8;
+}
+
+@media (max-width: 720px) {
+  .card.light .value-row { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .card.light .trend-wrap { gap: 6px; }
 }
 </style>

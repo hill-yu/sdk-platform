@@ -16,7 +16,7 @@ export function buildTrendOption(input: TrendOptionInput, config: TrendOptionCon
       color: light ? piePalette : undefined,
       title: { text: input.title, textStyle: { color: textColor } },
       tooltip: { trigger: "item" },
-      legend: { textStyle: { color: mutedColor } },
+      legend: { bottom: 8, textStyle: { color: mutedColor } },
       series: [{ type: "pie", radius: ["40%", "72%"], data: input.labels.map((name, index) => ({ name, value: input.counts[index] ?? 0, itemStyle: light ? { color: piePalette[index % piePalette.length] } : undefined })) }],
     };
   }

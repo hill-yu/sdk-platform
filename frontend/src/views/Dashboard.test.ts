@@ -27,10 +27,13 @@ describe("Dashboard home interactions", () => {
     const wrapper = mount(Dashboard, { global: { stubs: { TrendChart: true } } });
     await flushPromises();
 
+    expect(wrapper.get("h2").text()).toBe("数据大盘");
     expect(wrapper.text()).toContain("今日 PV");
     expect(wrapper.text()).toContain("今日 UV");
     expect(wrapper.text()).toContain("今日事件数");
     expect(wrapper.text()).toContain("活跃设备");
+    expect(wrapper.text()).toContain("28,416");
+    expect(wrapper.text()).toContain("较昨日");
     expect(api.getTrend).toHaveBeenCalledWith({ range: "24h", event_type: undefined });
     expect(api.getBreakdown).toHaveBeenCalledWith({ dimension: "event_type" });
     expect(api.getEvents).toHaveBeenCalledWith(expect.objectContaining({ page: 1, page_size: 8 }));

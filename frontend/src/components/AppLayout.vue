@@ -3,15 +3,18 @@
     <aside class="sidebar">
       <div class="brand">
         <span class="brand-kicker">SDK PLATFORM</span>
-        <h1>运营中台</h1>
+        <div class="brand-title">
+          <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2 28 9v14l-12 7L4 23V9l12-7Z" fill="#2563eb"/><path d="m16 2 12 7-12 7L4 9l12-7Z" fill="#60a5fa"/><path d="M16 16v14l12-7V9l-12 7Z" fill="#1d4ed8"/><path d="m16 10 4 2.3v4.6l-4 2.3-4-2.3v-4.6l4-2.3Z" fill="#fff" opacity=".94"/></svg>
+          <h1>SDK 运营中台</h1>
+        </div>
         <p>数据、配置、版本统一管理</p>
       </div>
 
       <nav class="nav">
-        <RouterLink to="/" class="nav-link">数据大盘</RouterLink>
-        <RouterLink to="/logs" class="nav-link">日志查看</RouterLink>
-        <RouterLink to="/config" class="nav-link">配置管理</RouterLink>
-        <RouterLink to="/version" class="nav-link">版本管理</RouterLink>
+        <RouterLink to="/" class="nav-link"><span class="nav-icon" aria-hidden="true">▥</span>数据大盘</RouterLink>
+        <RouterLink to="/logs" class="nav-link"><span class="nav-icon" aria-hidden="true">▤</span>日志查看</RouterLink>
+        <RouterLink to="/config" class="nav-link"><span class="nav-icon" aria-hidden="true">⚙</span>配置管理</RouterLink>
+        <RouterLink to="/version" class="nav-link"><span class="nav-icon" aria-hidden="true">◇</span>版本管理</RouterLink>
       </nav>
     </aside>
 
@@ -77,7 +80,9 @@ const routeTitle = computed(() => {
 .home-light .sidebar { padding: 20px 10px; border-right: 1px solid #e5e7eb; background: #fff; backdrop-filter: none; }
 .home-light .brand { padding: 0 16px; }
 .home-light .brand-kicker { display: none; }
-.home-light .brand h1 { color: #1f2937; font-size: 20px; letter-spacing: -0.02em; }
+.home-light .brand-title { display: flex; align-items: center; gap: 10px; }
+.home-light .brand-mark { width: 26px; height: 26px; flex: 0 0 auto; }
+.home-light .brand h1 { color: #0f172a; font-size: 20px; letter-spacing: -0.02em; white-space: nowrap; }
 .home-light .brand p { color: #64748b; font-size: 12px; }
 
 .brand-kicker,
@@ -117,8 +122,10 @@ const routeTitle = computed(() => {
   background: rgba(255, 255, 255, 0.03);
 }
 
-.home-light .nav-link { color: #334155; border-radius: 6px; padding: 12px 16px; background: transparent; }
+.home-light .nav-link { display: flex; align-items: center; gap: 12px; color: #334155; border-radius: 6px; padding: 12px 16px; background: transparent; }
+.home-light .nav-icon { width: 20px; color: #64748b; font-size: 20px; line-height: 1; text-align: center; }
 .home-light .nav-link:hover, .home-light .nav-link:focus-visible { color: #1d4ed8; background: #eff6ff; outline: 2px solid #93c5fd; outline-offset: 2px; }
+.home-light .nav-link:hover .nav-icon, .home-light .nav-link.router-link-active .nav-icon { color: #2563eb; }
 
 .nav-link.router-link-active {
   background: linear-gradient(135deg, rgba(214, 140, 69, 0.22), rgba(86, 145, 114, 0.18));
@@ -181,7 +188,8 @@ const routeTitle = computed(() => {
   .shell.home-light { grid-template-columns: minmax(0, 1fr); }
   .home-light .sidebar { padding: 12px 10px; }
   .home-light .brand { padding: 0 12px; }
-  .home-light .nav { flex-direction: row; overflow-x: auto; margin-top: 12px; }
-  .home-light .nav-link { flex: 0 0 auto; white-space: nowrap; }
+  .home-light .nav { flex-direction: row; justify-content: space-between; gap: 0; overflow: visible; margin-top: 12px; }
+  .home-light .nav-link { flex: 0 1 auto; gap: 6px; padding: 10px 7px; font-size: 14px; white-space: nowrap; }
+  .home-light .nav-icon { width: 16px; font-size: 17px; }
 }
 </style>
