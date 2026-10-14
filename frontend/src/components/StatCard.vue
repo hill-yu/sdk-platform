@@ -1,5 +1,5 @@
 <template>
-  <article class="card">
+  <article class="card" :class="{ light: props.light }">
     <p class="label">{{ title }}</p>
     <div class="value-row">
       <strong>{{ value }}</strong>
@@ -15,6 +15,7 @@ const props = defineProps<{
   title: string;
   value: number | string;
   trend: number;
+  light?: boolean;
 }>();
 
 const trendClass = computed(() => (props.trend >= 0 ? "trend positive" : "trend negative"));
@@ -29,6 +30,14 @@ const trendText = computed(() => `${props.trend >= 0 ? "↑" : "↓"} ${Math.abs
   border: 1px solid var(--border-soft);
   box-shadow: var(--panel-shadow);
 }
+
+.card.light { padding: 18px 22px; border-radius: 0; background: #fff; border: 0; border-right: 1px solid #e5e7eb; box-shadow: none; }
+.card.light:last-child { border-right: 0; }
+.card.light .label { color: #64748b; }
+.card.light strong { color: #1f2937; }
+.card.light .trend { padding: 0; border-radius: 0; background: transparent; }
+.card.light .positive { color: #059669; }
+.card.light .negative { color: #dc2626; }
 
 .label {
   margin: 0 0 10px;

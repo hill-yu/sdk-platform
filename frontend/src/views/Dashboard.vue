@@ -1,23 +1,23 @@
 <template>
-  <div class="stack">
-    <p v-if="errorMessage" class="feedback error">{{ errorMessage }}</p>
-    <p v-if="loading" class="feedback">正在加载数据...</p>
-    <section class="stats-grid">
-      <StatCard title="今日 PV" :value="summary.today_pv" :trend="trend(summary.today_pv, summary.yesterday_pv)" />
-      <StatCard title="今日 UV" :value="summary.today_uv" :trend="trend(summary.today_uv, summary.yesterday_uv)" />
+  <div class="stack dashboard-page">
+    <p v-if="errorMessage" data-testid="dashboard-error" class="feedback error">{{ errorMessage }}</p>
+    <p v-if="loading" data-testid="dashboard-loading" class="feedback">正在加载数据...</p>
+    <section class="stats-grid light-stats">
+      <StatCard title="今日 PV" :value="summary.today_pv" :trend="trend(summary.today_pv, summary.yesterday_pv)" light />
+      <StatCard title="今日 UV" :value="summary.today_uv" :trend="trend(summary.today_uv, summary.yesterday_uv)" light />
       <StatCard
         title="今日事件数"
         :value="summary.today_events"
-        :trend="trend(summary.today_events, summary.yesterday_events)"
+        :trend="trend(summary.today_events, summary.yesterday_events)" light
       />
       <StatCard
         title="活跃设备"
         :value="summary.active_devices"
-        :trend="trend(summary.active_devices, summary.yesterday_active_devices)"
+        :trend="trend(summary.active_devices, summary.yesterday_active_devices)" light
       />
     </section>
 
-    <section class="panel">
+    <section class="panel light-panel">
       <div class="panel-header">
         <h3>趋势图</h3>
         <div class="controls">
@@ -33,11 +33,12 @@
           </select>
         </div>
       </div>
-      <TrendChart :title="'事件趋势'" :labels="trendLabels" :counts="trendCounts" :uv="trendUvs" />
+      <p v-if="!loading && trendLabels.length === 0" class="empty-state">当前没有可展示的趋势数据。</p>
+      <TrendChart v-else :title="'事件趋势'" :labels="trendLabels" :counts="trendCounts" :uv="trendUvs" light />
     </section>
 
     <div class="dual-grid">
-      <section class="panel">
+      <section class="panel light-panel">
         <div class="panel-header">
           <h3>事件分布</h3>
           <select v-model="breakdownDimension" @change="loadBreakdown">
@@ -46,11 +47,11 @@
             <option value="element">元素</option>
           </select>
         </div>
-        <TrendChart :title="'分布图'" :labels="breakdownLabels" :counts="breakdownCounts" pie />
+        <TrendChart v-if="breakdownLabels.length" :title="'分布图'" :labels="breakdownLabels" :counts="breakdownCounts" pie light />
         <p v-if="breakdownLabels.length === 0" class="empty-state">当前没有可展示的分布数据。</p>
       </section>
 
-      <section class="panel">
+      <section class="panel light-panel">
         <div class="panel-header">
           <h3>事件明细</h3>
           <button class="ghost" @click="loadEvents">刷新</button>
@@ -216,6 +217,8 @@ onMounted(async () => {
   min-height: 0;
 }
 
+.dashboard-page { gap: 16px; }
+
 .stats-grid,
 .dual-grid {
   display: grid;
@@ -225,6 +228,8 @@ onMounted(async () => {
 .stats-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
+
+.light-stats { padding: 0; overflow: hidden; border: 1px solid #e5e7eb; border-radius: 6px; background: #fff; }
 
 .dual-grid {
   grid-template-columns: 1.1fr 1fr;
@@ -253,6 +258,9 @@ onMounted(async () => {
   box-shadow: var(--panel-shadow);
 }
 
+.light-panel { padding: 18px; border-radius: 6px; background: #fff; border-color: #e5e7eb; box-shadow: 0 1px 2px rgba(15, 23, 42, .03); }
+.dashboard-page h3 { color: #1f2937; }
+
 .panel-header,
 .controls,
 .filters,
@@ -276,6 +284,9 @@ input {
   border-radius: 12px;
   padding: 10px 12px;
 }
+
+.light-panel select, .light-panel input, .light-panel .ghost { color: #334155; background: #fff; border-color: #cbd5e1; }
+.light-panel select:focus-visible, .light-panel input:focus-visible, .light-panel button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
 
 .feedback {
   margin: 0;
@@ -326,10 +337,28 @@ input {
   text-align: center;
 }
 
+.light-panel .empty-state { color: #64748b; padding: 32px 12px; }
+.light-panel .table th, .light-panel .table td { border-bottom-color: #e5e7eb; color: #334155; }
+.light-panel .expanded-row pre { color: #475569; background: #f8fafc; }
+.light-panel .pager { color: #64748b; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-page *, .dashboard-page *::before, .dashboard-page *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
 @media (max-width: 1120px) {
   .stats-grid,
   .dual-grid {
     grid-template-columns: 1fr;
   }
+}
+
+@media (max-width: 720px) {
+  .light-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .light-stats > * { border-bottom: 1px solid #e5e7eb; }
+  .light-stats > *:nth-child(even) { border-right: 0; }
+  .dual-grid { gap: 12px; }
+  .filters { align-items: stretch; }
+  .filters > * { min-width: min(100%, 140px); }
 }
 </style>

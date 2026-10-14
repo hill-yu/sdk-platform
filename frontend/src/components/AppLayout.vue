@@ -1,5 +1,5 @@
 <template>
-  <div class="shell">
+  <div class="shell" :class="{ 'home-light': route.name === 'dashboard' }">
     <aside class="sidebar">
       <div class="brand">
         <span class="brand-kicker">SDK PLATFORM</span>
@@ -15,13 +15,14 @@
       </nav>
     </aside>
 
-    <main class="content">
+    <main class="content" :class="{ 'home-light-content': route.name === 'dashboard' }">
       <header class="topbar">
         <div>
-          <p class="eyebrow">Admin Console</p>
-          <h2>{{ routeTitle }}</h2>
+          <p v-if="route.name === 'dashboard'" class="breadcrumb">运营中台&nbsp; / &nbsp;数据大盘</p>
+          <template v-else><p class="eyebrow">Admin Console</p><h2>{{ routeTitle }}</h2></template>
         </div>
-        <div class="token-tip">
+        <div v-if="route.name === 'dashboard'" class="home-meta">北京时间 UTC+8</div>
+        <div v-else class="token-tip">
           当前使用本地 `admin_token`
         </div>
       </header>
@@ -61,6 +62,8 @@ const routeTitle = computed(() => {
     var(--bg-primary);
 }
 
+.shell.home-light { grid-template-columns: 224px minmax(0, 1fr); background: #f5f7fa; }
+
 .sidebar {
   min-width: 0;
   min-height: 0;
@@ -70,6 +73,12 @@ const routeTitle = computed(() => {
   background: linear-gradient(180deg, rgba(16, 27, 26, 0.95), rgba(24, 36, 34, 0.78));
   backdrop-filter: blur(14px);
 }
+
+.home-light .sidebar { padding: 20px 10px; border-right: 1px solid #e5e7eb; background: #fff; backdrop-filter: none; }
+.home-light .brand { padding: 0 16px; }
+.home-light .brand-kicker { display: none; }
+.home-light .brand h1 { color: #1f2937; font-size: 20px; letter-spacing: -0.02em; }
+.home-light .brand p { color: #64748b; font-size: 12px; }
 
 .brand-kicker,
 .eyebrow {
@@ -96,6 +105,8 @@ const routeTitle = computed(() => {
   gap: 12px;
 }
 
+.home-light .nav { margin-top: 26px; gap: 4px; }
+
 .nav-link {
   color: var(--text-primary);
   text-decoration: none;
@@ -106,11 +117,16 @@ const routeTitle = computed(() => {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.home-light .nav-link { color: #334155; border-radius: 6px; padding: 12px 16px; background: transparent; }
+.home-light .nav-link:hover, .home-light .nav-link:focus-visible { color: #1d4ed8; background: #eff6ff; outline: 2px solid #93c5fd; outline-offset: 2px; }
+
 .nav-link.router-link-active {
   background: linear-gradient(135deg, rgba(214, 140, 69, 0.22), rgba(86, 145, 114, 0.18));
   border-color: rgba(214, 140, 69, 0.35);
   box-shadow: 0 18px 32px rgba(0, 0, 0, 0.16);
 }
+
+.home-light .nav-link.router-link-active { color: #2563eb; background: #e8f1ff; border-color: transparent; box-shadow: none; }
 
 .content {
   min-width: 0;
@@ -120,6 +136,10 @@ const routeTitle = computed(() => {
   overflow: hidden;
   padding: 24px;
 }
+
+.home-light-content { padding: 0 22px 22px; background: #f5f7fa; }
+.home-light-content .topbar { min-height: 48px; margin: 0 -22px 18px; padding: 0 22px; align-items: center; border-bottom: 1px solid #e5e7eb; background: #fff; }
+.breadcrumb, .home-meta { margin: 0; color: #64748b; font-size: 14px; }
 
 .topbar {
   display: flex;
@@ -157,5 +177,11 @@ const routeTitle = computed(() => {
     flex-direction: column;
     align-items: flex-start;
   }
+
+  .shell.home-light { grid-template-columns: minmax(0, 1fr); }
+  .home-light .sidebar { padding: 12px 10px; }
+  .home-light .brand { padding: 0 12px; }
+  .home-light .nav { flex-direction: row; overflow-x: auto; margin-top: 12px; }
+  .home-light .nav-link { flex: 0 0 auto; white-space: nowrap; }
 }
 </style>
