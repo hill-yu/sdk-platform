@@ -35,6 +35,8 @@ C:\Users\喻远飞\.codex\visualizations\2026\10\14\global-light-theme-20261014-
 
 已覆盖 390×844、1366×768、1536×1024；路由为 `/`、`/logs`、`/config`、`/version`；日志覆盖解析统计、原始日志、使用时长三个 Tab，并生成原始日志详情与版本新增弹层截图。
 
+使用时长 Tab 使用七个时长桶的成功态 mock 数据，截图 `logs-usage-view-tab-1536.png` 可见汇总行，不以 loading 态作为验收依据。
+
 三种视口均满足四条路由的 `body.scrollWidth === body.clientWidth`。390px 实测：`390/390`；1366px：`1366/1366`；1536px：`1536/1536`。横向滚动仅保留在移动导航、配置文件 Tab、树编辑器和表格等明确的内部容器。
 
 Tab/键盘焦点实测 button、input、select 均为 `2px solid rgb(37, 99, 235)`、offset `2px`；全局 CSS 同时覆盖 button、input、select、textarea、link、tab、role button、summary。
