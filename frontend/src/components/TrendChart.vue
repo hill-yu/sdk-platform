@@ -3,7 +3,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { use } from "echarts/core";
 import { BarChart, LineChart, PieChart } from "echarts/charts";
 import { AriaComponent, GridComponent, LegendComponent, TooltipComponent, TitleComponent } from "echarts/components";
@@ -14,7 +14,25 @@ import { buildTrendOption, type TrendOptionInput } from "@/components/trendOptio
 use([BarChart, LineChart, PieChart, GridComponent, LegendComponent, TooltipComponent, TitleComponent, AriaComponent, CanvasRenderer]);
 
 const props = defineProps<TrendOptionInput>();
-const option = computed(() => buildTrendOption(props));
+const prefersReducedMotion = ref(false);
+let mediaQuery: MediaQueryList | undefined;
+
+const updateMotionPreference = () => {
+  prefersReducedMotion.value = mediaQuery?.matches ?? false;
+};
+
+onMounted(() => {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+  mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+  updateMotionPreference();
+  mediaQuery.addEventListener?.("change", updateMotionPreference);
+});
+
+onBeforeUnmount(() => {
+  mediaQuery?.removeEventListener?.("change", updateMotionPreference);
+});
+
+const option = computed(() => buildTrendOption(props, { reducedMotion: prefersReducedMotion.value }));
 </script>
 
 <style scoped>

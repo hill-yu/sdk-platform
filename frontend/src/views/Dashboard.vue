@@ -270,6 +270,8 @@ onMounted(async () => {
   gap: 12px;
 }
 
+.filters { flex-wrap: wrap; }
+
 .panel-header,
 .pager {
   justify-content: space-between;
@@ -286,6 +288,8 @@ input {
 }
 
 .light-panel select, .light-panel input, .light-panel .ghost { color: #334155; background: #fff; border-color: #cbd5e1; }
+.light-panel .filters input { min-width: 0; flex: 1 1 130px; }
+.light-panel .filters select, .light-panel .filters .ghost { flex: 0 1 auto; }
 .light-panel select:focus-visible, .light-panel input:focus-visible, .light-panel button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
 
 .feedback {
@@ -358,6 +362,9 @@ input {
   .light-stats > * { border-bottom: 1px solid #e5e7eb; }
   .light-stats > *:nth-child(even) { border-right: 0; }
   .dual-grid { gap: 12px; }
+  .panel-header, .controls { flex-wrap: wrap; }
+  .light-panel { overflow: hidden; }
+  .light-panel .chart { max-width: 100%; }
   .filters { align-items: stretch; }
   .filters > * { min-width: min(100%, 140px); }
 }
