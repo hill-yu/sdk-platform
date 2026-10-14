@@ -39,6 +39,10 @@ C:\Users\喻远飞\.codex\visualizations\2026\10\14\global-light-theme-20261014-
 
 QA 更正记录：早期 mock 截图曾因 `available_columns`、解析任务 envelope、Usage 七桶和版本列表字段不匹配而出现错误/空态；这些只读 QA 数据契约已在 repo 外 mock 中修正，最终帧以 `logs-analysis-success-1536.png`、`logs-column-settings-1536.png`、`logs-usage-view-tab-1536.png`、`version-390.png` 和 `version-scroll-end-390.png` 为准。业务源码实现仍保持 SHA `937da4e`。
 
+解析统计截图中的红色提示是 mock 提供的 4 个 H1 失败的合法业务状态，不是 `available_columns` 错误。使用时长七个桶通过合法的内部表格横向滚动逐项展示，`body` 保持无根级横向溢出。
+
+独立 review 已通过；代码 SHA `937da4e` 的 34 个测试文件、206 个测试及构建均已验证。
+
 三种视口均满足四条路由的 `body.scrollWidth === body.clientWidth`。390px 实测：`390/390`；1366px：`1366/1366`；1536px：`1536/1536`。横向滚动仅保留在移动导航、配置文件 Tab、树编辑器和表格等明确的内部容器。
 
 Tab/键盘焦点实测 button、input、select 均为 `2px solid rgb(37, 99, 235)`、offset `2px`；全局 CSS 同时覆盖 button、input、select、textarea、link、tab、role button、summary。
