@@ -2,7 +2,7 @@
 
 日期：2026-10-14  
 业务源码 SHA：`937da4ee8e5d24ff70cb47195372caec3f793848`  
-最终 master/doc HEAD：`36c18d625993a7b4c45aa7a5aa4bd2af26f48def`  
+发布候选/生产资产 SHA：`36c18d625993a7b4c45aa7a5aa4bd2af26f48def`  
 生产 release：`/www/releases/sdk-platform/36c18d625993a7b4c45aa7a5aa4bd2af26f48def`  
 旧 release：`/www/releases/sdk-platform/6d9206c1f14b91cc785e3886b1dd5d995a134a1a`
 
