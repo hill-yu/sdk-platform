@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     SDK_API_PORT: int = 8100
     ADMIN_API_PORT: int = 8101
     ADMIN_TOKEN: str = Field(default="", repr=False)
+    ADMIN_PASSWORD_LOGIN_ENABLED: bool = False
+    ADMIN_USERNAME: str = "admin"
+    ADMIN_PASSWORD_HASH: str = Field(default="", repr=False)
+    ADMIN_SESSION_COOKIE_SECURE: bool = True
+    ADMIN_AUTH_ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
+    ADMIN_SESSION_TTL_SECONDS: int = Field(default=28800, ge=300, le=28800)
     SDK_CONFIG_TOKEN: str = Field(default="", repr=False)
 
     # 腾讯云 COS

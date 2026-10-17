@@ -21,7 +21,10 @@
     <main class="content light-content">
       <header class="topbar">
         <p class="breadcrumb">运营中台&nbsp; / &nbsp;{{ routeTitle }}</p>
-        <div class="home-meta">北京时间 UTC+8</div>
+        <div class="topbar-actions">
+          <div class="home-meta">{{ adminAuth.session?.username || "admin" }} · 北京时间 UTC+8</div>
+          <button class="logout-button" type="button" @click="handleLogout">退出</button>
+        </div>
       </header>
       <section class="page">
         <RouterView />
@@ -32,9 +35,17 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
-import { RouterLink, RouterView, useRoute } from "vue-router";
+import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
+import { logout } from "@/api/auth";
+import { adminAuth } from "@/stores/adminAuth";
 
 const route = useRoute();
+const router = useRouter();
+
+async function handleLogout() {
+  await logout();
+  await router.replace({ name: "login" });
+}
 
 const routeTitle = computed(() => {
   if (route.name === "logs") return "日志查看";
@@ -132,6 +143,9 @@ const routeTitle = computed(() => {
 .light-content { background: var(--bg-primary); }
 .light-content .topbar { min-height: 48px; margin: 0 -22px 18px; padding: 0 22px; align-items: center; border-bottom: 1px solid var(--border-soft); background: var(--bg-secondary); }
 .breadcrumb, .home-meta { margin: 0; color: var(--text-muted); font-size: 14px; }
+.topbar-actions { display: flex; align-items: center; gap: 14px; }
+.logout-button { border: 1px solid var(--border-soft); border-radius: 7px; padding: 7px 12px; color: var(--text-secondary); background: var(--bg-secondary); }
+.logout-button:hover { color: var(--accent); border-color: var(--hover-border); background: var(--hover-bg); }
 
 .topbar {
   display: flex;

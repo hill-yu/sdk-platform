@@ -6,6 +6,7 @@ vi.mock("vue-router", () => ({
   RouterLink: { template: "<a><slot /></a>" },
   RouterView: { template: "<div data-testid='router-view-content'>page</div>" },
   useRoute: () => route,
+  useRouter: () => ({ replace: vi.fn() }),
 }));
 
 const route = reactive({ name: "dashboard" });

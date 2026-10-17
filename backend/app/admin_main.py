@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -10,10 +9,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from app.api.admin import config_mgr, dashboard, log_analysis, log_exports, log_metrics, usage_duration, version_mgr
+from app.api.admin import auth, config_mgr, dashboard, log_analysis, log_exports, log_metrics, usage_duration, version_mgr
 from app.core.config import get_settings
 from app.core.database import async_session_factory
 from app.core.middleware import RequestSizeLimitMiddleware
+from app.services.admin_auth_service import AdminAuthConfigError, parse_password_hash
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,14 @@ async def lifespan(app: FastAPI):
         )
     logger.info("ADMIN_TOKEN 校验通过")
 
+    if getattr(settings, "ADMIN_PASSWORD_LOGIN_ENABLED", False):
+        try:
+            parse_password_hash(getattr(settings, "ADMIN_PASSWORD_HASH", ""))
+        except AdminAuthConfigError as exc:
+            raise RuntimeError("ADMIN_PASSWORD_HASH 未配置或格式/参数不受支持") from exc
+    if not getattr(settings, "DEBUG", False) and not getattr(settings, "ADMIN_SESSION_COOKIE_SECURE", True):
+        raise RuntimeError("生产配置不得关闭 ADMIN_SESSION_COOKIE_SECURE")
+
     if "example.com" in settings.CDN_BASE_URL or "example.com" in settings.COS_BUCKET:
         raise RuntimeError(
             "CDN/COS 配置为占位符！请在 .env 中设置真实的 CDN_BASE_URL 和 COS_BUCKET"
@@ -78,19 +86,29 @@ async def lifespan(app: FastAPI):
                 logger.exception("后台任务关闭时失败")
 
 
-cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
+cors_origins = [origin.strip() for origin in get_settings().ADMIN_AUTH_ALLOWED_ORIGINS.split(",") if origin.strip()]
 
 app = FastAPI(title="Admin API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(RequestSizeLimitMiddleware, max_bytes=5_000_000)
 
+
+@app.middleware("http")
+async def no_store_auth_responses(request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/api/admin/auth/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
+    allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "X-CSRF-Token"],
 )
 
+app.include_router(auth.router, prefix="/api/admin")
 app.include_router(dashboard.router, prefix="/api/admin")
 app.include_router(config_mgr.router, prefix="/api/admin")
 app.include_router(version_mgr.router, prefix="/api/admin")
