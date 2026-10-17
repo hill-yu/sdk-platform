@@ -8,12 +8,12 @@ worktree：`C:\Users\喻远飞\.codex\worktrees\admin-login-db-audit-20261017\SD
 
 - 后端：`python -m pytest tests/test_admin_auth.py -q` → 15 passed。
 - 后端回归：`$env:PYTHONPATH='backend'; python -m pytest backend/tests -q` → 448 passed, 3 skipped。
-- 前端：bundled Node 直接运行 `node_modules/vitest/vitest.mjs --run` → 38 files / 212 tests passed。
+- 前端：bundled Node 运行 `node_modules/vitest/vitest.mjs --run --pool=threads --poolOptions.threads.singleThread=true` → 39 files / 217 tests passed。
 - 前端类型检查：bundled `vue-tsc --noEmit` 退出码 0。
 - 前端构建：bundled Vite build 退出码 0；仅有现有产物 chunk >500 kB 提示。
 - `git diff --check` 已执行。
 
-新增 auth 测试覆盖：错误账号/密码统一 401 与 no-store、scrypt 参数、Unicode 输入、session 撤销/容量、限流窗口清理、cookie session、CSRF 缺失、Basic/畸形 Authorization 不回退 cookie、logout 无 session 幂等、Origin 拒绝，以及前端 login 错误/内部 returnTo、withCredentials、无 prompt/sessionStorage。
+新增 auth 测试覆盖：错误账号/密码统一 401 与 no-store、scrypt 参数、Unicode 输入、session 撤销/容量、限流窗口清理、cookie session、CSRF 缺失、Basic/畸形 Authorization 不回退 cookie、logout 无 session 幂等、Origin 拒绝，以及前端 login 错误/内部 returnTo、withCredentials、无 prompt/sessionStorage、写请求 CSRF、401 会话过期事件、退出成功和退出请求失败提示。
 
 ## 本地联调状态
 
@@ -21,12 +21,15 @@ worktree：`C:\Users\喻远飞\.codex\worktrees\admin-login-db-audit-20261017\SD
 
 真实服务当前保持运行：
 
-- backend：`http://127.0.0.1:8101`，真实 `backend/app/admin_main.py`，启动 ETL refresh 成功。
-- frontend：`http://127.0.0.1:5173/login`，真实 Vite app，proxy 指向 8101。
+- backend：`http://localhost:8101`，真实 `backend/app/admin_main.py`，启动 ETL refresh 成功。
+- frontend：`http://localhost:5173/login`，真实 Vite app，proxy 指向 8101。
 - HTTP 证据：错误密码 401 + `Cache-Control: no-store`；正确密码 200；`/auth/me` 200；真实受保护 `GET /api/admin/package-profiles?package_name=local` 200。
-- 浏览器证据：错误密码显示“账号或密码错误”；成功登录进入数据大盘；退出返回 `/login`。登录页截图已在本次验收中捕获。
+- 浏览器证据：错误密码显示“账号或密码错误”；成功登录进入数据大盘；退出返回 `/login`。退出请求失败时会返回登录页并显示“尚未确认服务端会话注销，请重试”，避免把网络失败误报为已退出。
+- 390 宽度证据：浏览器 viewport 390×844 时 `bodyClientWidth=390`、`bodyScrollWidth=390`、`documentScrollWidth=390`，密码框、登录按钮和登录页均可见；截图已通过浏览器验收捕获。
+- 桌面宽度证据：浏览器 viewport 1280px 时 `bodyScrollWidth=1280`、`documentScrollWidth=1280`，登录页可见；截图已通过浏览器验收捕获。
+- CORS 语义证据：不允许的 Origin 调用 `/api/admin/auth/me` 仍可得到 HTTP 200，但响应不带 `Access-Control-Allow-Origin`，因此浏览器脚本无法读取；服务端不会把该 GET 错误地改成 403。
 
-尚未宣称的项目：390 宽截图、真实生产数据、生产 overview 性能、生产 CORS/CSRF、生产多实例 session。当前 DB 是空的专用本地库，页面显示空数据是预期，不代表生产数据质量。
+尚未宣称的项目：真实生产数据、生产 overview 性能、生产多实例 session。当前 DB 是空的专用本地库，页面显示空数据是预期，不代表生产数据质量。
 
 ## 本地启动准备
 

@@ -43,8 +43,12 @@ const route = useRoute();
 const router = useRouter();
 
 async function handleLogout() {
-  await logout();
-  await router.replace({ name: "login" });
+  try {
+    await logout();
+    await router.replace({ name: "login" });
+  } catch {
+    await router.replace({ name: "login", query: { logoutError: "1" } });
+  }
 }
 
 const routeTitle = computed(() => {

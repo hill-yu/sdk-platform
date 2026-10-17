@@ -32,6 +32,9 @@ const password = ref("");
 const showPassword = ref(false);
 const loading = ref(false);
 const errorMessage = ref("");
+if (route.query.logoutError === "1") {
+  errorMessage.value = "退出请求失败，尚未确认服务端会话注销，请重试";
+}
 
 function safeReturnTo(value: unknown) {
   const candidate = typeof value === "string" ? value : "/";
