@@ -4,13 +4,13 @@ import logging
 from datetime import datetime
 from time import perf_counter
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin.deps import require_admin_token
 from app.core.config import get_settings
 from app.core.database import get_db, get_db_no_commit
-from app.schemas.admin_schemas import ConfigCreateRequest, ConfigUpsertRequest
+from app.schemas.admin_schemas import ConfigCreateRequest, ConfigPublishRequest, ConfigUpsertRequest
 from app.services.config_crypto import normalize_package_name
 from app.services import config_service
 
@@ -132,11 +132,15 @@ async def update_config(
 @router.post("/configs/{config_id}/publish")
 async def publish_config(
     config_id: int,
+    payload: ConfigPublishRequest | None = Body(None),
     admin_user: str = Depends(require_admin_token),
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        data = await config_service.publish_config(db, config_id, admin_user)
+        if payload is None:
+            data = await config_service.publish_config(db, config_id, admin_user)
+        else:
+            data = await config_service.publish_config(db, config_id, admin_user, expected_updated_at=payload.expected_updated_at)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return {"code": 0, "data": data}

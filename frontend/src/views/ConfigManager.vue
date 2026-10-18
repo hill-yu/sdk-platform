@@ -42,6 +42,14 @@
           <button class="primary" :disabled="!editable || operationBusy" @click="publishCurrent">{{ publishing ? "正在发布…" : "发布" }}</button>
           <button v-if="selectedConfig?.status === 'archived'" class="ghost" @click="rollbackCurrent">回滚到此版本</button>
         </div>
+        <div v-if="publishPreview" class="preview-backdrop" data-testid="publish-preview-backdrop">
+          <section class="panel publish-preview" data-testid="publish-preview">
+            <div class="panel-header"><h3>发布前预览</h3><button class="ghost" type="button" :disabled="publishing" @click="publishPreview = null">取消</button></div>
+            <p>确认发布草稿 #{{ publishPreview.id }}（{{ publishPreview.package_name }}），保存时间：{{ publishPreview.updated_at }}</p>
+            <div class="preview-files"><div v-for="file in configFiles" :key="file" class="preview-file"><h4>{{ file }}</h4><pre>{{ JSON.stringify(publishPreview.config_data[file], null, 2) }}</pre></div></div>
+            <button data-testid="confirm-publish" class="primary" :disabled="publishing" @click="confirmPublish">确认发布</button>
+          </section>
+        </div>
       </section>
     </div>
   </div>
@@ -70,6 +78,11 @@ const changeLog = ref("");
 const feedback = reactive({ error: "", success: "" });
 const saving = ref(false);
 const publishing = ref(false);
+const publishPreview = ref<any | null>(null);
+const serverConfigData = ref<JsonObject>(emptyConfigData());
+const serverChangeLog = ref("");
+const serverUpdatedAt = ref<string | null>(null);
+const configFiles: ConfigFileName[] = ["mainConfig", "newTouchConfig", "newTextRuleConfig"];
 const pageSizes = [10, 20, 50];
 const page = ref(1);
 const pageSize = ref(10);
@@ -157,6 +170,9 @@ async function selectConfig(id: number) {
     if (requestSequence !== detailRequestSequence) return;
     selectedId.value = id;
     configData.value = response.data.config_data;
+    serverConfigData.value = response.data.config_data;
+    serverChangeLog.value = response.data.change_log || "";
+    serverUpdatedAt.value = response.data.updated_at || null;
     jsonText.value = JSON.stringify(configData.value, null, 2);
     activeFile.value = "mainConfig";
     treeValid.value = true;
@@ -189,7 +205,10 @@ async function saveDraft() {
     beginFeedback(feedback);
     const data = currentData();
     saving.value = true;
-    await updateConfig(configId, { config_data: data, change_log: changeLog.value });
+    const saved = await updateConfig(configId, { config_data: data, change_log: changeLog.value });
+    serverConfigData.value = data;
+    serverChangeLog.value = changeLog.value;
+    serverUpdatedAt.value = saved.data?.updated_at ?? serverUpdatedAt.value;
     await loadConfigs(); setFeedbackSuccess(feedback, "配置已加密保存");
   } catch (error) {
     if (isRequestTimeout(error)) {
@@ -210,9 +229,16 @@ async function publishCurrent() {
   const before = { ...selectedConfig.value };
   try {
     beginFeedback(feedback);
-    currentData();
-    publishing.value = true;
-    await publishConfig(configId); await loadConfigs(); setFeedbackSuccess(feedback, "配置已发布");
+    const data = currentData();
+    if (JSON.stringify(data) !== JSON.stringify(serverConfigData.value) || changeLog.value !== serverChangeLog.value) {
+      throw new Error("检测到未保存修改，请先保存草稿");
+    }
+    const response = await getConfig(configId);
+    validateConfigData(response.data.config_data);
+    serverConfigData.value = response.data.config_data;
+    serverChangeLog.value = response.data.change_log || "";
+    serverUpdatedAt.value = response.data.updated_at || null;
+    publishPreview.value = { ...response.data, config_data: response.data.config_data };
   } catch (error) {
     if (isRequestTimeout(error)) {
       try {
@@ -222,6 +248,26 @@ async function publishCurrent() {
         }
       } catch { /* 保留原始超时错误 */ }
     }
+    setFeedbackError(feedback, message(error));
+  } finally { publishing.value = false; }
+}
+async function confirmPublish() {
+  if (!publishPreview.value || !selectedId.value || !editable.value) return;
+  const configId = selectedId.value;
+  const before = { ...selectedConfig.value };
+  try {
+    publishing.value = true;
+    await publishConfig(configId, publishPreview.value.updated_at);
+    publishPreview.value = null;
+    await loadConfigs(); setFeedbackSuccess(feedback, "配置已发布");
+  } catch (error) {
+    if (isRequestTimeout(error)) {
+      try {
+        const response = await getConfig(configId);
+        if (isPublishConfirmed(before, response.data)) { publishPreview.value = null; await loadConfigs(); setFeedbackSuccess(feedback, "请求虽超时，但已确认配置发布成功"); return; }
+      } catch { /* preserve original timeout */ }
+    }
+    publishPreview.value = null;
     setFeedbackError(feedback, message(error));
   } finally { publishing.value = false; }
 }
@@ -253,5 +299,11 @@ onMounted(loadConfigs);
 .feedback { padding: 12px; border-radius: 6px; }
 .error { color: var(--error-text); }
 .success { color: var(--success-text); }
+.preview-backdrop { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 35%); }
+.publish-preview { width: min(900px, 100%); max-height: 90dvh; overflow: auto; }
+.preview-files { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.preview-file { min-width: 0; }
+.preview-file h4 { margin: 0 0 6px; }
+.preview-file pre { max-height: 260px; overflow: auto; margin: 0; padding: 10px; background: var(--code-bg); white-space: pre-wrap; }
 @media (max-width: 1000px) { .content-grid { grid-template-columns: minmax(0, 1fr); } .list-panel { max-height: min(55vh, 520px); } }
 </style>

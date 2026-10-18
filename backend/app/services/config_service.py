@@ -132,10 +132,17 @@ async def update_config(
     return _serialize_summary(config)
 
 
-async def publish_config(db: AsyncSession, config_id: int, published_by: str) -> dict[str, Any]:
-    config = await db.get(SdkConfig, config_id)
+async def publish_config(db: AsyncSession, config_id: int, published_by: str, *, expected_updated_at: datetime | None = None) -> dict[str, Any]:
+    original_config = await db.get(SdkConfig, config_id)
+    if original_config is None:
+        raise ValueError("只能发布草稿状态的配置")
+    await _acquire_package_lock(db, original_config.package_name)
+    locked_result = await db.execute(select(SdkConfig).where(SdkConfig.id == config_id).with_for_update())
+    config = (locked_result.scalar_one_or_none() if hasattr(locked_result, "scalar_one_or_none") else None) or original_config
     if config is None or config.status != "draft":
         raise ValueError("只能发布草稿状态的配置")
+    if expected_updated_at is not None and config.updated_at != expected_updated_at:
+        raise ValueError("配置已被其他操作修改，请重新预览后发布")
     return await _publish_from_record(db, config, published_by)
 
 
@@ -168,8 +175,6 @@ async def rollback_config(db: AsyncSession, config_id: int, published_by: str) -
 
 
 async def _publish_from_record(db: AsyncSession, config: SdkConfig, published_by: str) -> dict[str, Any]:
-    await _acquire_package_lock(db, config.package_name)
-
     plain = decrypt_payload(config.encrypted_config, _token())
     _validate_full_config(plain)
     version = await _next_package_version(db, config.package_name)

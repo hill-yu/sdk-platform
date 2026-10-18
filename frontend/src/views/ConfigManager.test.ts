@@ -308,7 +308,9 @@ describe("ConfigManager version pagination", () => {
 
     await publishButton(wrapper).trigger("click");
     await flushPromises();
-    expect(api.publishConfig).toHaveBeenCalledWith(1);
+    await wrapper.get("[data-testid='confirm-publish']").trigger("click");
+    await flushPromises();
+    expect(api.publishConfig).toHaveBeenCalledWith(1, "before-1");
     expect(api.getConfigs).toHaveBeenCalledTimes(3);
     expect(wrapper.get("[data-testid='version-page']").text()).toContain("2 / 3");
     expect(wrapper.get<HTMLTextAreaElement>("[data-testid='json-editor']").element.value).toBe(edited);
@@ -426,6 +428,7 @@ describe("ConfigManager tree and JSON modes", () => {
     api.publishConfig.mockRejectedValueOnce(timeout);
     api.getConfig
       .mockResolvedValueOnce({ data: detail(1, specialData) })
+      .mockResolvedValueOnce({ data: detail(1, specialData) })
       .mockResolvedValueOnce({ data: detail(1, specialData, "published", { version: "v2" }) });
     const wrapper = await mountManager();
 
@@ -433,8 +436,10 @@ describe("ConfigManager tree and JSON modes", () => {
     expect(publishButton).toBeDefined();
     await publishButton!.trigger("click");
     await flushPromises();
+    await wrapper.get("[data-testid='confirm-publish']").trigger("click");
+    await flushPromises();
 
-    expect(api.publishConfig).toHaveBeenCalledWith(1);
+    expect(api.publishConfig).toHaveBeenCalledWith(1, "before-1");
     expect(wrapper.get("[data-testid='success-feedback']").text()).toContain("已确认配置发布成功");
   });
 
@@ -459,10 +464,14 @@ describe("ConfigManager tree and JSON modes", () => {
     const edited = { ...specialData, mainConfig: { edited: true } };
     await wrapper.get("[data-testid='json-mode']").trigger("click");
     await wrapper.get("[data-testid='json-editor']").setValue(JSON.stringify(edited));
+    await wrapper.get("[data-testid='save-config']").trigger("click");
+    await flushPromises();
 
     await publishButton(wrapper).trigger("click");
     await flushPromises();
+    await wrapper.get("[data-testid='confirm-publish']").trigger("click");
+    await flushPromises();
 
-    expect(api.publishConfig).toHaveBeenCalledWith(1);
+    expect(api.publishConfig).toHaveBeenCalledWith(1, "before-1");
   });
 });
