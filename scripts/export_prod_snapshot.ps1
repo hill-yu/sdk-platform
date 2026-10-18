@@ -29,7 +29,7 @@ function Export-Table([string] $name, [string] $fileName) {
   $partial = Join-Path $RunDir ($fileName + ".partial"); $final = Join-Path $RunDir $fileName
   $header = "{`"table`":`"$name`",`"snapshot_start`":`"$SnapshotStart`",`"snapshot_end`":`"$SnapshotEnd`"}"
   [IO.File]::WriteAllText($partial, $header + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
-  $rows = 0; $lastId = 0L; $lastTs = "1970-01-01T00:00:00Z"
+  $rows = 0; $lastId = 0L; $lastTs = "1970-01-01T00:00:00Z"; $minTs = $null; $maxTs = $null
   while ($true) {
     if ($rows -ge $MaxRows -or $script:TotalBytes -ge $MaxBytes) { throw "$name export limit exceeded; incomplete" }
     if ($name -eq "events") {
@@ -38,12 +38,13 @@ function Export-Table([string] $name, [string] $fileName) {
       $sql = "BEGIN; SET TRANSACTION READ ONLY; SET LOCAL statement_timeout='5s'; SET LOCAL lock_timeout='1s'; SELECT json_build_object('id',id,'server_ts',server_ts,'package_name',package_name,'device_id',device_id,'device_model',device_model,'os',os,'app_version',app_version,'sdk_version',sdk_version,'duration_s',duration_s)::text FROM sdk_usage_durations WHERE server_ts >= '$SnapshotStart'::timestamptz AND server_ts < '$SnapshotEnd'::timestamptz AND (server_ts > '$lastTs'::timestamptz OR (server_ts = '$lastTs'::timestamptz AND id > $lastId)) ORDER BY server_ts,id LIMIT $BatchSize; ROLLBACK;"
     }
     $batch = @(Invoke-ProdBatch $sql)
-    foreach ($line in $batch) { [IO.File]::AppendAllText($partial, $line.Trim() + [Environment]::NewLine, [Text.UTF8Encoding]::new($false)); $obj = $line | ConvertFrom-Json; $lastId = [int64]$obj.id; $lastTs = [string]$obj.server_ts; $rows++; $script:TotalRows++; $script:TotalBytes += [Text.Encoding]::UTF8.GetByteCount($line) + 1 }
+    foreach ($line in $batch) { [IO.File]::AppendAllText($partial, $line.Trim() + [Environment]::NewLine, [Text.UTF8Encoding]::new($false)); $obj = $line | ConvertFrom-Json; $lastId = [int64]$obj.id; $lastTs = [string]$obj.server_ts; $ts = [datetimeoffset]::Parse($lastTs); if ($null -eq $minTs -or $ts -lt $minTs) { $minTs = $ts }; if ($null -eq $maxTs -or $ts -gt $maxTs) { $maxTs = $ts }; $rows++; $script:TotalRows++; $script:TotalBytes += [Text.Encoding]::UTF8.GetByteCount($line) + 1 }
     if ((Get-Item -LiteralPath $partial).Length -gt $MaxBytes) { throw "$name file limit exceeded; incomplete" }
     if ($batch.Count -lt $BatchSize) { break }; Start-Sleep -Milliseconds $DelayMs
   }
   Move-Item -LiteralPath $partial -Destination $final
-  [pscustomobject]@{ table=$name; file=$fileName; rows=$rows; bytes=(Get-Item -LiteralPath $final).Length; sha256=(Get-FileHash -LiteralPath $final -Algorithm SHA256).Hash }
+  $minOut = if ($minTs) { $minTs.ToUniversalTime().ToString("o") } else { $null }; $maxOut = if ($maxTs) { $maxTs.ToUniversalTime().ToString("o") } else { $null }
+  [pscustomobject]@{ table=$name; file=$fileName; rows=$rows; bytes=(Get-Item -LiteralPath $final).Length; sha256=(Get-FileHash -LiteralPath $final -Algorithm SHA256).Hash; min_ts=$minOut; max_ts=$maxOut }
 }
 $metadata = @((Export-Table "events" "prod-events-20261018.jsonl"),(Export-Table "usage" "prod-usage-20261018.jsonl"))
 $manifest = [pscustomobject]@{ complete=$true; snapshot_start=$SnapshotStart; snapshot_end=$SnapshotEnd; max_rows_per_table=$MaxRows; max_bytes_total=$MaxBytes; total_rows=$script:TotalRows; total_bytes=$script:TotalBytes; tables=$metadata }
