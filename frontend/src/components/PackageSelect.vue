@@ -16,6 +16,7 @@
       :aria-expanded="open"
       @focus="openPicker"
       @keydown="onKeydown"
+      @focusout="onFocusout"
     />
     <div v-if="open" class="package-options" role="listbox">
       <p v-if="loading" data-testid="package-select-loading">加载中…</p>
@@ -90,11 +91,15 @@ function searchNow(currentId = ++requestId) {
 function scheduleSearch() {
   if (timer) clearTimeout(timer);
   const currentId = ++requestId;
+  options.value = [];
+  highlightedIndex.value = -1;
+  loading.value = true;
+  error.value = "";
   timer = setTimeout(() => { timer = undefined; searchNow(currentId); }, 300);
 }
 function openPicker() { if (!props.disabled) { if (!props.multiple && keyword.value === props.modelValue) keyword.value = ""; open.value = true; scheduleSearch(); } }
 function select(name: string) {
-  if (selectedNames.value.includes(name)) return;
+  if (!options.value.includes(name) || selectedNames.value.includes(name)) return;
   if (props.multiple) emit("update:modelValue", [...selectedNames.value, name]);
   else { emit("update:modelValue", name); suppressKeywordSearch = true; keyword.value = name; open.value = false; }
 }
@@ -109,22 +114,37 @@ function moveHighlight(direction: 1 | -1) {
   highlightedIndex.value = -1;
 }
 function onKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape") { open.value = false; return; }
+  if (event.key === "Escape") { cancelSearchAndRestore(); return; }
   if (!open.value || !options.value.length) return;
   if (event.key === "ArrowDown") { event.preventDefault(); moveHighlight(1); }
   else if (event.key === "ArrowUp") { event.preventDefault(); moveHighlight(-1); }
   else if (event.key === "Enter" && highlightedIndex.value >= 0 && !selectedNames.value.includes(options.value[highlightedIndex.value])) { event.preventDefault(); select(options.value[highlightedIndex.value]); }
 }
+function cancelSearchAndRestore() {
+  if (timer) { clearTimeout(timer); timer = undefined; }
+  ++requestId;
+  open.value = false;
+  loading.value = false;
+  error.value = "";
+  options.value = [];
+  highlightedIndex.value = -1;
+  suppressKeywordSearch = true;
+  keyword.value = props.multiple ? "" : (typeof props.modelValue === "string" ? props.modelValue : "");
+}
+function onFocusout(event: FocusEvent) {
+  const nextTarget = event.relatedTarget as Node | null;
+  if (root.value && nextTarget && root.value.contains(nextTarget)) return;
+  cancelSearchAndRestore();
+}
 function onDocumentClick(event: MouseEvent) {
   if (root.value && !root.value.contains(event.target as Node)) {
-    open.value = false;
-    if (!props.multiple) { suppressKeywordSearch = true; keyword.value = typeof props.modelValue === "string" ? props.modelValue : ""; }
+    cancelSearchAndRestore();
   }
 }
 document.addEventListener("click", onDocumentClick);
 watch(keyword, () => {
   if (suppressKeywordSearch) { suppressKeywordSearch = false; return; }
-  if (!props.disabled) { open.value = true; scheduleSearch(); }
+  if (!props.disabled && open.value) scheduleSearch();
 });
 watch(() => props.modelValue, (value) => { if (!open.value && !props.multiple) keyword.value = typeof value === "string" ? value : ""; }, { deep: true });
 onBeforeUnmount(() => { if (timer) clearTimeout(timer); ++requestId; document.removeEventListener("click", onDocumentClick); });

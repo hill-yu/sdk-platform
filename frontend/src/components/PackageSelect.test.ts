@@ -53,6 +53,44 @@ describe("PackageSelect", () => {
     expect(wrapper.text()).not.toContain("old.package");
   });
 
+  it("invalidates old options during the debounce window", async () => {
+    const wrapper = mount(PackageSelect, { props: { modelValue: "", multiple: false } });
+    const input = wrapper.get("[data-testid='package-select-input']");
+    await input.trigger("focus");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    expect(wrapper.find("[data-testid='package-select-option']").exists()).toBe(true);
+    await input.setValue("new");
+    expect(wrapper.find("[data-testid='package-select-option']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='package-select-loading']").exists()).toBe(true);
+  });
+
+  it("restores the applied value on escape and focus leaving the component", async () => {
+    const wrapper = mount(PackageSelect, { props: { modelValue: "com.example.a", multiple: false } });
+    const input = wrapper.get("[data-testid='package-select-input']");
+    await input.trigger("focus");
+    await input.setValue("com.example.b");
+    await input.trigger("keydown", { key: "Escape" });
+    expect((input.element as HTMLInputElement).value).toBe("com.example.a");
+    expect(wrapper.find("[data-testid='package-select-option']").exists()).toBe(false);
+    await input.trigger("focus");
+    await input.setValue("com.example.c");
+    await input.trigger("focusout", { relatedTarget: null });
+    expect((input.element as HTMLInputElement).value).toBe("com.example.a");
+    expect(wrapper.find("[data-testid='package-select-option']").exists()).toBe(false);
+  });
+
+  it("does not search or open when the parent changes the closed value", async () => {
+    const wrapper = mount(PackageSelect, { props: { modelValue: "com.example.a", multiple: false } });
+    searchLogPackages.mockClear();
+    await wrapper.setProps({ modelValue: "com.example.b" });
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    expect((wrapper.get("[data-testid='package-select-input']").element as HTMLInputElement).value).toBe("com.example.b");
+    expect(wrapper.find("[data-testid='package-select-option']").exists()).toBe(false);
+    expect(searchLogPackages).not.toHaveBeenCalled();
+  });
+
   it("supports multiple selection, de-duplicates, removes chips, and reports errors", async () => {
     searchLogPackages.mockRejectedValueOnce(new Error("search unavailable"));
     const wrapper = mount(PackageSelect, { props: { modelValue: ["com.example.a"], multiple: true } });
