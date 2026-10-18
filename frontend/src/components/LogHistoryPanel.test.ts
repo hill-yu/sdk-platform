@@ -37,4 +37,18 @@ describe("LogHistoryPanel", () => {
     expect(wrapper.text()).toContain("#9");
     expect(wrapper.text()).not.toContain("#8");
   });
+
+  it("paginates history without changing the selected package", async () => {
+    getHistoricalParseJobs.mockReset()
+      .mockResolvedValueOnce({ data: { code: 0, data: { total: 11, page: 1, page_size: 10, items: [{ id: 2, package_name: "com.example.app", status: "success", historical_available: true, range_start: "2026-10-01", range_end: "2026-10-02" }] } } })
+      .mockResolvedValueOnce({ data: { code: 0, data: { total: 11, page: 2, page_size: 10, items: [{ id: 1, package_name: "com.example.app", status: "success", historical_available: true, range_start: "2026-09-01", range_end: "2026-09-02" }] } } });
+    const wrapper = mount(LogHistoryPanel, { props: { packageName: "com.example.app" } });
+    await wrapper.find("button").trigger("click");
+    await flushPromises();
+    await wrapper.get("[data-testid='history-next']").trigger("click");
+    await flushPromises();
+    expect(getHistoricalParseJobs).toHaveBeenLastCalledWith({ package_name: "com.example.app", page: 2, page_size: 10 });
+    expect(wrapper.text()).toContain("#1");
+    expect(wrapper.text()).toContain("第 2 / 2 页");
+  });
 });

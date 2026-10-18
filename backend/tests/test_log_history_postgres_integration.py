@@ -14,7 +14,7 @@ from sqlalchemy import event, insert
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models.log_analysis import LogReparseJob
-from app.models.log_metrics import H1DeclarationStage, LogClickAttemptStage
+from app.models.log_metrics import H1Declaration, H1DeclarationStage, LogClickAttempt, LogClickAttemptStage
 from app.services.log_history_service import get_complete_job_context
 from app.services.log_metrics_service import (
     get_config_breakdown,
@@ -42,6 +42,8 @@ async def db():
         await connection.run_sync(lambda sync: LogReparseJob.__table__.create(sync, checkfirst=True))
         await connection.run_sync(lambda sync: H1DeclarationStage.__table__.create(sync, checkfirst=True))
         await connection.run_sync(lambda sync: LogClickAttemptStage.__table__.create(sync, checkfirst=True))
+        await connection.run_sync(lambda sync: H1Declaration.__table__.create(sync, checkfirst=True))
+        await connection.run_sync(lambda sync: LogClickAttempt.__table__.create(sync, checkfirst=True))
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             yield session
@@ -49,6 +51,8 @@ async def db():
         async with engine.begin() as connection:
             await connection.run_sync(lambda sync: LogClickAttemptStage.__table__.drop(sync, checkfirst=True))
             await connection.run_sync(lambda sync: H1DeclarationStage.__table__.drop(sync, checkfirst=True))
+            await connection.run_sync(lambda sync: LogClickAttempt.__table__.drop(sync, checkfirst=True))
+            await connection.run_sync(lambda sync: H1Declaration.__table__.drop(sync, checkfirst=True))
             await connection.run_sync(lambda sync: LogReparseJob.__table__.drop(sync, checkfirst=True))
         await engine.dispose()
 
@@ -65,6 +69,14 @@ async def seed(session):
     await session.execute(insert(LogClickAttemptStage), [
         dict(job_id=101, event_id=1, event_server_ts=START, record_index=0, attempt_index=0, package_name="com.example.app", target_kind="web_element", did_click=True, navigation_code=1, decoder_version="test"),
         dict(job_id=102, event_id=1, event_server_ts=START, record_index=0, attempt_index=0, package_name="com.example.app", target_kind="web_element", did_click=False, navigation_code=0, failure_category="timeout", decoder_version="test"),
+    ])
+    # Simulate the later formal-table overwrite for package B. Historical reads
+    # must remain pinned to the stage rows for each job instead of falling back.
+    await session.execute(insert(H1Declaration), [
+        dict(event_id=1, event_server_ts=START, record_index=0, package_name="com.example.app", status="success", decoder_version="formal-overwrite", decoded_payload={"planned_click_attempts": [{}]}),
+    ])
+    await session.execute(insert(LogClickAttempt), [
+        dict(event_id=1, event_server_ts=START, record_index=0, attempt_index=0, package_name="com.example.app", target_kind="web_element", did_click=True, navigation_code=1, decoder_version="formal-overwrite"),
     ])
     await session.commit()
 

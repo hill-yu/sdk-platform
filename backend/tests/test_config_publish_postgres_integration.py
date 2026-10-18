@@ -61,3 +61,4 @@ async def test_save_holding_row_lock_invalidates_preview_without_publish_side_ef
         async with engine.begin() as connection:
             await connection.run_sync(lambda sync: SdkConfig.__table__.drop(sync, checkfirst=True))
         await engine.dispose()
+        get_settings.cache_clear()
