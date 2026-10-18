@@ -37,17 +37,17 @@ class Db:
 
 
 def job(**overrides):
-    values = dict(id=7, status="success", total_count=1, processed_count=1, h1_count=1, failed_h1_count=0, no_h1_count=0)
+    values = dict(id=7, status="success", package_name="com.example.app", range_start=START, snapshot_end=END, total_count=1, processed_count=1, h1_count=1, failed_h1_count=0, no_h1_count=0)
     values.update(overrides)
     return SimpleNamespace(**values)
 
 
 def h1(*, status="success", payload=None):
-    return SimpleNamespace(event_id=1, event_server_ts=START, record_index=0, status=status, decoded_payload=payload or {"planned_click_attempts": [{}]})
+    return SimpleNamespace(event_id=1, event_server_ts=START, record_index=0, package_name="com.example.app", status=status, decoded_payload=payload or {"planned_click_attempts": [{}]})
 
 
 def click():
-    return SimpleNamespace(event_id=1, event_server_ts=START, record_index=0, attempt_index=0)
+    return SimpleNamespace(event_id=1, event_server_ts=START, record_index=0, package_name="com.example.app", attempt_index=0)
 
 
 def test_historical_metrics_compile_only_stage_tables_and_job_id():
@@ -82,7 +82,7 @@ def test_history_rejects_incomplete_stage_counts_and_orphan_clicks():
     else:
         raise AssertionError("incomplete history must be unavailable")
 
-    orphan = Db([Result(scalar=job()), Result(rows=[h1()]), Result(rows=[SimpleNamespace(event_id=9, event_server_ts=START, record_index=0, attempt_index=0)])])
+    orphan = Db([Result(scalar=job()), Result(rows=[h1()]), Result(rows=[SimpleNamespace(event_id=9, event_server_ts=START, record_index=0, package_name="com.example.app", attempt_index=0)])])
     try:
         asyncio.run(get_complete_job_context(orphan, 7))
     except HistoricalParseUnavailable as exc:
@@ -97,3 +97,28 @@ def test_history_accepts_zero_h1_snapshot_without_decoder_fallback():
     db = Db([Result(scalar=job(h1_count=0, no_h1_count=1)), Result(rows=[]), Result(rows=[])])
     result = asyncio.run(get_complete_job_context(db, 7))
     assert result.id == 7
+
+
+def test_history_counts_distinct_event_keys_when_one_event_has_multiple_h1_rows():
+    from app.services.log_history_service import get_complete_job_context
+
+    first = h1()
+    second = h1(payload={"planned_click_attempts": []})
+    second.record_index = 1
+    result = asyncio.run(get_complete_job_context(Db([
+        Result(scalar=job(h1_count=2)), Result(rows=[first, second]), Result(rows=[click()]),
+    ]), 7))
+    assert result.id == 7
+
+
+def test_history_rejects_stage_rows_from_another_package_or_snapshot():
+    from app.services.log_history_service import HistoricalParseUnavailable, get_complete_job_context
+
+    foreign = h1()
+    foreign.package_name = "com.other.app"
+    try:
+        asyncio.run(get_complete_job_context(Db([Result(scalar=job()), Result(rows=[foreign]), Result(rows=[click()])]), 7))
+    except HistoricalParseUnavailable as exc:
+        assert "包名" in str(exc)
+    else:
+        raise AssertionError("cross-package stage data must be unavailable")

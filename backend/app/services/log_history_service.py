@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.log_analysis import LogReparseJob
 from app.models.log_metrics import H1DeclarationStage, LogClickAttemptStage
+from app.services.config_crypto import normalize_package_name
 from app.services.log_parse_job_service import serialize_parse_job
 
 
@@ -23,9 +24,9 @@ async def list_parse_jobs(
 ) -> dict[str, object]:
     if page < 1 or page_size < 1 or page_size > 50:
         raise ValueError("分页参数无效")
-    filters = [LogReparseJob.status == "success"]
+    filters = []
     if package_name:
-        filters.append(LogReparseJob.package_name == package_name)
+        filters.append(LogReparseJob.package_name == normalize_package_name(package_name))
     total = int((await db.execute(select(func.count(LogReparseJob.id)).where(*filters))).scalar_one() or 0)
     rows = (await db.execute(
         select(LogReparseJob)
@@ -34,7 +35,7 @@ async def list_parse_jobs(
         .limit(page_size)
         .offset((page - 1) * page_size)
     )).scalars().all()
-    return {"total": total, "page": page, "page_size": page_size, "items": [serialize_parse_job(row) for row in rows]}
+    return {"total": total, "page": page, "page_size": page_size, "items": [{**serialize_parse_job(row), "historical_available": row.status == "success"} for row in rows]}
 
 
 async def get_complete_job_context(db: AsyncSession, job_id: int) -> LogReparseJob:
@@ -54,11 +55,15 @@ async def get_complete_job_context(db: AsyncSession, job_id: int) -> LogReparseJ
     click_rows = (await db.execute(
         select(LogClickAttemptStage).where(LogClickAttemptStage.job_id == job_id)
     )).scalars().all()
+    for row in [*h1_rows, *click_rows]:
+        if row.package_name != job.package_name or row.event_server_ts < job.range_start or row.event_server_ts >= job.snapshot_end:
+            raise HistoricalParseUnavailable("历史阶段数据超出任务包名或快照范围")
+    h1_event_keys = {(row.event_id, row.event_server_ts) for row in h1_rows}
     h1_keys = {(row.event_id, row.event_server_ts, row.record_index) for row in h1_rows}
     click_keys = {(row.event_id, row.event_server_ts, row.record_index) for row in click_rows}
     if len(h1_rows) != job.h1_count or sum(row.status == "failed" for row in h1_rows) != job.failed_h1_count:
         raise HistoricalParseUnavailable("历史 H1 阶段数据不完整")
-    if len(h1_keys) + job.no_h1_count != job.processed_count:
+    if len(h1_event_keys) + job.no_h1_count != job.processed_count:
         raise HistoricalParseUnavailable("历史事件覆盖计数不完整")
     if any(row.status == "failed" for row in h1_rows if row.event_id is None):
         raise HistoricalParseUnavailable("历史失败 H1 记录缺少事件键")
