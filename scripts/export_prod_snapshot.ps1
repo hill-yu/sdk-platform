@@ -2,6 +2,8 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\")).Path
 $PrivateRoot = Join-Path $RepoRoot ".local-run"
 $RunDir = Join-Path $PrivateRoot ("prod-snapshot-20261018-" + (Get-Date -Format yyyyMMdd-HHmmssfff))
+$isFake = $env:SNAPSHOT_EXPORT_FAKE_RUNNER -eq "1"
+if ($isFake -and $env:SNAPSHOT_EXPORT_TEST_RUN_DIR) { $RunDir = $env:SNAPSHOT_EXPORT_TEST_RUN_DIR }
 $UserProfile = [Environment]::GetFolderPath("UserProfile")
 $SshKey = Join-Path $UserProfile ".ssh\id_ed25519_hill_yu"
 $KnownHosts = Join-Path $UserProfile ".ssh\known_hosts"
@@ -10,7 +12,7 @@ $RemoteCommand = "cd /www/releases/sdk-platform/current/backend && /www/releases
 $SnapshotStart = "2026-10-17T16:00:00Z"
 $SnapshotEnd = "2026-10-18T14:58:52Z"
 $BatchSize = 500; $MaxRows = 100000; $MaxBytes = 200MB
-if ($env:SNAPSHOT_EXPORT_FAKE_RUNNER -eq "1" -and $env:SNAPSHOT_EXPORT_TEST_MAX_ROWS) { $MaxRows = [int]$env:SNAPSHOT_EXPORT_TEST_MAX_ROWS }
+if ($isFake -and $env:SNAPSHOT_EXPORT_TEST_MAX_ROWS) { $MaxRows = [int]$env:SNAPSHOT_EXPORT_TEST_MAX_ROWS }
 $script:TotalRows = 0; $script:TotalBytes = 0L; $script:Completed = $false
 if (Test-Path -LiteralPath $RunDir) { throw "Refusing to reuse existing run directory" }
 New-Item -ItemType Directory -Path $RunDir | Out-Null
@@ -19,7 +21,7 @@ if (-not (Test-Path -LiteralPath $KnownHosts)) { throw "Missing known_hosts" }
 $sshArgs = @("-o","BatchMode=yes","-o","IdentitiesOnly=yes","-o","ConnectTimeout=5","-o","StrictHostKeyChecking=yes","-o","UserKnownHostsFile=$KnownHosts","-i",$SshKey,$ProdTarget)
 
 $remotePython = @'
-import asyncio, json
+import asyncio, json, sys
 from datetime import datetime, timezone
 from urllib.parse import quote
 import asyncpg
@@ -73,14 +75,18 @@ async def read_table(conn, table):
         await asyncio.sleep(0.25)
 
 async def main():
-    conn = await asyncpg.connect(db_url())
+    conn = await asyncpg.connect(db_url(), timeout=5)
     try:
         await read_table(conn, "events"); await read_table(conn, "usage")
         print(json.dumps({"kind": "complete", "snapshot_start": START, "snapshot_end": END}, separators=(",", ":")), flush=True)
     finally:
         await conn.close()
 
-asyncio.run(main())
+try:
+    asyncio.run(main())
+except Exception:
+    print(json.dumps({"kind": "error", "error": "remote snapshot export failed"}), flush=True)
+    sys.exit(1)
 '@
 
 function Export-Stream {
@@ -107,16 +113,20 @@ function Export-Stream {
       $tableMeta[[string]$message.table] = $message
     } elseif ($message.kind -eq "complete") {
       $script:Completed = $true
-      foreach ($table in @("events", "usage")) { Move-Item -LiteralPath ($paths[$table] + ".partial") -Destination $paths[$table] }
-      $manifest = [pscustomobject]@{ complete=$true; snapshot_start=$SnapshotStart; snapshot_end=$SnapshotEnd; max_rows_per_table=$MaxRows; max_bytes_total=$MaxBytes; total_rows=$script:TotalRows; total_bytes=$script:TotalBytes; tables=@(
-        [pscustomobject]@{ table="events"; file="prod-events-20261018.jsonl"; rows=$tableRows.events; bytes=(Get-Item -LiteralPath $paths.events).Length; sha256=(Get-FileHash -LiteralPath $paths.events -Algorithm SHA256).Hash; min_ts=$tableMeta.events.min_ts; max_ts=$tableMeta.events.max_ts },
-        [pscustomobject]@{ table="usage"; file="prod-usage-20261018.jsonl"; rows=$tableRows.usage; bytes=(Get-Item -LiteralPath $paths.usage).Length; sha256=(Get-FileHash -LiteralPath $paths.usage -Algorithm SHA256).Hash; min_ts=$tableMeta.usage.min_ts; max_ts=$tableMeta.usage.max_ts }
-      ) }
-      $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $RunDir "manifest.json") -Encoding utf8
     } else { throw "unexpected remote stream message" }
   }
-  if ($env:SNAPSHOT_EXPORT_FAKE_RUNNER -ne "1" -and $LASTEXITCODE -ne 0) { throw "Production stream failed; stopped without retry" }
+  $streamExitCode = if ($isFake -and $env:SNAPSHOT_EXPORT_FAKE_EXIT -eq "1") { 1 } elseif ($isFake) { 0 } else { $LASTEXITCODE }
+  if ($streamExitCode -ne 0) { throw "Production stream failed; stopped without retry" }
   if (-not $script:Completed) { throw "Production stream ended without completion; partial files retained" }
+  foreach ($table in @("events", "usage")) {
+    if (-not $tableMeta.ContainsKey($table)) { throw "missing table completion; partial files retained" }
+    Move-Item -LiteralPath ($paths[$table] + ".partial") -Destination $paths[$table]
+  }
+  $manifest = [pscustomobject]@{ complete=$true; snapshot_start=$SnapshotStart; snapshot_end=$SnapshotEnd; max_rows_per_table=$MaxRows; max_bytes_total=$MaxBytes; total_rows=$script:TotalRows; total_bytes=$script:TotalBytes; tables=@(
+    [pscustomobject]@{ table="events"; file="prod-events-20261018.jsonl"; rows=$tableRows.events; bytes=(Get-Item -LiteralPath $paths.events).Length; sha256=(Get-FileHash -LiteralPath $paths.events -Algorithm SHA256).Hash; min_ts=$tableMeta.events.min_ts; max_ts=$tableMeta.events.max_ts },
+    [pscustomobject]@{ table="usage"; file="prod-usage-20261018.jsonl"; rows=$tableRows.usage; bytes=(Get-Item -LiteralPath $paths.usage).Length; sha256=(Get-FileHash -LiteralPath $paths.usage -Algorithm SHA256).Hash; min_ts=$tableMeta.usage.min_ts; max_ts=$tableMeta.usage.max_ts }
+  ) }
+  $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $RunDir "manifest.json") -Encoding utf8
   Write-Output ([pscustomobject]@{ run_dir=$RunDir; total_rows=$script:TotalRows; total_bytes=$script:TotalBytes })
 }
 Export-Stream

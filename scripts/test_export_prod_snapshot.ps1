@@ -18,22 +18,27 @@ function ssh {
 }
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..\")).Path
-$before = @(Get-ChildItem -LiteralPath (Join-Path $root ".local-run") -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+$run = Join-Path $root ".local-run\fake-export-complete"
+Remove-Item -LiteralPath $run -Recurse -Force -ErrorAction SilentlyContinue
+$env:SNAPSHOT_EXPORT_TEST_RUN_DIR = $run
 . (Join-Path $PSScriptRoot "export_prod_snapshot.ps1") | Out-Null
 if ($script:FakeCalls -ne 1) { throw "expected exactly one SSH invocation" }
-$after = @(Get-ChildItem -LiteralPath (Join-Path $root ".local-run") -Directory | Where-Object { $before -notcontains $_.FullName })
-if ($after.Count -ne 1 -or -not (Test-Path (Join-Path $after[0] "manifest.json"))) { throw "complete fake export did not create manifest" }
-Remove-Item -LiteralPath $after[0] -Recurse -Force
+if (-not (Test-Path (Join-Path $run "manifest.json"))) { throw "complete fake export did not create manifest" }
+Remove-Item -LiteralPath $run -Recurse -Force
 
-$script:FakeMode = "断流"; $script:FakeCalls = 0
+$script:FakeMode = "断流"; $script:FakeCalls = 0; $run = Join-Path $root ".local-run\fake-export-disconnect"; Remove-Item -LiteralPath $run -Recurse -Force -ErrorAction SilentlyContinue; $env:SNAPSHOT_EXPORT_TEST_RUN_DIR = $run
 try { . (Join-Path $PSScriptRoot "export_prod_snapshot.ps1") | Out-Null; throw "断流 was not rejected" } catch { if ($_.Exception.Message -notmatch "without completion") { throw } }
-$partial = Get-ChildItem -LiteralPath (Join-Path $root ".local-run") -Recurse -Filter "*.partial" | Select-Object -Last 1
-if (-not $partial) { throw "断流 did not retain partial file" }
-Remove-Item -LiteralPath $partial.Directory.FullName -Recurse -Force
+if (-not (Get-ChildItem -LiteralPath $run -Filter "*.partial")) { throw "断流 did not retain partial file" }
+Remove-Item -LiteralPath $run -Recurse -Force
 
-$env:SNAPSHOT_EXPORT_TEST_MAX_ROWS = "1"; $script:FakeMode = "超限"; $script:FakeCalls = 0
+$env:SNAPSHOT_EXPORT_TEST_MAX_ROWS = "1"; $script:FakeMode = "超限"; $script:FakeCalls = 0; $run = Join-Path $root ".local-run\fake-export-limit"; Remove-Item -LiteralPath $run -Recurse -Force -ErrorAction SilentlyContinue; $env:SNAPSHOT_EXPORT_TEST_RUN_DIR = $run
 try { . (Join-Path $PSScriptRoot "export_prod_snapshot.ps1") | Out-Null; throw "超限 was not rejected" } catch { if ($_.Exception.Message -notmatch "export limit exceeded") { throw } }
-$partial = Get-ChildItem -LiteralPath (Join-Path $root ".local-run") -Recurse -Filter "*.partial" | Select-Object -Last 1
-if (-not $partial) { throw "超限 did not retain partial file" }
-Remove-Item -LiteralPath $partial.Directory.FullName -Recurse -Force
-Write-Output "fake export runner: one SSH call, completion, pagination, over-limit and断流 checks passed"
+if (-not (Get-ChildItem -LiteralPath $run -Filter "*.partial")) { throw "超限 did not retain partial file" }
+Remove-Item -LiteralPath $run -Recurse -Force
+
+$env:SNAPSHOT_EXPORT_TEST_MAX_ROWS = "100000"; $env:SNAPSHOT_EXPORT_FAKE_EXIT = "1"; $script:FakeMode = "complete"; $script:FakeCalls = 0; $run = Join-Path $root ".local-run\fake-export-exit"; Remove-Item -LiteralPath $run -Recurse -Force -ErrorAction SilentlyContinue; $env:SNAPSHOT_EXPORT_TEST_RUN_DIR = $run
+try { . (Join-Path $PSScriptRoot "export_prod_snapshot.ps1") | Out-Null; throw "nonzero exit was not rejected" } catch { if ($_.Exception.Message -notmatch "Production stream failed") { throw } }
+if (Test-Path (Join-Path $run "manifest.json")) { throw "nonzero exit created manifest" }
+Remove-Item -LiteralPath $run -Recurse -Force
+Remove-Item Env:SNAPSHOT_EXPORT_TEST_RUN_DIR,Env:SNAPSHOT_EXPORT_TEST_MAX_ROWS,Env:SNAPSHOT_EXPORT_FAKE_EXIT,Env:SNAPSHOT_EXPORT_FAKE_RUNNER -ErrorAction SilentlyContinue
+Write-Output "fake export runner: one SSH call, completion, over-limit, disconnect and failed-exit checks passed"
