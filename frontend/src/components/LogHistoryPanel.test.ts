@@ -13,6 +13,8 @@ describe("LogHistoryPanel", () => {
 
   it("loads the effective package history and only opens successful jobs", async () => {
     const wrapper = mount(LogHistoryPanel, { props: { packageName: "com.example.app" } });
+    expect(getHistoricalParseJobs).not.toHaveBeenCalled();
+    await wrapper.find("button").trigger("click");
     await flushPromises();
     expect(getHistoricalParseJobs).toHaveBeenCalledWith({ package_name: "com.example.app", page: 1, page_size: 10 });
     expect(wrapper.findAll("[data-testid='history-job']")).toHaveLength(2);
@@ -26,6 +28,8 @@ describe("LogHistoryPanel", () => {
     const old = new Promise((resolve) => { resolveOld = resolve; });
     getHistoricalParseJobs.mockReset().mockReturnValueOnce(old).mockResolvedValueOnce({ data: { code: 0, data: { items: [{ id: 9, package_name: "new", status: "success", historical_available: true }] } } });
     const wrapper = mount(LogHistoryPanel, { props: { packageName: "old" } });
+    await wrapper.find("button").trigger("click");
+    await flushPromises();
     await wrapper.setProps({ packageName: "new" });
     await flushPromises();
     resolveOld({ data: { code: 0, data: { items: [{ id: 8, package_name: "old", status: "success", historical_available: true }] } } });

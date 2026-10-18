@@ -114,7 +114,7 @@
       </div>
     </div>
     <section v-show="view === 'usage'" class="panel usage-placeholder" data-testid="usage-view">
-      <UsageDurationPanel />
+      <KeepAlive><UsageDurationPanel v-if="view === 'usage'" /></KeepAlive>
     </section>
   </div>
 </template>
