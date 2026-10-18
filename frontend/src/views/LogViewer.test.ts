@@ -256,6 +256,17 @@ describe("LogViewer", () => {
     expect(getUsageSummary).toHaveBeenCalledWith(expect.objectContaining({ date_from: expect.any(String), hour_from: 0, date_to: expect.any(String), hour_to: 23 }));
   });
 
+  it("preserves usage draft state when switching tabs", async () => {
+    const wrapper = mount(LogViewer);
+    await flushPromises();
+    await wrapper.get("[data-testid='usage-view-tab']").trigger("click");
+    const packageInput = wrapper.get("[data-testid='usage-package-name']");
+    await packageInput.setValue("com.example.app");
+    await wrapper.get("[data-testid='raw-view-tab']").trigger("click");
+    await wrapper.get("[data-testid='usage-view-tab']").trigger("click");
+    expect((wrapper.get("[data-testid='usage-package-name']").element as HTMLInputElement).value).toBe("com.example.app");
+  });
+
   it("refreshes every analysis surface from the current legal draft", async () => {
     const wrapper = await mountAnalysisViewer();
     await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
