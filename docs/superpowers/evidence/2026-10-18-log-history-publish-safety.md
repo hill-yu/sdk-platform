@@ -40,7 +40,7 @@ cd frontend
 <bundled-node> ...\vitest.mjs run --pool=threads --poolOptions.threads.singleThread=true
 ```
 
-- 前端最终全量：42 files / 234 tests passed；新增 Usage 查询/刷新失败保留旧结果、Config 409 重读 baseline、预览 inert/焦点回归。
+- 前端最终全量：42 files / 235 tests passed；新增 Usage 查询/刷新失败保留旧结果且展示旧生效条件、Config 409 重读 baseline、预览 inert/焦点回归，以及预览目标冻结回归。
 - `vue-tsc --noEmit`：passed。
 - `vite build`：passed；仅有既有的 bundle 大小提示。
 
@@ -75,12 +75,12 @@ powershell -NoProfile -File .\scripts\run_log_history_acceptance.ps1 -EnvFile <p
 
 | 规格/计划 | 本地证据 | 状态 |
 |---|---|---|
-| 包名选择交互 / 计划 §1 | 真实授权 `GET /api/admin/log-packages?keyword=com.example.local` 返回 `com.example.local`；前端 `PackageSelect.test.ts`、全量 42/230 | 通过（业务 API）；浏览器键盘/弹层未执行 |
+| 包名选择交互 / 计划 §1 | 真实授权 `GET /api/admin/log-packages?keyword=com.example.local` 返回 `com.example.local`；前端 `PackageSelect.test.ts`、全量 42/235 | 通过（业务 API）；浏览器键盘/弹层未执行 |
 | 历史任务列表与固定结果 / 规格“历史解析结果”、计划 §2–3 | 本地完整库 job `9001`；历史列表返回 1 条；overview 实际 click=1；五个历史 metrics 路由、A/B job 隔离、404/409 均有真实 PG 测试 | 通过 |
-| 使用时长状态保留 / 规格“使用时长”、计划 §4 | 本地完整库写入两条 usage；授权 summary 返回 1 个聚合项；`UsageDurationPanel.test.ts` 覆盖 | 通过（API/单测）；浏览器标签切换未执行 |
+| 使用时长状态保留 / 规格“使用时长”、计划 §4 | 本地完整库写入两条 usage；授权 summary 返回 1 个聚合项；`UsageDurationPanel.test.ts` 覆盖旧行、错误和旧生效条件标签 | 通过（API/单测）；浏览器标签切换未执行 |
 | 三文件发布预览 / 规格“发布确认与一致性”、计划 §5 | 真实 `GET /configs/1` 返回 `mainConfig,newTextRuleConfig,newTouchConfig`；本地 draft 已创建 | 通过（业务 API） |
 | dirty 阻止、语义 JSON、取消不 POST / 计划 §5 | `ConfigManager.test.ts`、`jsonSemantic.test.ts`；服务端双会话 stale publish 返回 409 且最终仍 draft | 通过（单测/真实 PG+HTTP）；浏览器按钮交互未执行 |
-| 失败状态与预览键盘边界 / 规格 §51、§57–61 | `UsageDurationPanel.test.ts` 覆盖 applied query/refresh 失败保留旧行并提示错误；`ConfigManager.test.ts` 覆盖 409 重读 baseline、不自动发布、工作区 inert、确认按钮 autofocus | 通过（组件回归）；浏览器键盘交互未执行 |
+| 失败状态与预览键盘边界 / 规格 §51、§57–61 | `UsageDurationPanel.test.ts` 覆盖 applied query/refresh 失败保留旧行、旧生效条件和错误提示；`ConfigManager.test.ts` 覆盖 409 重读 baseline、不自动发布、工具栏/工作区 inert、确认按钮 autofocus，以及切换选中对象后不调用发布 API | 通过（组件回归）；浏览器键盘交互未执行 |
 | 本地开发环境 / 计划 §7 | 独立完整库 `sdk_local_acceptance_20261018`，16 张 public 表；前端/API 200；登录、me、历史、usage、configs 真实授权 API 已连通 | 通过 |
 | 桌面与 390px 浏览器 / 计划 §7 | 无截图文件：IAB `ERR_BLOCKED_BY_CLIENT`；Chrome Computer Use 在 URL 可信度检查处安全停止 | 缺项，需用户手工验收 |
 
