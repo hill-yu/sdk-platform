@@ -90,7 +90,7 @@ LIMIT 1000;
 
 EXPLAIN (FORMAT JSON)
 SELECT id, package_name, range_start, range_end, snapshot_end, status,
-       processed_count, failed_count, created_at, completed_at
+       processed_count, failed_count, created_at, finished_at
 FROM sdk_log_reparse_jobs
 WHERE range_start < '2026-10-18T16:00:00Z'::timestamptz
   AND range_end >  '2026-10-17T16:00:00Z'::timestamptz
