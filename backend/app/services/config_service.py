@@ -113,6 +113,8 @@ async def update_config(
     config = await db.get(SdkConfig, config_id)
     if config is None:
         raise ValueError("配置不存在")
+    locked_result = await db.execute(select(SdkConfig).where(SdkConfig.id == config_id).with_for_update())
+    config = (locked_result.scalar_one_or_none() if hasattr(locked_result, "scalar_one_or_none") else None) or config
     if config.status != "draft":
         raise ValueError("仅可编辑 draft 状态的配置")
     phase_started = perf_counter()
