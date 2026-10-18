@@ -16,6 +16,10 @@ from app.core.config import get_settings
 from app.core.timezone import serialize_business_time
 from app.models.config import SdkConfig
 from app.services.config_crypto import decrypt_payload, encrypt_payload, normalize_package_name
+
+
+class ConfigPublishConflictError(ValueError):
+    """The preview precondition no longer matches the draft row."""
 from app.services.config_version import max_version, next_version
 
 logger = logging.getLogger(__name__)
@@ -113,7 +117,7 @@ async def update_config(
     config = await db.get(SdkConfig, config_id)
     if config is None:
         raise ValueError("配置不存在")
-    locked_result = await db.execute(select(SdkConfig).where(SdkConfig.id == config_id).with_for_update())
+    locked_result = await db.execute(select(SdkConfig).where(SdkConfig.id == config_id).with_for_update().execution_options(populate_existing=True))
     config = (locked_result.scalar_one_or_none() if hasattr(locked_result, "scalar_one_or_none") else None) or config
     if config.status != "draft":
         raise ValueError("仅可编辑 draft 状态的配置")
@@ -139,12 +143,12 @@ async def publish_config(db: AsyncSession, config_id: int, published_by: str, *,
     if original_config is None:
         raise ValueError("只能发布草稿状态的配置")
     await _acquire_package_lock(db, original_config.package_name)
-    locked_result = await db.execute(select(SdkConfig).where(SdkConfig.id == config_id).with_for_update())
+    locked_result = await db.execute(select(SdkConfig).where(SdkConfig.id == config_id).with_for_update().execution_options(populate_existing=True))
     config = (locked_result.scalar_one_or_none() if hasattr(locked_result, "scalar_one_or_none") else None) or original_config
     if config is None or config.status != "draft":
         raise ValueError("只能发布草稿状态的配置")
     if expected_updated_at is not None and config.updated_at != expected_updated_at:
-        raise ValueError("配置已被其他操作修改，请重新预览后发布")
+        raise ConfigPublishConflictError("配置已被其他操作修改，请重新预览后发布")
     return await _publish_from_record(db, config, published_by)
 
 

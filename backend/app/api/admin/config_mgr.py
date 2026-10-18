@@ -25,6 +25,8 @@ router = APIRouter(tags=["Admin - Config"], dependencies=[Depends(require_admin_
 async def list_configs(package_name: str | None = None, db: AsyncSession = Depends(get_db_no_commit)):
     try:
         normalized = normalize_package_name(package_name) if package_name else None
+    except config_service.ConfigPublishConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"code": 0, "data": await config_service.list_configs(db, normalized)}
@@ -141,6 +143,8 @@ async def publish_config(
             data = await config_service.publish_config(db, config_id, admin_user)
         else:
             data = await config_service.publish_config(db, config_id, admin_user, expected_updated_at=payload.expected_updated_at)
+    except config_service.ConfigPublishConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return {"code": 0, "data": data}

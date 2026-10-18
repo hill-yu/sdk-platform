@@ -40,7 +40,7 @@ export const getMetricConfigs = (scope: MetricQueryScope) => request.get<ApiEnve
 export const getMetricTargets = (scope: MetricQueryScope) => request.get<ApiEnvelope<{ items: TargetMetric[] }>>("/log-analysis/metrics/targets", { params: scope });
 export const getMetricFailures = (scope: MetricQueryScope & { target_kind?: "web_element" | "ad_area"; config_id?: number }) => request.get<ApiEnvelope<FailureBreakdownItem[]>>("/log-analysis/metrics/failures", { params: scope });
 export const getH1Details = (scope: MetricQueryScope & { page: number; page_size: number; sort_order?: "asc" | "desc" }) => request.get<ApiEnvelope<Paginated<H1Detail>>>("/log-analysis/metrics/h1", { params: scope });
-export const getHistoricalParseJobs = (params: { package_name?: string; page?: number; page_size?: number }) => request.get<ApiEnvelope<HistoricalParseJobs>>("/log-analysis/parse-jobs", { params });
+export const getHistoricalParseJobs = (params: { package_name?: string; page?: number; page_size?: number }) => request.get<ApiEnvelope<HistoricalParseJobs>>("/log-analysis/parse-jobs/history", { params });
 export const getHistoricalMetricOverview = (jobId: number) => request.get<ApiEnvelope<MetricOverview>>(`/log-analysis/parse-jobs/${jobId}/metrics/overview`);
 export const getHistoricalMetricConfigs = (jobId: number) => request.get<ApiEnvelope<{ total: number; items: ConfigMetricItem[] }>>(`/log-analysis/parse-jobs/${jobId}/metrics/configs`);
 export const getHistoricalMetricTargets = (jobId: number) => request.get<ApiEnvelope<{ items: TargetMetric[] }>>(`/log-analysis/parse-jobs/${jobId}/metrics/targets`);

@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from sqlalchemy.dialects import postgresql
+from fastapi.testclient import TestClient
+from app.core.database import get_db_no_commit
 
 
 START = datetime(2026, 9, 29, tzinfo=timezone.utc)
@@ -122,3 +124,24 @@ def test_history_rejects_stage_rows_from_another_package_or_snapshot():
         assert "包名" in str(exc)
     else:
         raise AssertionError("cross-package stage data must be unavailable")
+
+
+def test_history_list_route_uses_history_path_and_default_page_size(monkeypatch):
+    from app.admin_main import app
+    from app.api.admin import log_metrics
+
+    async def fake_list(*_args, **kwargs):
+        assert kwargs["page_size"] == 10
+        return {"total": 0, "page": 1, "page_size": 10, "items": []}
+
+    monkeypatch.setattr(log_metrics.log_history_service, "list_parse_jobs", fake_list)
+    async def override_db():
+        yield object()
+
+    app.dependency_overrides[get_db_no_commit] = override_db
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/admin/log-analysis/parse-jobs/history", headers={"Authorization": "Bearer a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0"})
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200

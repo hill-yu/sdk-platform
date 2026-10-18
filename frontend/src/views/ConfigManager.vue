@@ -63,6 +63,7 @@ import { createConfig, getConfig, getConfigs, publishConfig, rollbackConfig, upd
 import { validateConfigData, type JsonObject, type JsonValue } from "@/utils/configTree";
 import { isPublishConfirmed, isRequestTimeout, isSaveConfirmed } from "@/utils/configOperation";
 import { beginFeedback, setFeedbackError, setFeedbackSuccess } from "@/utils/feedback";
+import { jsonSemanticallyEqual } from "@/utils/jsonSemantic";
 
 type ConfigItem = Record<string, any>;
 const configs = reactive<{ published: ConfigItem[]; drafts: ConfigItem[]; history: ConfigItem[] }>({ published: [], drafts: [], history: [] });
@@ -230,7 +231,7 @@ async function publishCurrent() {
   try {
     beginFeedback(feedback);
     const data = currentData();
-    if (JSON.stringify(data) !== JSON.stringify(serverConfigData.value) || changeLog.value !== serverChangeLog.value) {
+    if (!jsonSemanticallyEqual(data, serverConfigData.value) || changeLog.value !== serverChangeLog.value) {
       throw new Error("检测到未保存修改，请先保存草稿");
     }
     const response = await getConfig(configId);
@@ -251,6 +252,9 @@ async function publishCurrent() {
     setFeedbackError(feedback, message(error));
   } finally { publishing.value = false; }
 }
+function isConflict(error: unknown): boolean {
+  return Boolean((error as { response?: { status?: number } })?.response?.status === 409);
+}
 async function confirmPublish() {
   if (!publishPreview.value || !selectedId.value || !editable.value) return;
   const configId = selectedId.value;
@@ -268,7 +272,7 @@ async function confirmPublish() {
       } catch { /* preserve original timeout */ }
     }
     publishPreview.value = null;
-    setFeedbackError(feedback, message(error));
+    setFeedbackError(feedback, isConflict(error) ? "草稿已变化，请重新读取预览后确认发布" : message(error));
   } finally { publishing.value = false; }
 }
 async function rollbackCurrent() { if (selectedId.value) { try { beginFeedback(feedback); await rollbackConfig(selectedId.value); await loadConfigs(); setFeedbackSuccess(feedback, "配置已回滚为新版本"); } catch (error) { setFeedbackError(feedback, message(error)); } } }

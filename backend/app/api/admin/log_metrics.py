@@ -133,7 +133,7 @@ async def get_latest_parse_job(
     return {"code": 0, "data": _service().serialize_parse_job(job) if job is not None else None}
 
 
-@router.get("/log-analysis/parse-jobs", response_model=dict)
+@router.get("/log-analysis/parse-jobs/history", response_model=dict)
 async def list_historical_parse_jobs(
     package_name: str | None = Query(None, min_length=1, max_length=255),
     page: int = Query(1, ge=1),
