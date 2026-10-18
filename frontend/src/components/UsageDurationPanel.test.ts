@@ -126,6 +126,9 @@ describe("UsageDurationPanel", () => {
     expect(wrapper.get("[data-testid='usage-error']").text()).toContain("query unavailable");
     expect(wrapper.get("[data-testid='usage-summary-row']").text()).toContain("com.a");
     expect(wrapper.get<HTMLInputElement>("[data-testid='usage-package-name']").element.value).toBe("com.failed");
+    expect(wrapper.get("[data-testid='usage-applied-scope']").text()).toContain("全部包名");
+    expect(wrapper.get("[data-testid='usage-applied-scope']").text()).toContain("2026-09-28");
+    expect(wrapper.get("[data-testid='usage-applied-scope']").text()).not.toContain("com.failed");
   });
 
   it("keeps the last successful rows when refresh fails", async () => {

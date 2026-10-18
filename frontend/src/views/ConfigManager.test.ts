@@ -507,4 +507,25 @@ describe("ConfigManager tree and JSON modes", () => {
     expect(wrapper.get("[data-testid='config-workspace']").attributes("inert")).toBeDefined();
     expect(wrapper.get("[data-testid='confirm-publish']").attributes("autofocus")).toBeDefined();
   });
+
+  it("freezes the preview target and never publishes another selected config", async () => {
+    listResponse({ drafts: [item(1), item(2)] });
+    api.getConfig.mockImplementation((id: number) => Promise.resolve({ data: detail(id, id === 1 ? specialData : secondData) }));
+    const wrapper = await mountManager();
+    await publishButton(wrapper).trigger("click");
+    await flushPromises();
+    expect(wrapper.get("[data-testid='publish-preview']").text()).toContain("草稿 #1");
+    expect(wrapper.get("[data-testid='config-toolbar']").attributes("inert")).toBeDefined();
+
+    await wrapper.findAll(".list-item")[1].trigger("click");
+    await flushPromises();
+    await wrapper.get("[data-testid='confirm-publish']").trigger("click");
+    await flushPromises();
+
+    expect(api.publishConfig).not.toHaveBeenCalled();
+    expect(wrapper.find("[data-testid='publish-preview']").exists()).toBe(false);
+    expect(wrapper.get("[data-testid='error-feedback']").text()).toContain("预览对象已切换");
+    expect(wrapper.get("[data-testid='config-workspace']").attributes("inert")).toBeUndefined();
+    expect(wrapper.get("[data-testid='config-toolbar']").attributes("inert")).toBeUndefined();
+  });
 });

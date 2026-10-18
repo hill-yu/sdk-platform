@@ -15,6 +15,7 @@
     </form>
     <p v-if="validationError" data-testid="usage-validation-error" class="error">{{ validationError }}</p>
     <p v-if="disabled" data-testid="usage-disabled" class="empty-state">当前不可查询使用时长。</p>
+    <p v-if="!disabled" data-testid="usage-applied-scope" class="applied-scope">已生效条件：包名 {{ appliedScope.package_name || "全部包名" }}；{{ appliedScope.date_from }} {{ appliedScope.hour_from }}:00 至 {{ appliedScope.date_to }} {{ appliedScope.hour_to }}:00</p>
     <p v-if="!disabled && error" data-testid="usage-error" class="error">{{ error }}</p>
     <p v-if="!disabled && !loading && !error && !summary?.items.length" data-testid="usage-empty" class="empty-state">当前条件下暂无使用时长数据。</p>
 
@@ -96,6 +97,7 @@ async function load(scope: UsageScope) {
   try {
     const response = await getUsageSummary(scope);
     if (disposed || requestId !== scopeRequestId) return;
+    appliedScope.value = { ...scope };
     summary.value = unwrap<{ total: number; page: number; page_size: number; items: UsageSummaryItem[] }>(response);
   } catch (cause) {
     if (!disposed && requestId === scopeRequestId) { error.value = cause instanceof Error ? cause.message : "使用时长读取失败"; }
@@ -107,7 +109,6 @@ async function load(scope: UsageScope) {
 function applyScope(scope: UsageScope) {
   validationError.value = validate(scope);
   if (validationError.value) return;
-  appliedScope.value = scope;
   void load(scope);
 }
 function applyDraft() { if (!props.disabled) applyScope(snapshotDraft()); }

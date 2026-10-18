@@ -1,6 +1,6 @@
 <template>
   <div class="layout">
-    <section class="panel toolbar">
+    <section class="panel toolbar" data-testid="config-toolbar" :inert="Boolean(publishPreview)">
       <label class="package-label">包名 <input v-model.trim="packageFilter" class="input" placeholder="com.example.app" /></label>
       <button class="ghost" @click="loadConfigs({ resetPage: true })">筛选</button>
       <button class="primary" @click="createDraft">新建草稿</button>
@@ -261,12 +261,19 @@ function isConflict(error: unknown): boolean {
   return Boolean((error as { response?: { status?: number } })?.response?.status === 409);
 }
 async function confirmPublish() {
-  if (!publishPreview.value || !selectedId.value || !editable.value) return;
-  const configId = selectedId.value;
-  const before = { ...selectedConfig.value };
+  const preview = publishPreview.value;
+  if (!preview) return;
+  const configId = Number(preview.id);
+  const target = allConfigs.value.find((item) => item.id === configId);
+  if (!target || selectedId.value !== configId || target.status !== "draft") {
+    publishPreview.value = null;
+    setFeedbackError(feedback, "预览对象已切换，请重新读取预览后确认发布");
+    return;
+  }
+  const before = { ...target };
   try {
     publishing.value = true;
-    await publishConfig(configId, publishPreview.value.updated_at);
+    await publishConfig(configId, preview.updated_at);
     publishPreview.value = null;
     await loadConfigs(); setFeedbackSuccess(feedback, "配置已发布");
   } catch (error) {
