@@ -69,6 +69,13 @@ powershell -NoProfile -File .\scripts\run_log_history_acceptance.ps1 -EnvFile <p
 - 真实授权业务 API：使用本地登录会话调用 `/api/admin/auth/login`、`/api/admin/auth/me`、`/api/admin/log-analysis/parse-jobs/history?package_name=com.example.local`、`/api/admin/log-analysis/parse-jobs/9001/metrics/overview` 和 `/metrics/configs`，结果为 `login_username=admin me_username=admin history_items=1 history_job=9001 overview_actual_clicks=1 configs_status=0`。
 - 浏览器验收边界：IAB 打开本机地址返回 `ERR_BLOCKED_BY_CLIENT`；随后本机 Chrome 的 Computer Use 状态读取因“could not determine the current browser URL on Windows with enough confidence to enforce policy”被安全策略停止。未执行后续点击/输入，也未绕过策略，因此桌面/390px 交互验收未宣称通过。
 
+### 本地登录启动与复核（2026-10-18）
+
+- 根因：原 8101 进程只加载了 `.local-run/local-dev.env`；该文件包含本地登录提示密码变量，但没有 `ADMIN_PASSWORD_HASH`，因此密码登录未启用。`/api/admin/health` 仍可返回 200，不能作为登录可用性的证据。
+- 私有启动入口：`C:\Users\喻远飞\.codex\local-admin-start-20261017.ps1`；私有凭据文件：`C:\Users\喻远飞\.codex\local-admin-login-20261017.txt`。未回显或提交密码。凭据文件中的密码与其哈希已程序化核对匹配。
+- 当前本地监听：Admin API PID `23736`（Python 3.11，工作目录为本 worktree 的 `backend`）；前端 PID `25684`（Node/Vite，工作目录为本 worktree 的 `frontend`）。启动时显式加载私有 `ADMIN_PASSWORD_HASH`、启用密码登录、设置本地 HTTP cookie 和 `127.0.0.1:5173`/`localhost:5173` origin；未修改密码。
+- 真实 HTTP 验证：直连登录 `200`、`Set-Cookie` 为 `HttpOnly` 且本地 cookie `Secure=false`、`/auth/me` 为 `200`、错误密码为 `401`；错误 CSRF 的写操作为 `403`；正确登出为 `200`，登出后 `/auth/me` 为 `401`。经 Vite `5173/api/admin` 代理重复验证：登录 `200`、me `200`、错误 CSRF `403`、登出 `200`、登出后 me `401`。
+
 ## 计划/规格验收矩阵
 
 对应规格：`docs/superpowers/specs/2026-10-18-log-history-and-publish-safety-design.md`；对应计划：`docs/superpowers/plans/2026-10-18-log-history-and-publish-safety.md`。
