@@ -38,7 +38,7 @@ function Export-Table([string] $name, [string] $cursorShape, [string] $fileName)
   $header = "{`"table`":`"$name`",`"snapshot_start`":`"$SnapshotStart`",`"snapshot_end`":`"$SnapshotEnd`"}"
   [IO.File]::WriteAllText($path, $header + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
   $rows = 0
-  $bytes = [IO.File]::Length($path)
+  $bytes = (Get-Item -LiteralPath $path).Length
   $lastId = 0L
   $lastTs = "1970-01-01T00:00:00Z"
   while ($true) {
@@ -56,7 +56,7 @@ function Export-Table([string] $name, [string] $cursorShape, [string] $fileName)
       $lastTs = [string]$obj.server_ts
       $rows++
     }
-    $bytes = [IO.File]::Length($path)
+    $bytes = (Get-Item -LiteralPath $path).Length
     if ($batch.Count -lt $BatchSize) { break }
     Start-Sleep -Milliseconds $DelayMs
   }
