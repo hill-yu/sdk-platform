@@ -9,7 +9,7 @@
       <button data-testid="usage-view-tab" type="button" :class="{ active: view === 'usage' }" @click="switchView('usage')">使用时长</button>
     </div>
 
-    <template v-if="view === 'analysis'">
+    <div v-show="view === 'analysis'" data-testid="analysis-view">
       <section class="panel filters-panel">
         <div class="panel-header">
           <h3>解析统计</h3>
@@ -23,6 +23,7 @@
           @reset="resetAnalysis"
         />
       </section>
+      <LogHistoryPanel :package-name="appliedFilters.package_name" :selected-job-id="historyJob?.id ?? null" @select="selectHistoricalJob" />
 
       <LogParseTaskPanel
         :draft-scope="analysisScopeFromFilters(draftFilters)"
@@ -33,7 +34,7 @@
         @request-parse="requestParse"
         @request-cancel="requestCancel"
       />
-      <LogMetricsPanel :scope="metricScope" :job="parseJob" :profile="packageProfile" :visible-columns="visibleColumns" @failure-select="openFailureDrawer" @configure-columns="columnSettingsOpen = true" @profile-update="updatePackageProfile" @profile-error="showProfileError" />
+      <LogMetricsPanel :scope="historyJob ? historicalScope(historyJob) : metricScope" :job="historyJob ?? parseJob" :history-job-id="historyJob?.id ?? null" :profile="packageProfile" :visible-columns="visibleColumns" @failure-select="openFailureDrawer" @configure-columns="columnSettingsOpen = true" @profile-update="updatePackageProfile" @profile-error="showProfileError" />
       <LogFailureDrawer :open="failureDrawerOpen" :items="failureItems" :loading="failureLoading" :error="failureError" @close="closeFailureDrawer" />
 
       <div v-if="columnSettingsOpen" class="modal-backdrop" data-testid="column-settings-modal">
@@ -50,9 +51,9 @@
           />
         </section>
       </div>
-    </template>
+    </div>
 
-    <template v-else-if="view === 'raw'">
+    <div v-show="view === 'raw'" data-testid="raw-view">
       <section class="panel filters-panel">
         <div class="filters">
           <PackageSelect :model-value="rawFilters.package_name" input-test-id="package-filter" placeholder="搜索包名" @update:model-value="changePackageFilter" />
@@ -111,8 +112,8 @@
         </section>
         <section class="panel detail-panel"><div class="panel-header"><h3>日志详情</h3></div><LogDetail :item="selected" @copy-success="showCopySuccess" @copy-error="showCopyError" /></section>
       </div>
-    </template>
-    <section v-else class="panel usage-placeholder" data-testid="usage-view">
+    </div>
+    <section v-show="view === 'usage'" class="panel usage-placeholder" data-testid="usage-view">
       <UsageDurationPanel />
     </section>
   </div>
@@ -123,7 +124,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 
 import { getEventFilterOptions, getEvents } from "@/api/dashboard";
 import type { EventFilterOptions, EventItem, EventQuery, LogLevel } from "@/api/dashboard";
-import { cancelParseJob, getLatestParseJob, getMetricFailures, getParseJob, postParseJob } from "@/api/logMetrics";
+import { cancelParseJob, getHistoricalMetricFailures, getLatestParseJob, getMetricFailures, getParseJob, postParseJob } from "@/api/logMetrics";
 import type { FailureBreakdownItem, LogMetricScope, ParseJob } from "@/api/logMetrics";
 import { getLogAnalysisColumns, getPackageProfile, putLogAnalysisColumns } from "@/api/logAnalysis";
 import { FORMAL_METRIC_COLUMN_MAPPING } from "@/api/logAnalysis";
@@ -135,6 +136,7 @@ import LogDetail from "@/components/LogDetail.vue";
 import LogExportPanel from "@/components/LogExportPanel.vue";
 import LogMetricsPanel from "@/components/LogMetricsPanel.vue";
 import LogParseTaskPanel from "@/components/LogParseTaskPanel.vue";
+import LogHistoryPanel from "@/components/LogHistoryPanel.vue";
 import UsageDurationPanel from "@/components/UsageDurationPanel.vue";
 import PackageSelect from "@/components/PackageSelect.vue";
 import { formatBusinessTime } from "@/utils/dateTime";
@@ -158,6 +160,7 @@ const draftFilters = ref<LogAnalysisFilterValues>({ date_from: recentAnalysisRan
 const appliedFilters = ref<LogAnalysisFilterValues>({ ...draftFilters.value });
 const metricScope = ref<LogMetricScope>({ package_name: "", date_from: recentAnalysisRange.date_from, hour_from: recentAnalysisRange.hour_from, date_to: recentAnalysisRange.date_to, hour_to: recentAnalysisRange.hour_to });
 const parseJob = ref<ParseJob | null>(null);
+const historyJob = ref<ParseJob | null>(null);
 const parseStarting = ref(false);
 const parseCancelling = ref(false);
 const packageProfile = ref<PackageProfile | null>(null);
@@ -267,8 +270,24 @@ function applyAnalysisScope(value: LogAnalysisFilterValues): LogMetricScope | nu
   const error = validateAnalysisScope(scope);
   if (error) { setFeedbackError(feedback, error); return null; }
   appliedFilters.value = { ...value };
+  historyJob.value = null;
   metricScope.value = scope;
   return scope;
+}
+
+function historicalScope(job: ParseJob): LogMetricScope {
+  const start = new Date(job.range_start_utc ?? job.range_start);
+  const end = new Date(job.range_end_utc ?? job.range_end);
+  const date = (value: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai" }).format(value);
+  const hour = (value: Date) => Number(new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Shanghai", hour: "numeric", hour12: false }).format(value));
+  return { package_name: job.package_name ?? "", date_from: date(start), hour_from: hour(start), date_to: date(new Date(end.getTime() - 1)), hour_to: hour(new Date(end.getTime() - 1)) };
+}
+function selectHistoricalJob(job: ParseJob) {
+  clearParsePoll();
+  ++failureRequestSequence;
+  failureDrawerOpen.value = false;
+  historyJob.value = job;
+  packageProfile.value = null;
 }
 
 function queryAnalysis(value: LogAnalysisFilterValues) {
@@ -290,6 +309,7 @@ function resetAnalysis(value: LogAnalysisFilterValues) {
   ++parseRequestSequence;
   ++profileRequestSequence;
   parseJob.value = null;
+  historyJob.value = null;
   packageProfile.value = null;
   appliedFilters.value = { ...value };
   metricScope.value = { package_name: "", date_from: value.date_from, hour_from: value.hour_from, date_to: value.date_to, hour_to: value.hour_to };
@@ -299,6 +319,7 @@ async function requestParse(snapshot: LogMetricScope) {
   if (parseStarting.value || parseCancelling.value) return;
   const scope = applyAnalysisScope({ ...draftFilters.value, ...snapshot });
   if (!scope) return;
+  historyJob.value = null;
   clearParsePoll();
   parseJob.value = null;
   const requestSequence = ++parseRequestSequence;
@@ -343,7 +364,9 @@ async function openFailureDrawer(selection: { target_kind: "web_element" | "ad_a
   const scope = { ...metricScope.value };
   failureDrawerOpen.value = true; failureLoading.value = true; failureError.value = ""; failureItems.value = [];
   try {
-    const response = await getMetricFailures({ ...scope, ...(parseJob.value?.snapshot_end_utc ? { snapshot_end_utc: parseJob.value.snapshot_end_utc } : {}), ...selection });
+    const response = historyJob.value
+      ? await getHistoricalMetricFailures(historyJob.value.id, selection)
+      : await getMetricFailures({ ...scope, ...(parseJob.value?.snapshot_end_utc ? { snapshot_end_utc: parseJob.value.snapshot_end_utc } : {}), ...selection });
     if (requestSequence !== failureRequestSequence) return;
     let value: unknown = response;
     if (value && typeof value === "object" && "data" in value) value = (value as { data: unknown }).data;

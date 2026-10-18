@@ -73,7 +73,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
-import { getMetricConfigs, getMetricOverview, getMetricTargets } from "@/api/logMetrics";
+import { getHistoricalMetricConfigs, getHistoricalMetricOverview, getHistoricalMetricTargets, getMetricConfigs, getMetricOverview, getMetricTargets } from "@/api/logMetrics";
 import type { ConfigMetricItem, LogMetricScope, MetricOverview, ParseJob, TargetMetric } from "@/api/logMetrics";
 import type { PackageProfile } from "@/api/logAnalysis";
 import PackageProfileCell, { type PackageProfileField } from "@/components/PackageProfileCell.vue";
@@ -82,7 +82,7 @@ import { analysisScopeUtcRange } from "@/utils/logAnalysisScope";
 type MetricViewKind = "web_element" | "ad_area";
 type VisibleTarget = Omit<TargetMetric, "target_kind">;
 
-const props = withDefaults(defineProps<{ scope: LogMetricScope; job?: ParseJob | null; profile?: PackageProfile | null; visibleColumns?: string[] }>(), { job: null, profile: null, visibleColumns: () => [] });
+const props = withDefaults(defineProps<{ scope: LogMetricScope; job?: ParseJob | null; profile?: PackageProfile | null; visibleColumns?: string[]; historyJobId?: number | null }>(), { job: null, profile: null, visibleColumns: () => [], historyJobId: null });
 const emit = defineEmits<{
   "failure-select": [value: { target_kind: MetricViewKind; config_id?: number }];
   "configure-columns": [];
@@ -157,7 +157,7 @@ function queryScope(scope: LogMetricScope) {
 
 async function loadTargets(scope: LogMetricScope, requestId: number, kind: MetricViewKind) {
   const targetRequest = ++targetRequestId;
-  const response = await getMetricTargets(scope);
+  const response = props.historyJobId ? await getHistoricalMetricTargets(props.historyJobId) : await getMetricTargets(scope);
   if (disposed || requestId !== scopeRequestId || targetRequest !== targetRequestId || targetKind.value !== kind) return;
   rawTargets.value = unwrap<{ items: TargetMetric[] }>(response).items;
 }
@@ -171,7 +171,10 @@ async function load() {
   disabled.value = false; loading.value = true; error.value = "";
   const scopedQuery = queryScope(scope);
   try {
-    const [overviewResponse, configsResponse] = await Promise.all([getMetricOverview(scopedQuery), getMetricConfigs(scopedQuery)]);
+    const [overviewResponse, configsResponse] = await Promise.all([
+      props.historyJobId ? getHistoricalMetricOverview(props.historyJobId) : getMetricOverview(scopedQuery),
+      props.historyJobId ? getHistoricalMetricConfigs(props.historyJobId) : getMetricConfigs(scopedQuery),
+    ]);
     if (disposed || requestId !== scopeRequestId) return;
     overview.value = unwrap<MetricOverview>(overviewResponse);
     configs.value = unwrap<{ total: number; items: ConfigMetricItem[] }>(configsResponse).items;
@@ -203,7 +206,7 @@ function showColumn(column: string) { return !props.visibleColumns.length || pro
 function emitProfileUpdate(payload: { field: PackageProfileField; value: string; profile: Partial<PackageProfile> }) { emit("profile-update", payload); }
 function emitProfileError(message: string) { emit("profile-error", message); }
 
-watch(() => [props.scope, props.job], () => { void load(); }, { deep: true });
+watch(() => [props.scope, props.job, props.historyJobId], () => { void load(); }, { deep: true });
 onMounted(() => { void load(); });
 onBeforeUnmount(() => { disposed = true; ++scopeRequestId; ++targetRequestId; });
 </script>
