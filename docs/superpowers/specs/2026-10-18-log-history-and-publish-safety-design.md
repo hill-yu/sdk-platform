@@ -26,7 +26,7 @@
 
 打开下拉时加载首批候选；输入 300 毫秒后使用现有 log-packages 搜索能力，有界返回并提供“继续输入缩小范围”提示。处理加载、空结果、失败重试、快速输入时旧响应不覆盖新结果。支持方向键、Enter、Escape 和点击外部关闭。保留 SDK 版本联动：切换原始日志包名清除不适用的 SDK 版本。
 
-导出选择器默认继承已生效的原始日志包名；用户能明确查看所选包名。单包筛选生效时保持该包锁定，避免查询一个包却导出其他包；选择“全部包名”后可批量多选。SDK 版本、设备、级别、日期、小时和 H1 模式沿用现有契约。
+导出选择器默认继承已生效的原始日志包名；用户能明确查看所选包名。单包筛选生效时保持该包锁定，避免查询一个包却导出其他包；选择“全部包名”后可批量多选。单包→全部时清空继承包名以及旧多选，要求重新明确选择；全部→单包时清空旧多选并仅使用父级已生效包名，单包A→单包B立即改为B。父级尚未点击查询的草稿条件不改变导出有效条件。SDK 版本、设备、级别、日期、小时和 H1 模式沿用现有契约。
 
 ## 历史解析结果
 
@@ -36,11 +36,13 @@
 
 选择成功任务后，结果区域明确标记“历史任务 #ID”，展示该任务固定的包名、range_start、snapshot_end 和完成时间。查看历史不会启动解析，不修改当前任务或上方待提交筛选；提供“返回当前结果”。创建新任务或应用新查询时退出历史模式。历史请求和当前轮询分开，旧响应不得覆盖新选择。
 
-实现利用成功任务保留的 stage 行作为按 job_id 隔离的只读历史数据源，复用现有指标计算，不重新解析 raw extra。所有历史 overview/configs/targets/failures/H1 以及关联 click 明细都必须使用相同 job_id；禁止退回正式结果表或按日期读取最新结果。全局别名/公司等展示配置仍使用当前配置，历史事实和数值保持不变。
+实现利用成功任务保留的 stage 行作为按 job_id 隔离的只读历史数据源，复用现有指标计算，不重新解析 raw extra。所有历史 overview/configs/targets/failures/H1 以及关联 click 明细都必须使用相同 job_id；禁止退回正式结果表或按日期读取最新结果。数据源模型和job_id为显式查询上下文，贯穿overview每个scalar子查询、attempt_counts/mismatch、target helper及H1→click关联。SQL构造测试逐条断言历史查询引用stage、含正确job_id绑定且不引用正式表，不能仅通过最终数值推断隔离正确。全局别名/公司等展示配置仍使用当前配置，历史事实和数值保持不变。
 
 历史 API 建议：GET `/api/admin/log-analysis/parse-jobs`；GET `/api/admin/log-analysis/parse-jobs/{job_id}/metrics/{overview|configs|targets|failures|h1}`，分别实现明确路由而非任意函数分发。任务范围由服务器读取，不允许客户端覆盖其包名和时间范围。静态 latest 路由排在动态 job_id 前。
 
-旧成功任务仅在保留明细可验证时展示结果。检查成功状态及 H1 记录数与已保存任务计数的一致性；合法零 H1 任务显示零结果。缺失/不完整时返回明确“历史结果不可用”，不能展示最新结果或伪造零值。新任务成功之后不得重新 claim 或更改已完成 stage；失败和取消任务的清理不影响其他任务。本次不增加自动清理或缩短历史保留时间。
+旧成功任务仅在保留明细可验证时展示结果。历史可用不变量：status=success；processed_count=total_count且非负；stage H1总行数=job.h1_count（包含failed）；failed行数=job.failed_h1_count；不同(event_id,event_server_ts)数量+no_h1_count=processed_count。每个成功H1的click数量和其decoded_payload.planned_click_attempts数组长度一致，click必须关联到同job同事件复合键/record_index的成功H1，失败H1没有click；不允许孤立click。校验字段缺失、非数组、旧decoder格式无法证明完整时返回不可用，不从声明点击数p推测实际click数量。
+
+合法total=0要求processed/h1/failed/no_h1及stage click全为0；合法非空零H1要求no_h1=processed=total且stage H1/click均空。失败H1保留在H1明细和失败计数中，成功指标聚合维持既有status=success口径。检查在打开具体历史结果时执行，列表不做逐任务重聚合；可返回未验证的可打开候选，进入后明确验证结果。缺失/不完整时返回明确“历史结果不可用”，不能展示最新结果或伪造零值。新任务成功之后不得重新 claim 或更改已完成 stage；失败和取消任务的清理不影响其他任务。本次不增加自动清理或缩短历史保留时间。
 
 ## 使用时长重复加载
 

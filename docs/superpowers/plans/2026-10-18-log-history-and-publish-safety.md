@@ -23,6 +23,7 @@
 - [ ] 先补行为测试：打开加载候选、搜索/空结果/错误重试、旧响应不得覆盖、单选完整包名、多选去重/删除、Escape/Enter、原始日志 SDK 版本重置。
 - [ ] 实现统一单选/多选搜索基础组件或让已有多选使用同一候选加载逻辑；300ms debounce、有界返回；卸载后忽略响应。
 - [ ] 接入解析必填单选、原始日志全部/单选及导出多选；单包导出沿用已生效包名，保留全部筛选 payload。
+- [ ] 导出父筛选双向切换测试：单包→全部清空继承和旧多选；全部→单包仅发送新单包；A→B仅发送B；尚未应用的草稿筛选不影响payload。
 - [ ] 执行相关组件/API测试，确认新失败用例转绿后提交。
 
 ## 2. 历史任务与固定结果服务
@@ -32,6 +33,8 @@
 - [ ] 检查所有 stage 清理入口和成功任务 claim 条件；记录 h1_count/failed_h1_count 的实际含义，完整性判断与其一致，不臆造计数公式。
 - [ ] 添加历史列表服务：包名精确筛选、created_at/id 倒序、page=1/page_size=10、上限50；返回元信息和结果是否可用，不在列表逐任务执行完整聚合。
 - [ ] 将 metrics 查询的数据源参数化，默认仍是正式 H1/click，历史模式使用两张 stage 并对所有分支加 job_id。保留原统计计算代码，避免复制两套公式。
+- [ ] 查询上下文显式包含H1模型/click模型/job_id，逐项检查overview全部scalar子查询、attempt_counts/mismatch、target helper、configs/failures/H1和关联click。SQL/服务层捕获每条历史SQL，断言stage job_id绑定以及无正式表引用；未知/非成功/不完整任务不允许fallback。
+- [ ] 实现规格中的完整性不变量：processed=total；H1/failed计数；distinct H1事件+no_h1=processed；每个成功H1的click数与decoded_payload.planned_click_attempts数组长度相符且无孤立click。不能以declared_click_count代替click计数，不能把total=0与证据丢失混淆；旧格式缺证据明确不可用。失败H1留明细，成功聚合仍只计status=success。
 - [ ] 新增明确的历史 metrics 路由，先验证任务成功与数据完整性；由 job 元信息决定 package/range/snapshot。未知任务404、未完成或缺失历史409；合法零结果200。
 - [ ] 在本地 PostgreSQL 构造任务 A/B 相同包名范围但 H1/click 结果不同：B 发布覆盖正式结果后，A 历史所有 API仍读A；覆盖 failures/H1关联click、跨包隔离、零H1、不完整旧任务；成功任务不能被再次写入。
 - [ ] 运行原有 metrics/job 回归，提交后交独立审查再继续历史 UI。
@@ -63,6 +66,7 @@
 - [ ] 保存已确认服务器内容为基准，使用递归对象键排序且保留数组顺序的语义比较。保存超时仅确认时间变化不等于当前编辑内容已存储，必须读回核对内容后更新基准。
 - [ ] 实现预览态：冻结config_id/updated_at，右侧只读展示三份JSON，确认与取消；确认前禁切版本/禁编辑，标题显示包名与保存时间。
 - [ ] publish body新增可选 expected_updated_at（带时区datetime，旧无body API兼容）；网页始终发送。定义冲突异常映射409。
+- [ ] expected_updated_at=None只代表旧API客户端兼容路径，新增网页确认请求不得省略；测试断言网页请求体携带预览值。
 - [ ] 在包级锁内重新锁定/刷新配置行并检查expected_updated_at和draft，检查必须在COS、版本分配、状态写入之前；保存使用行锁并重新检查状态。避免锁前读取的ORM缓存值成为比较依据。
 - [ ] 本地PostgreSQL双会话测试：预览后保存导致409且无版本/上传副作用；发布取得锁后保存等待并因非draft拒绝；不同草稿发布无锁顺序反转；legacy publish兼容；保留60秒与超时复核。
 - [ ] 运行配置加密、版本分配、发布回滚回归，提交并交审查。
