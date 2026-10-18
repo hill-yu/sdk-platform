@@ -2,8 +2,9 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\")).Path
 $PrivateDir = Join-Path $RepoRoot ".local-run"
-$SshKey = "C:\Users\喻远飞\.ssh\id_ed25519_hill_yu"
-$KnownHosts = "C:\Users\喻远飞\.ssh\known_hosts"
+$UserProfile = [Environment]::GetFolderPath("UserProfile")
+$SshKey = Join-Path $UserProfile ".ssh\id_ed25519_hill_yu"
+$KnownHosts = Join-Path $UserProfile ".ssh\known_hosts"
 $ProdTarget = "root@104.244.92.6"
 $ProdEnvFile = "/www/releases/sdk-platform/current/backend/.env"
 $SnapshotStart = "2026-10-17T16:00:00Z"
