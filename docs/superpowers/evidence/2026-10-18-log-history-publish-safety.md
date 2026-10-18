@@ -68,3 +68,19 @@ powershell -NoProfile -File .\scripts\run_log_history_acceptance.ps1 -EnvFile <p
 - 管理 API：`http://127.0.0.1:8101/api/admin/health`，HTTP 200，返回 `{"status":"ok"}`。
 - 真实授权业务 API：使用本地登录会话调用 `/api/admin/auth/login`、`/api/admin/auth/me`、`/api/admin/log-analysis/parse-jobs/history?package_name=com.example.local`、`/api/admin/log-analysis/parse-jobs/9001/metrics/overview` 和 `/metrics/configs`，结果为 `login_username=admin me_username=admin history_items=1 history_job=9001 overview_actual_clicks=1 configs_status=0`。
 - 浏览器验收边界：IAB 打开本机地址返回 `ERR_BLOCKED_BY_CLIENT`；随后本机 Chrome 的 Computer Use 状态读取因“could not determine the current browser URL on Windows with enough confidence to enforce policy”被安全策略停止。未执行后续点击/输入，也未绕过策略，因此桌面/390px 交互验收未宣称通过。
+
+## 计划/规格验收矩阵
+
+对应规格：`docs/superpowers/specs/2026-10-18-log-history-and-publish-safety-design.md`；对应计划：`docs/superpowers/plans/2026-10-18-log-history-and-publish-safety.md`。
+
+| 规格/计划 | 本地证据 | 状态 |
+|---|---|---|
+| 包名选择交互 / 计划 §1 | 真实授权 `GET /api/admin/log-packages?keyword=com.example.local` 返回 `com.example.local`；前端 `PackageSelect.test.ts`、全量 42/230 | 通过（业务 API）；浏览器键盘/弹层未执行 |
+| 历史任务列表与固定结果 / 规格“历史解析结果”、计划 §2–3 | 本地完整库 job `9001`；历史列表返回 1 条；overview 实际 click=1；五个历史 metrics 路由、A/B job 隔离、404/409 均有真实 PG 测试 | 通过 |
+| 使用时长状态保留 / 规格“使用时长”、计划 §4 | 本地完整库写入两条 usage；授权 summary 返回 1 个聚合项；`UsageDurationPanel.test.ts` 覆盖 | 通过（API/单测）；浏览器标签切换未执行 |
+| 三文件发布预览 / 规格“发布确认与一致性”、计划 §5 | 真实 `GET /configs/1` 返回 `mainConfig,newTextRuleConfig,newTouchConfig`；本地 draft 已创建 | 通过（业务 API） |
+| dirty 阻止、语义 JSON、取消不 POST / 计划 §5 | `ConfigManager.test.ts`、`jsonSemantic.test.ts`；服务端双会话 stale publish 返回 409 且最终仍 draft | 通过（单测/真实 PG+HTTP）；浏览器按钮交互未执行 |
+| 本地开发环境 / 计划 §7 | 独立完整库 `sdk_local_acceptance_20261018`，16 张 public 表；前端/API 200；登录、me、历史、usage、configs 真实授权 API 已连通 | 通过 |
+| 桌面与 390px 浏览器 / 计划 §7 | 无截图文件：IAB `ERR_BLOCKED_BY_CLIENT`；Chrome Computer Use 在 URL 可信度检查处安全停止 | 缺项，需用户手工验收 |
+
+用户手工验收步骤（不需要生产数据）：打开 `http://127.0.0.1:5173/`，使用 `.local-run/local-dev.env` 中的本地账号登录；在日志分析页搜索 `com.example.local`，展开历史并选择 job `9001`；切换使用时长标签确认查询状态保留；配置页打开 draft `1`，确认三个文件均可预览，修改 JSON 后点击发布应先提示保存，保存后重新预览；另一个会话保存后再用旧预览确认应显示 409/重新预览提示。桌面和 390px 各执行一次。不得把本地凭据提交或复制到外部系统。
