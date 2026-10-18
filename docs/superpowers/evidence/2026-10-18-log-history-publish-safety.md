@@ -71,10 +71,11 @@ powershell -NoProfile -File .\scripts\run_log_history_acceptance.ps1 -EnvFile <p
 
 ### 本地登录启动与复核（2026-10-18）
 
-- 根因：原 8101 进程只加载了 `.local-run/local-dev.env`；该文件包含本地登录提示密码变量，但没有 `ADMIN_PASSWORD_HASH`，因此密码登录未启用。`/api/admin/health` 仍可返回 200，不能作为登录可用性的证据。
-- 私有启动入口：`C:\Users\喻远飞\.codex\local-admin-start-20261017.ps1`；私有凭据文件：`C:\Users\喻远飞\.codex\local-admin-login-20261017.txt`。未回显或提交密码。凭据文件中的密码与其哈希已程序化核对匹配。
-- 当前本地监听：Admin API PID `23736`（Python 3.11，工作目录为本 worktree 的 `backend`）；前端 PID `25684`（Node/Vite，工作目录为本 worktree 的 `frontend`）。启动时显式加载私有 `ADMIN_PASSWORD_HASH`、启用密码登录、设置本地 HTTP cookie 和 `127.0.0.1:5173`/`localhost:5173` origin；未修改密码。
-- 真实 HTTP 验证：直连登录 `200`、`Set-Cookie` 为 `HttpOnly` 且本地 cookie `Secure=false`、`/auth/me` 为 `200`、错误密码为 `401`；错误 CSRF 的写操作为 `403`；正确登出为 `200`，登出后 `/auth/me` 为 `401`。经 Vite `5173/api/admin` 代理重复验证：登录 `200`、me `200`、错误 CSRF `403`、登出 `200`、登出后 me `401`。
+- 根因：原 8101 进程只加载了 `.local-run/local-dev.env`；该文件没有 `ADMIN_PASSWORD_HASH`，因此密码登录未启用。`/api/admin/health` 仍可返回 200，不能作为登录可用性的证据。
+- 当前本地启动入口：`SDK/scripts/start_feature_local_acceptance.ps1`；脚本显式使用当前 feature worktree、数据库 `sdk_local_acceptance_20261018`、`127.0.0.1:5173`/`localhost:5173` origin、本地 HTTP cookie，并仅从私有凭据文件 `C:\Users\喻远飞\.codex\local-admin-login-20261017.txt` 读取已存在的哈希。未回显或提交密码，也未修改密码。
+- 当前本地监听：Admin API PID `24132`（Python 3.11，工作目录为本 worktree 的 `backend`）；前端由同一脚本启动并监听 5173，工作目录为本 worktree 的 `frontend`。旧 `LOCAL_ACCEPTANCE_PASSWORD` 已从未跟踪的 `.local-run/local-dev.env` 移除，避免与哈希凭据混用。
+- 真实 HTTP 验证：直连登录 `200`、`Set-Cookie` 为 `HttpOnly` 且本地 cookie `Secure=false`、`/auth/me` 为 `200`、错误密码为 `401`；错误 CSRF 的写操作为 `403`；正确登出为 `200`，登出后 `/auth/me` 为 `401`。经 Vite `5173/api/admin` 代理重复验证：登录 `200`、me `200`、错误密码 `401`、错误 CSRF `403`、登出 `200`、登出后 me `401`。
+- 更正：此前 `b503b58` 记录的是旧的 `sdk_platform_local`/临时启动方式，不能作为当前 feature 完整库验收依据；本节和后续提交改为显式脚本与 `sdk_local_acceptance_20261018`。
 
 ## 计划/规格验收矩阵
 
