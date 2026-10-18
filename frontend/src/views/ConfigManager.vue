@@ -7,7 +7,7 @@
     </section>
     <p v-if="feedback.error" data-testid="error-feedback" class="feedback error">{{ feedback.error }}</p>
     <p v-if="feedback.success" data-testid="success-feedback" class="feedback success">{{ feedback.success }}</p>
-    <div class="content-grid">
+    <div class="content-grid" data-testid="config-workspace" :inert="Boolean(publishPreview)">
       <section class="panel list-panel">
         <h3>配置版本</h3>
         <div ref="versionList" class="version-list" data-testid="version-list">
@@ -42,14 +42,14 @@
           <button class="primary" :disabled="!editable || operationBusy" @click="publishCurrent">{{ publishing ? "正在发布…" : "发布" }}</button>
           <button v-if="selectedConfig?.status === 'archived'" class="ghost" @click="rollbackCurrent">回滚到此版本</button>
         </div>
-        <div v-if="publishPreview" class="preview-backdrop" data-testid="publish-preview-backdrop">
-          <section class="panel publish-preview" data-testid="publish-preview">
+      </section>
+    </div>
+    <div v-if="publishPreview" class="preview-backdrop" data-testid="publish-preview-backdrop">
+      <section class="panel publish-preview" data-testid="publish-preview" @keydown.esc="publishPreview = null">
             <div class="panel-header"><h3>发布前预览</h3><button class="ghost" type="button" :disabled="publishing" @click="publishPreview = null">取消</button></div>
             <p>确认发布草稿 #{{ publishPreview.id }}（{{ publishPreview.package_name }}），保存时间：{{ publishPreview.updated_at }}</p>
             <div class="preview-files"><div v-for="file in configFiles" :key="file" class="preview-file"><h4>{{ file }}</h4><pre>{{ JSON.stringify(publishPreview.config_data[file], null, 2) }}</pre></div></div>
-            <button data-testid="confirm-publish" class="primary" :disabled="publishing" @click="confirmPublish">确认发布</button>
-          </section>
-        </div>
+        <button ref="confirmButton" data-testid="confirm-publish" class="primary" autofocus :disabled="publishing" @click="confirmPublish">确认发布</button>
       </section>
     </div>
   </div>
@@ -80,6 +80,7 @@ const feedback = reactive({ error: "", success: "" });
 const saving = ref(false);
 const publishing = ref(false);
 const publishPreview = ref<any | null>(null);
+const confirmButton = ref<HTMLButtonElement | null>(null);
 const serverConfigData = ref<JsonObject>(emptyConfigData());
 const serverChangeLog = ref("");
 const serverUpdatedAt = ref<string | null>(null);
@@ -183,6 +184,14 @@ async function selectConfig(id: number) {
     if (requestSequence === detailRequestSequence) setFeedbackError(feedback, message(error));
   }
 }
+async function refreshServerBaseline(configId: number) {
+  const response = await getConfig(configId);
+  validateConfigData(response.data.config_data);
+  serverConfigData.value = response.data.config_data;
+  serverChangeLog.value = response.data.change_log || "";
+  serverUpdatedAt.value = response.data.updated_at || null;
+  return response.data;
+}
 async function createDraft() {
   try {
     beginFeedback(feedback);
@@ -234,12 +243,8 @@ async function publishCurrent() {
     if (!jsonSemanticallyEqual(data, serverConfigData.value) || changeLog.value !== serverChangeLog.value) {
       throw new Error("检测到未保存修改，请先保存草稿");
     }
-    const response = await getConfig(configId);
-    validateConfigData(response.data.config_data);
-    serverConfigData.value = response.data.config_data;
-    serverChangeLog.value = response.data.change_log || "";
-    serverUpdatedAt.value = response.data.updated_at || null;
-    publishPreview.value = { ...response.data, config_data: response.data.config_data };
+    const response = await refreshServerBaseline(configId);
+    publishPreview.value = { ...response, config_data: response.config_data };
   } catch (error) {
     if (isRequestTimeout(error)) {
       try {
@@ -272,11 +277,18 @@ async function confirmPublish() {
       } catch { /* preserve original timeout */ }
     }
     publishPreview.value = null;
-    setFeedbackError(feedback, isConflict(error) ? "草稿已变化，请重新读取预览后确认发布" : message(error));
+    if (isConflict(error)) {
+      try { await refreshServerBaseline(configId); } catch { /* preserve the editor and original conflict */ }
+      await loadConfigs();
+      setFeedbackError(feedback, "草稿已变化，请重新读取预览后确认发布");
+    } else setFeedbackError(feedback, message(error));
   } finally { publishing.value = false; }
 }
 async function rollbackCurrent() { if (selectedId.value) { try { beginFeedback(feedback); await rollbackConfig(selectedId.value); await loadConfigs(); setFeedbackSuccess(feedback, "配置已回滚为新版本"); } catch (error) { setFeedbackError(feedback, message(error)); } } }
 watch(() => allConfigs.value.length, clampPage);
+watch(publishPreview, async (value) => {
+  if (value) { await nextTick(); confirmButton.value?.focus(); }
+});
 onMounted(loadConfigs);
 </script>
 

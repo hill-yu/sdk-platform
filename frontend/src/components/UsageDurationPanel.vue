@@ -15,10 +15,10 @@
     </form>
     <p v-if="validationError" data-testid="usage-validation-error" class="error">{{ validationError }}</p>
     <p v-if="disabled" data-testid="usage-disabled" class="empty-state">当前不可查询使用时长。</p>
-    <p v-else-if="error" data-testid="usage-error" class="error">{{ error }}</p>
-    <p v-else-if="!loading && !summary?.items.length" data-testid="usage-empty" class="empty-state">当前条件下暂无使用时长数据。</p>
+    <p v-if="!disabled && error" data-testid="usage-error" class="error">{{ error }}</p>
+    <p v-if="!disabled && !loading && !error && !summary?.items.length" data-testid="usage-empty" class="empty-state">当前条件下暂无使用时长数据。</p>
 
-    <div v-else-if="summary" class="table-scroll usage-table-scroll">
+    <div v-if="!disabled && summary" class="table-scroll usage-table-scroll">
       <table class="table usage-summary-table">
         <caption class="sr-only">使用时长汇总</caption>
         <thead><tr><th>包名</th><th>设备数</th><th>总时长</th><th>平均时长</th><th>≤120 秒</th><th>121–300 秒</th><th>301–600 秒</th><th>601–899 秒</th><th>900–1199 秒</th><th>1200–1499 秒</th><th>≥1500 秒</th><th>最后上报</th><th>明细</th></tr></thead>
@@ -98,7 +98,7 @@ async function load(scope: UsageScope) {
     if (disposed || requestId !== scopeRequestId) return;
     summary.value = unwrap<{ total: number; page: number; page_size: number; items: UsageSummaryItem[] }>(response);
   } catch (cause) {
-    if (!disposed && requestId === scopeRequestId) { summary.value = null; error.value = cause instanceof Error ? cause.message : "使用时长读取失败"; }
+    if (!disposed && requestId === scopeRequestId) { error.value = cause instanceof Error ? cause.message : "使用时长读取失败"; }
   } finally {
     if (!disposed && requestId === scopeRequestId) loading.value = false;
   }

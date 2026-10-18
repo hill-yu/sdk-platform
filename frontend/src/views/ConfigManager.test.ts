@@ -474,4 +474,37 @@ describe("ConfigManager tree and JSON modes", () => {
 
     expect(api.publishConfig).toHaveBeenCalledWith(1, "before-1");
   });
+
+  it("reloads the server baseline after a 409 without overwriting the editor or auto-publishing", async () => {
+    const conflict = Object.assign(new Error("conflict"), { response: { status: 409 } });
+    api.publishConfig.mockRejectedValueOnce(conflict);
+    api.getConfig.mockImplementation((id: number) => Promise.resolve({ data: detail(id, specialData, "draft", { updated_at: "server-after-conflict" }) }));
+    const wrapper = await mountManager();
+
+    await wrapper.get("[data-testid='json-mode']").trigger("click");
+    const editor = wrapper.get<HTMLTextAreaElement>("[data-testid='json-editor']");
+    const editorBeforePreview = editor.element.value;
+    await publishButton(wrapper).trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid='publish-preview']").exists()).toBe(true);
+
+    await wrapper.get("[data-testid='confirm-publish']").trigger("click");
+    await flushPromises();
+
+    expect(api.publishConfig).toHaveBeenCalledOnce();
+    expect(api.getConfig.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(api.getConfigs.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(wrapper.find("[data-testid='publish-preview']").exists()).toBe(false);
+    expect(wrapper.get<HTMLTextAreaElement>("[data-testid='json-editor']").element.value).toBe(editorBeforePreview);
+    expect(wrapper.get("[data-testid='error-feedback']").text()).toContain("重新读取预览");
+  });
+
+  it("makes the editor workspace inert and focuses confirmation while preview is open", async () => {
+    const wrapper = await mountManager();
+    await publishButton(wrapper).trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get("[data-testid='config-workspace']").attributes("inert")).toBeDefined();
+    expect(wrapper.get("[data-testid='confirm-publish']").attributes("autofocus")).toBeDefined();
+  });
 });

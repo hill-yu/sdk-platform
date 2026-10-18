@@ -115,6 +115,30 @@ describe("UsageDurationPanel", () => {
     wrapper.unmount();
   });
 
+  it("keeps the last successful rows when an applied query fails", async () => {
+    const wrapper = mount(UsageDurationPanel);
+    await flushPromises();
+    vi.mocked(getUsageSummary).mockRejectedValueOnce(new Error("query unavailable"));
+    await wrapper.get("[data-testid='usage-package-name']").setValue("com.failed");
+    await wrapper.get("[data-testid='usage-query']").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get("[data-testid='usage-error']").text()).toContain("query unavailable");
+    expect(wrapper.get("[data-testid='usage-summary-row']").text()).toContain("com.a");
+    expect(wrapper.get<HTMLInputElement>("[data-testid='usage-package-name']").element.value).toBe("com.failed");
+  });
+
+  it("keeps the last successful rows when refresh fails", async () => {
+    const wrapper = mount(UsageDurationPanel);
+    await flushPromises();
+    vi.mocked(getUsageSummary).mockRejectedValueOnce(new Error("refresh unavailable"));
+    await wrapper.get("[data-testid='usage-refresh']").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get("[data-testid='usage-error']").text()).toContain("refresh unavailable");
+    expect(wrapper.get("[data-testid='usage-summary-row']").text()).toContain("com.a");
+  });
+
   it("ignores an in-flight summary response after unmount", async () => {
     let resolve!: (value: unknown) => void;
     vi.mocked(getUsageSummary).mockReturnValueOnce(new Promise((nextResolve) => { resolve = nextResolve; }) as never);
