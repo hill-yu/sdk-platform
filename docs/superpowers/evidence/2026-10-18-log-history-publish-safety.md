@@ -67,4 +67,4 @@ powershell -NoProfile -File .\scripts\run_log_history_acceptance.ps1 -EnvFile <p
 - 前端：`http://127.0.0.1:5173/`，HTTP 200。
 - 管理 API：`http://127.0.0.1:8101/api/admin/health`，HTTP 200，返回 `{"status":"ok"}`。
 - 真实授权业务 API：使用本地登录会话调用 `/api/admin/auth/login`、`/api/admin/auth/me`、`/api/admin/log-analysis/parse-jobs/history?package_name=com.example.local`、`/api/admin/log-analysis/parse-jobs/9001/metrics/overview` 和 `/metrics/configs`，结果为 `login_username=admin me_username=admin history_items=1 history_job=9001 overview_actual_clicks=1 configs_status=0`。
-- Codex 内置浏览器尝试打开本机地址时被容器策略拒绝：`ERR_BLOCKED_BY_CLIENT`，因此桌面/390px 交互验收未宣称通过。
+- 浏览器验收边界：IAB 打开本机地址返回 `ERR_BLOCKED_BY_CLIENT`；随后本机 Chrome 的 Computer Use 状态读取因“could not determine the current browser URL on Windows with enough confidence to enforce policy”被安全策略停止。未执行后续点击/输入，也未绕过策略，因此桌面/390px 交互验收未宣称通过。
