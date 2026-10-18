@@ -64,8 +64,7 @@ WHERE n.nspname = 'public' AND parent.relname = 'sdk_events'
 ORDER BY child.relname;
 
 SELECT pid, usename, application_name, client_addr, state,
-       wait_event_type, wait_event, query_start,
-       left(query, 160) AS query_preview
+       wait_event_type, wait_event, query_start
 FROM pg_stat_activity
 WHERE datname = current_database() AND pid <> pg_backend_pid()
 ORDER BY query_start NULLS LAST;
