@@ -76,6 +76,13 @@ vi.mock("@/api/logMetrics", () => ({
 }));
 vi.mock("@/api/usageDurations", () => ({ getUsageSummary, getUsageDevices }));
 vi.mock("@/api/logExports", () => ({ createLogExport, getLogExport, downloadLogExport }));
+vi.mock("@/components/PackageSelect.vue", () => ({
+  default: {
+    props: ["modelValue", "inputTestId", "placeholder", "disabled"],
+    emits: ["update:modelValue"],
+    template: `<input :data-testid="inputTestId" :placeholder="placeholder" :disabled="disabled" :value="modelValue" @input="$emit('update:modelValue', $event.target.value)" />`,
+  },
+}));
 
 import LogViewer from "@/views/LogViewer.vue";
 import LogExportPanel from "@/components/LogExportPanel.vue";
@@ -584,14 +591,13 @@ describe("LogViewer", () => {
   it("ignores a late package options response from an older request", async () => {
     const oldOptions = deferred<{ data: { package_names: string[]; sdk_versions: string[] } }>();
     const newOptions = deferred<{ data: { package_names: string[]; sdk_versions: string[] } }>();
-    getEventFilterOptions
-      .mockResolvedValueOnce({ data: { package_names: ["com.example.app", "com.example.other"], sdk_versions: [] } })
-      .mockReturnValueOnce(oldOptions.promise)
-      .mockReturnValueOnce(newOptions.promise);
     const wrapper = await mountViewer();
+
+    getEventFilterOptions.mockReset().mockReturnValueOnce(oldOptions.promise).mockReturnValueOnce(newOptions.promise);
 
     await wrapper.get("[data-testid='package-filter']").setValue("com.example.app");
     await wrapper.get("[data-testid='package-filter']").setValue("com.example.other");
+    await flushPromises();
     newOptions.resolve({ data: { package_names: ["com.example.app", "com.example.other"], sdk_versions: ["2.0.0"] } });
     await flushPromises();
     oldOptions.resolve({ data: { package_names: ["com.example.app", "com.example.other"], sdk_versions: ["1.0.0"] } });

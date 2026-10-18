@@ -20,7 +20,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import type { LogLevel } from "@/api/dashboard";
 import { createLogExport, downloadLogExport, getLogExport } from "@/api/logExports";
 import type { LogExportJob } from "@/api/logExports";
@@ -38,6 +38,7 @@ const props = defineProps<{
 }>();
 const packageNames = ref<string[]>([]);
 const effectivePackageNames = computed(() => props.packageName ? [props.packageName] : packageNames.value);
+let previousAppliedPackage = props.packageName;
 const currentJob = ref<LogExportJob | null>(null);
 const submitting = ref(false);
 const exportMode = ref<"raw" | "h1">("raw");
@@ -47,6 +48,11 @@ let disposed = false;
 let generation = 0;
 const statusText = computed(() => ({ pending: "等待处理", running: "生成中", success: "已完成", failed: "失败" }[currentJob.value?.status || "pending"]));
 const modeLocked = computed(() => submitting.value || currentJob.value?.status === "pending" || currentJob.value?.status === "running");
+watch(() => props.packageName, (next) => {
+  if (next === previousAppliedPackage) return;
+  packageNames.value = [];
+  previousAppliedPackage = next;
+});
 function changeExportMode(event: Event) {
   if (modeLocked.value) return;
   exportMode.value = (event.target as HTMLSelectElement).value as "raw" | "h1";

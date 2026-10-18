@@ -55,10 +55,8 @@
     <template v-else-if="view === 'raw'">
       <section class="panel filters-panel">
         <div class="filters">
-          <select v-model="rawFilters.package_name" data-testid="package-filter" :aria-busy="filterOptionsLoading" @change="changePackageFilter(rawFilters.package_name)">
-            <option value="">全部包名</option>
-            <option v-for="packageName in filterOptions.package_names" :key="packageName" :value="packageName">{{ packageName }}</option>
-          </select>
+          <PackageSelect :model-value="rawFilters.package_name" input-test-id="package-filter" placeholder="搜索包名" @update:model-value="changePackageFilter" />
+          <button data-testid="package-filter-clear" class="ghost" type="button" @click="clearPackageFilter">全部包名</button>
           <select v-model="rawFilters.sdk_version" data-testid="sdk-version-filter" :disabled="!rawFilters.package_name || filterOptionsLoading">
             <option value="">全部 SDK 版本</option>
             <option v-for="sdkVersion in filterOptions.sdk_versions" :key="sdkVersion" :value="sdkVersion">{{ sdkVersion }}</option>
@@ -138,6 +136,7 @@ import LogExportPanel from "@/components/LogExportPanel.vue";
 import LogMetricsPanel from "@/components/LogMetricsPanel.vue";
 import LogParseTaskPanel from "@/components/LogParseTaskPanel.vue";
 import UsageDurationPanel from "@/components/UsageDurationPanel.vue";
+import PackageSelect from "@/components/PackageSelect.vue";
 import { formatBusinessTime } from "@/utils/dateTime";
 import { beginFeedback, setFeedbackError, setFeedbackSuccess } from "@/utils/feedback";
 import { defaultRecentThreeDays } from "@/utils/logDateRange";
@@ -431,12 +430,14 @@ async function loadFilterOptions(packageName?: string): Promise<void> {
     if (requestSequence === filterOptionsRequestSequence) filterOptionsLoading.value = false;
   }
 }
-function changePackageFilter(packageName: string): void {
+function changePackageFilter(value: string | string[]): void {
+  const packageName = typeof value === "string" ? value : (value[0] ?? "");
   rawFilters.package_name = packageName;
   rawFilters.sdk_version = "";
   filterOptions.sdk_versions = [];
   void loadFilterOptions(packageName || undefined);
 }
+function clearPackageFilter(): void { changePackageFilter(""); }
 async function loadLogs(options: { resetPage?: boolean; targetPage?: number } = {}): Promise<void> {
   const targetPage = options.resetPage ? 1 : (options.targetPage ?? rawPage.value); rawRequestedPage.value = targetPage; const requestSequence = ++rawRequestSequence; beginFeedback(feedback);
   try { const response = await getEvents(rawQueryParams(targetPage)); if (requestSequence !== rawRequestSequence) return; rawResult.total = response.data.total; rawResult.items = response.data.items; rawPage.value = targetPage; rawRequestedPage.value = targetPage; if (selected.value) selected.value = rawResult.items.find((item) => item.id === selected.value?.id) ?? null; }

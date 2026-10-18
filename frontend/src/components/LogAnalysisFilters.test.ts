@@ -27,7 +27,7 @@ describe("LogAnalysisFilters", () => {
     expect(wrapper.emitted("query")).toBeUndefined();
     expect(wrapper.get("[data-testid='filter-error']").text()).toContain("包名");
 
-    await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
+    await wrapper.setProps({ modelValue: { package_name: "com.example.app" } });
     await wrapper.get("[data-testid='filter-date-from']").setValue("2026-09-01");
     await wrapper.get("[data-testid='filter-date-to']").setValue("2026-09-09");
     await wrapper.get("[data-testid='filter-query-existing']").trigger("click");

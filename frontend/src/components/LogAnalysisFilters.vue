@@ -23,7 +23,7 @@
       </label>
       <label>
         <span>包名（必填）</span>
-        <input data-testid="filter-package-name" type="text" :value="draft.package_name" :disabled="disabled || loading" placeholder="完全匹配" @input="updateField('package_name', $event)" />
+          <PackageSelect :model-value="draft.package_name" input-test-id="filter-package-name" placeholder="搜索并选择完整包名" :disabled="disabled || loading" @update:model-value="updatePackageName" />
       </label>
     </div>
 
@@ -48,6 +48,7 @@ import { computed, reactive, ref, watch } from "vue";
 import { defaultRecentThreeDays } from "@/utils/logDateRange";
 import { validateAnalysisScope } from "@/utils/logAnalysisScope";
 import type { LogLevel } from "@/api/dashboard";
+import PackageSelect from "@/components/PackageSelect.vue";
 
 export interface LogAnalysisFilterValues {
   package_name: string;
@@ -122,6 +123,11 @@ function updateField(field: keyof LogAnalysisFilterValues, event: Event) {
   const target = event.target as HTMLInputElement | HTMLSelectElement;
   const value = field === "hour_from" || field === "hour_to" ? Number(target.value) : target.value;
   draft[field] = value as never;
+  emit("update:modelValue", snapshot());
+}
+
+function updatePackageName(value: string | string[]) {
+  draft.package_name = typeof value === "string" ? value : (value[0] ?? "");
   emit("update:modelValue", snapshot());
 }
 
