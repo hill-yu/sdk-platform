@@ -40,7 +40,7 @@ cd frontend
 <bundled-node> ...\vitest.mjs run --pool=threads --poolOptions.threads.singleThread=true
 ```
 
-- 前端最终全量：41 files / 227 tests passed。
+- 前端最终全量：42 files / 230 tests passed。
 - `vue-tsc --noEmit`：passed。
 - `vite build`：passed；仅有既有的 bundle 大小提示。
 
@@ -62,7 +62,9 @@ powershell -NoProfile -File .\scripts\run_log_history_acceptance.ps1 -EnvFile <p
 
 ## 本地服务与浏览器验收
 
+- 独立本地开发库：`sdk_local_acceptance_20261018`，监听 `127.0.0.1:55432`；使用 `scripts/init_db.sql`、`scripts/migrate_cos_upload_status.sql`、`migrate_log_analysis.py --apply`、`migrate_event_package_name.py --apply`、`migrate_config_versions.py --apply` 完成正式初始化/迁移，公开表数量为 16，包含事件、配置、版本、使用时长、日志分析、stage 和导出相关表。
+- 私有本地配置文件：`SDK/.local-run/local-dev.env`，未跟踪、未提交；凭据内容不记录在本文档中。
 - 前端：`http://127.0.0.1:5173/`，HTTP 200。
 - 管理 API：`http://127.0.0.1:8101/api/admin/health`，HTTP 200，返回 `{"status":"ok"}`。
-- 已启动本地前后端与 disposable PostgreSQL；由于数据库只包含本次隔离验收所需的最小表，健康检查可用，完整业务页面需接入完整开发库。
+- 真实授权业务 API：使用本地登录会话调用 `/api/admin/auth/login`、`/api/admin/auth/me`、`/api/admin/log-analysis/parse-jobs/history?package_name=com.example.local`、`/api/admin/log-analysis/parse-jobs/9001/metrics/overview` 和 `/metrics/configs`，结果为 `login_username=admin me_username=admin history_items=1 history_job=9001 overview_actual_clicks=1 configs_status=0`。
 - Codex 内置浏览器尝试打开本机地址时被容器策略拒绝：`ERR_BLOCKED_BY_CLIENT`，因此桌面/390px 交互验收未宣称通过。
