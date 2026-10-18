@@ -40,3 +40,10 @@
 - 预检期间连接均为 idle，无 active/waiting query；事务最终 `ROLLBACK`。
 
 建议的后续读取方案（仍需 root 确认）：事件按 `server_ts` 日边界、稳定游标 `(server_ts,id)`、每批最多 500 行、单批 statement timeout 5 秒，批次间限速；使用时长按 `(server_ts,id)` 同样分批。由于事件目标日计划仍是分区 Seq Scan，先追加一个 planner-only keyset `EXPLAIN` 并评估单批成本，若单批超时则暂停，不建索引、不改变生产计划任务。
+
+## 导出脚本安全修正记录
+
+- root 已批准方案后，旧版脚本在审查阻断前实际完成了 2 个 events 批次，共 1000 行、约 855KB；未开始 usage，没有 manifest，未导入本地。该 `.local-run` 文件是失败证据，禁止作为导入输入，不提交到 Git。
+- 随后已停止远端调用；生产复核显示只有 idle 连接、无 active 导出查询。
+- 新版脚本提交 `2063a67`：远程只解析 DB 连接字段并用进程内 `PGPASSWORD`，每次短事务 READ ONLY；唯一 run 目录、partial 文件、完成 manifest、SHA-256、固定时间窗、行数/字节上限；本地导入强制 `127.0.0.1:55432/sdk_prod_snapshot_20261018_001`、要求空库和完整 manifest，并按 500 行本地事务批量导入。
+- `scripts/test_snapshot_import.py`：4 passed；新 SHA 未经独立复审前不再次连接生产。
