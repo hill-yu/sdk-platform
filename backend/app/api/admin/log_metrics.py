@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
@@ -86,7 +87,11 @@ def _metric_scope(
 
 async def _call_metric(service_name: str, scope: dict[str, object], db: AsyncSession, **kwargs):
     try:
-        return await getattr(_metrics_service(), service_name)(db, **scope, **kwargs)
+        metric = getattr(_metrics_service(), service_name)
+        parameters = inspect.signature(metric).parameters
+        accepts_arbitrary_scope = any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())
+        accepted_scope = scope if accepts_arbitrary_scope else {key: value for key, value in scope.items() if key in parameters}
+        return await metric(db, **accepted_scope, **kwargs)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

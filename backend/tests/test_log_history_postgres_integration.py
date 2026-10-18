@@ -9,10 +9,14 @@ from __future__ import annotations
 import os
 from datetime import datetime, timezone
 
+import httpx
 import pytest
 from sqlalchemy import event, insert
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.admin_main import app
+from app.api.admin.deps import require_admin_token
+from app.core.database import get_db_no_commit
 from app.models.log_analysis import LogReparseJob
 from app.models.log_metrics import H1Declaration, H1DeclarationStage, LogClickAttempt, LogClickAttemptStage
 from app.services.log_history_service import get_complete_job_context
@@ -102,3 +106,53 @@ async def test_two_successful_jobs_are_isolated_across_all_history_metric_surfac
     assert "sdk_log_h1_declarations" not in sql and "sdk_log_click_attempts" not in sql
     assert "sdk_log_h1_declaration_stage" in sql and "sdk_log_click_attempt_stage" in sql
     assert sql.count("job_id") >= 10
+
+
+@pytest.mark.anyio
+async def test_http_history_metrics_use_job_id_and_reject_unavailable_jobs(db):
+    await seed(db)
+    await db.execute(insert(LogReparseJob), [
+        dict(id=103, package_name="com.example.app", range_start=START, range_end=END, snapshot_end=END, status="failed", processed_count=0, total_count=1, h1_count=0, failed_h1_count=0, no_h1_count=0),
+        dict(id=104, package_name="com.example.app", range_start=START, range_end=END, snapshot_end=END, status="success", processed_count=0, total_count=1, h1_count=0, failed_h1_count=0, no_h1_count=0),
+    ])
+    await db.commit()
+
+    async def override_db():
+        yield db
+
+    async def override_admin():
+        return "test-admin"
+
+    app.dependency_overrides[get_db_no_commit] = override_db
+    app.dependency_overrides[require_admin_token] = override_admin
+    statements: list[str] = []
+    listener = lambda *_args: statements.append(_args[2])
+    event.listen(db.bind.sync_engine, "before_cursor_execute", listener)
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            paths = ["overview", "configs", "targets", "failures", "h1"]
+            for metric in paths:
+                response = await client.get(f"/api/admin/log-analysis/parse-jobs/101/metrics/{metric}")
+                assert response.status_code == 200, (metric, response.text)
+                assert response.json()["code"] == 0
+            for metric in paths:
+                response = await client.get(f"/api/admin/log-analysis/parse-jobs/102/metrics/{metric}")
+                assert response.status_code == 200, (metric, response.text)
+                assert response.json()["code"] == 0
+            overview_a = (await client.get("/api/admin/log-analysis/parse-jobs/101/metrics/overview")).json()["data"]
+            overview_b = (await client.get("/api/admin/log-analysis/parse-jobs/102/metrics/overview")).json()["data"]
+            assert overview_a["actual_click_count"] == 1
+            assert overview_b["actual_click_count"] == 0
+
+            assert (await client.get("/api/admin/log-analysis/parse-jobs/999/metrics/overview")).status_code == 404
+            assert (await client.get("/api/admin/log-analysis/parse-jobs/103/metrics/overview")).status_code == 409
+            assert (await client.get("/api/admin/log-analysis/parse-jobs/104/metrics/overview")).status_code == 409
+            sql = "\n".join(statements)
+            assert "sdk_log_h1_declarations" not in sql and "sdk_log_click_attempts" not in sql
+            assert "sdk_log_h1_declaration_stage" in sql and "sdk_log_click_attempt_stage" in sql
+            assert "job_id" in sql
+    finally:
+        event.remove(db.bind.sync_engine, "before_cursor_execute", listener)
+        app.dependency_overrides.pop(get_db_no_commit, None)
+        app.dependency_overrides.pop(require_admin_token, None)
