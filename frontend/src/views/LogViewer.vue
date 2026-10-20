@@ -89,6 +89,9 @@
           :hour-from="appliedRawFilters.hour_from"
           :date-to="appliedRawFilters.date_to"
           :hour-to="appliedRawFilters.hour_to"
+          :scope-ready="rawScopeReady"
+          :scope-busy="rawLoadState === 'loading'"
+          :scope-error="rawLoadState === 'error' ? rawLoadError : ''"
         />
       </section>
       <div class="viewer-grid">
@@ -408,7 +411,11 @@ const filterOptionsError = ref("");
 const filterOptionsLoading = ref(false);
 let filterOptionsRequestSequence = 0;
 const rawResult = reactive({ total: 0, items: [] as EventItem[] });
+const rawLoadState = ref<"idle" | "loading" | "success" | "error">("idle");
+const rawLoadError = ref("");
 const rawPage = ref(1); const rawRequestedPage = ref(1); const rawPageSize = 20; const selected = ref<EventItem | null>(null); let rawRequestSequence = 0;
+const rawScopeKey = (filters: RawFilters) => JSON.stringify(filters);
+const rawScopeReady = computed(() => rawLoadState.value === "success" && rawScopeKey(rawFilters) === rawScopeKey(appliedRawFilters.value));
 function display(value: unknown): string { return value == null || value === "" ? "-" : String(value); }
 function levelClass(value: unknown): string { return typeof value === "string" ? `level-${value}` : "level-unknown"; }
 function rawQueryParams(targetPage: number): EventQuery {
@@ -462,9 +469,9 @@ function changePackageFilter(value: string | string[]): void {
 }
 function clearPackageFilter(): void { changePackageFilter(""); }
 async function loadLogs(options: { resetPage?: boolean; targetPage?: number } = {}): Promise<void> {
-  const targetPage = options.resetPage ? 1 : (options.targetPage ?? rawPage.value); rawRequestedPage.value = targetPage; const requestSequence = ++rawRequestSequence; beginFeedback(feedback);
-  try { const response = await getEvents(rawQueryParams(targetPage)); if (requestSequence !== rawRequestSequence) return; rawResult.total = response.data.total; rawResult.items = response.data.items; rawPage.value = targetPage; rawRequestedPage.value = targetPage; if (selected.value) selected.value = rawResult.items.find((item) => item.id === selected.value?.id) ?? null; }
-  catch (error) { if (requestSequence !== rawRequestSequence) return; rawRequestedPage.value = rawPage.value; setFeedbackError(feedback, error instanceof Error ? error.message : "日志查询失败"); }
+  const targetPage = options.resetPage ? 1 : (options.targetPage ?? rawPage.value); rawRequestedPage.value = targetPage; const requestSequence = ++rawRequestSequence; rawLoadState.value = "loading"; rawLoadError.value = ""; beginFeedback(feedback);
+  try { const response = await getEvents(rawQueryParams(targetPage)); if (requestSequence !== rawRequestSequence) return; rawResult.total = response.data.total; rawResult.items = response.data.items; rawPage.value = targetPage; rawRequestedPage.value = targetPage; rawLoadState.value = "success"; if (selected.value) selected.value = rawResult.items.find((item) => item.id === selected.value?.id) ?? null; }
+  catch (error) { if (requestSequence !== rawRequestSequence) return; rawRequestedPage.value = rawPage.value; rawLoadState.value = "error"; rawLoadError.value = error instanceof Error ? error.message : "日志查询失败"; setFeedbackError(feedback, rawLoadError.value); }
 }
 const rawTotalPages = computed(() => Math.max(1, Math.ceil(rawResult.total / rawPageSize)));
 async function changePage(nextPage: number): Promise<void> { const boundedPage = Math.min(rawTotalPages.value, Math.max(1, nextPage)); if (boundedPage !== rawRequestedPage.value) await loadLogs({ targetPage: boundedPage }); }

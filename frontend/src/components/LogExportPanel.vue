@@ -7,9 +7,9 @@
       </select>
     </label>
     <span v-if="exportMode === 'h1'" data-testid="h1-export-note" class="export-note">有 H1 按条拆行，无 H1 保留原始 extra</span>
-    <PackageMultiSelect v-if="!props.packageName" v-model="packageNames" />
-    <span v-else data-testid="export-package">导出包名：{{ props.packageName }}</span>
-    <button data-testid="export-button" class="primary" type="button" :disabled="!effectivePackageNames.length || modeLocked" @click="startExport">
+    <span data-testid="export-scope">{{ props.packageName ? `导出包名：${props.packageName}` : "导出范围：全部包名（跟随当前筛选）" }}</span>
+    <span v-if="!props.scopeReady || props.scopeBusy || props.scopeError" data-testid="export-scope-note" class="export-note">{{ props.scopeError || (props.scopeBusy ? "查询中，请稍候…" : "请先查询并确认当前筛选条件") }}</span>
+    <button data-testid="export-button" class="primary" type="button" :disabled="!props.scopeReady || props.scopeBusy || !!props.scopeError || modeLocked" @click="startExport">
       {{ submitting ? "正在创建任务" : "批量导出 CSV" }}
     </button>
     <span v-if="currentJob">状态：{{ statusText }}</span>
@@ -24,9 +24,8 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import type { LogLevel } from "@/api/dashboard";
 import { createLogExport, downloadLogExport, getLogExport } from "@/api/logExports";
 import type { LogExportJob } from "@/api/logExports";
-import PackageMultiSelect from "@/components/PackageMultiSelect.vue";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   packageName: string;
   sdkVersion: string;
   deviceId: string;
@@ -35,9 +34,10 @@ const props = defineProps<{
   hourFrom?: string;
   dateTo: string;
   hourTo?: string;
-}>();
-const packageNames = ref<string[]>([]);
-const effectivePackageNames = computed(() => props.packageName ? [props.packageName] : packageNames.value);
+  scopeReady?: boolean;
+  scopeBusy?: boolean;
+  scopeError?: string;
+}>(), { scopeReady: true, scopeBusy: false, scopeError: "" });
 let previousAppliedPackage = props.packageName;
 const currentJob = ref<LogExportJob | null>(null);
 const submitting = ref(false);
@@ -50,7 +50,6 @@ const statusText = computed(() => ({ pending: "等待处理", running: "生成�
 const modeLocked = computed(() => submitting.value || currentJob.value?.status === "pending" || currentJob.value?.status === "running");
 watch(() => props.packageName, (next) => {
   if (next === previousAppliedPackage) return;
-  packageNames.value = [];
   previousAppliedPackage = next;
 });
 function changeExportMode(event: Event) {
@@ -98,15 +97,16 @@ async function pollJob(requestGeneration: number, expectedJobId: string) {
   }
 }
 async function startExport() {
-  if (disposed || submitting.value || modeLocked.value) return;
+  if (disposed || submitting.value || modeLocked.value || !props.scopeReady || props.scopeBusy || props.scopeError) return;
   const requestGeneration = ++generation;
   clearPollTimer();
-  const selectedPackageNames = [...effectivePackageNames.value];
+  const selectedPackageNames = props.packageName ? [props.packageName] : [];
   const selectedMode = exportMode.value;
   submitting.value = true; error.value = "";
   try {
     const response = await createLogExport({
       package_names: selectedPackageNames,
+      all_packages: !props.packageName,
       export_mode: selectedMode,
       sdk_version: props.sdkVersion || undefined,
       device_id: props.deviceId || undefined,

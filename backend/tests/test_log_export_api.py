@@ -63,6 +63,22 @@ def test_search_usage_packages_is_admin_protected_and_uses_usage_source(monkeypa
     assert response.json()["data"]["items"] == ["com.pivexa.app"]
 
 
+def test_create_all_package_export_scope_is_explicit(monkeypatch):
+    from app.admin_main import app
+    from app.api.admin import log_exports
+
+    async def fake_create(_db, body):
+        assert body.all_packages is True
+        assert body.package_names == []
+        return {"id": str(JOB_ID), "status": "pending"}
+
+    monkeypatch.setattr(log_exports.log_export_service, "create_job", fake_create)
+    with TestClient(app) as client:
+        response = client.post("/api/admin/log-exports", headers=HEADERS, json={"all_packages": True})
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "pending"
+
+
 def test_create_export_rejects_sdk_version_longer_than_20_characters():
     from app.admin_main import app
 

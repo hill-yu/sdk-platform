@@ -3,9 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({ createLogExport: vi.fn(), getLogExport: vi.fn(), downloadLogExport: vi.fn() }));
 vi.mock("@/api/logExports", () => api);
-vi.mock("@/components/PackageMultiSelect.vue", () => ({
-  default: { props: ["modelValue"], emits: ["update:modelValue"], template: "<button data-testid='choose' @click=\"$emit('update:modelValue', ['com.a','com.b'])\">choose</button>" },
-}));
 import LogExportPanel from "@/components/LogExportPanel.vue";
 
 describe("LogExportPanel", () => {
@@ -21,16 +18,14 @@ describe("LogExportPanel", () => {
     vi.useRealTimers();
   });
 
-  it("creates with selected packages and current filters then polls to success", async () => {
+  it("exports all packages with current applied filters then polls to success", async () => {
     const wrapper = mount(LogExportPanel, { props: {
       packageName: "", sdkVersion: "", deviceId: "d1", logLevel: "error", dateFrom: "2026-08-01", dateTo: "2026-08-28",
     }});
-    expect(wrapper.get("[data-testid='export-button']").attributes("disabled")).toBeDefined();
-    await wrapper.get("[data-testid='choose']").trigger("click");
     await wrapper.get("[data-testid='export-button']").trigger("click");
     await flushPromises();
     expect(api.createLogExport).toHaveBeenCalledWith({
-      package_names: ["com.a", "com.b"], export_mode: "raw", device_id: "d1", log_level: "error",
+      package_names: [], all_packages: true, export_mode: "raw", device_id: "d1", log_level: "error",
       date_from: "2026-08-01", date_to: "2026-08-28",
     });
     await vi.advanceTimersByTimeAsync(2000);
@@ -46,33 +41,21 @@ describe("LogExportPanel", () => {
       dateFrom: "2026-09-01", dateTo: "2026-09-23",
     }});
 
-    expect(wrapper.find("[data-testid='choose']").exists()).toBe(false);
     expect(wrapper.get("[data-testid='export-button']").attributes("disabled")).toBeUndefined();
     await wrapper.get("[data-testid='export-button']").trigger("click");
     await flushPromises();
 
     expect(api.createLogExport).toHaveBeenCalledWith({
-      package_names: ["com.a"], export_mode: "raw", sdk_version: "1.0.6", device_id: "d1", log_level: "error",
+      package_names: ["com.a"], all_packages: false, export_mode: "raw", sdk_version: "1.0.6", device_id: "d1", log_level: "error",
       date_from: "2026-09-01", date_to: "2026-09-23",
     });
     wrapper.unmount();
   });
 
-  it("restores multi-package selection when the page package is cleared", async () => {
-    const wrapper = mount(LogExportPanel, { props: {
-      packageName: "com.a", sdkVersion: "", deviceId: "", logLevel: "", dateFrom: "", dateTo: "",
-    }});
-
-    await wrapper.setProps({ packageName: "" });
-    expect(wrapper.find("[data-testid='choose']").exists()).toBe(true);
-    await wrapper.get("[data-testid='choose']").trigger("click");
-    await wrapper.get("[data-testid='export-button']").trigger("click");
-    await flushPromises();
-
-    expect(api.createLogExport).toHaveBeenCalledWith(expect.objectContaining({
-      package_names: ["com.a", "com.b"],
-    }));
-    wrapper.unmount();
+  it("disables export until the applied scope is ready", async () => {
+    const wrapper = mount(LogExportPanel, { props: { packageName: "", scopeReady: false, sdkVersion: "", deviceId: "", logLevel: "", dateFrom: "", dateTo: "" } });
+    expect(wrapper.get("[data-testid='export-button']").attributes("disabled")).toBeDefined();
+    expect(wrapper.get("[data-testid='export-scope-note']").text()).toContain("请先查询");
   });
 
   it("continues polling after a transient status error", async () => {
@@ -80,7 +63,6 @@ describe("LogExportPanel", () => {
       data: { id: "job-1", status: "success", row_count: 5 },
     });
     const wrapper = mount(LogExportPanel, { props: { packageName: "", sdkVersion: "", deviceId: "", logLevel: "", dateFrom: "", dateTo: "" } });
-    await wrapper.get("[data-testid='choose']").trigger("click");
     await wrapper.get("[data-testid='export-button']").trigger("click");
     await flushPromises();
     await vi.advanceTimersByTimeAsync(2000);
@@ -102,7 +84,7 @@ describe("LogExportPanel", () => {
     await flushPromises();
 
     expect(api.createLogExport).toHaveBeenCalledWith({
-      package_names: ["com.a"], export_mode: "raw", sdk_version: undefined, device_id: undefined, log_level: undefined,
+      package_names: ["com.a"], all_packages: false, export_mode: "raw", sdk_version: undefined, device_id: undefined, log_level: undefined,
       date_from: "2026-09-20", hour_from: 8, date_to: "2026-09-22", hour_to: 17,
     });
     wrapper.unmount();
@@ -148,7 +130,7 @@ describe("LogExportPanel", () => {
     await flushPromises();
 
     expect(api.createLogExport).toHaveBeenCalledWith({
-      package_names: ["com.a"], export_mode: "h1", sdk_version: "1.0.6", device_id: "d1", log_level: "error",
+      package_names: ["com.a"], all_packages: false, export_mode: "h1", sdk_version: "1.0.6", device_id: "d1", log_level: "error", hour_from: undefined, hour_to: undefined,
       date_from: "2026-09-01", date_to: "2026-09-03",
     });
     expect(wrapper.get("[data-testid='export-mode']").attributes("disabled")).toBeDefined();

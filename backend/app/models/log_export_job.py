@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from sqlalchemy import BigInteger, CheckConstraint, Column, Date, DateTime, SmallInteger, String, Text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, Date, DateTime, SmallInteger, String, Text, false
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.sql import func
 
@@ -26,12 +26,18 @@ class LogExportJob(Base):
             "(hour_from IS NULL OR hour_from BETWEEN 0 AND 23) AND (hour_to IS NULL OR hour_to BETWEEN 0 AND 23)",
             name="chk_log_export_jobs_hour_bounds",
         ),
+        CheckConstraint(
+            "(all_packages = TRUE AND package_names = '[]'::jsonb) OR "
+            "(all_packages = FALSE AND jsonb_array_length(package_names) BETWEEN 1 AND 50)",
+            name="chk_log_export_jobs_package_scope",
+        ),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     status = Column(String(20), nullable=False, default="pending")
     export_mode = Column(String(10), nullable=False, default="raw")
     package_names = Column(JSONB, nullable=False)
+    all_packages = Column(Boolean, nullable=False, default=False, server_default=false())
     sdk_version = Column(String(20))
     device_id = Column(String(64))
     log_level = Column(String(10))

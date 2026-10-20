@@ -344,6 +344,7 @@ CREATE TABLE IF NOT EXISTS sdk_log_export_jobs (
     status VARCHAR(20) NOT NULL DEFAULT 'pending',
     export_mode VARCHAR(10) NOT NULL DEFAULT 'raw',
     package_names JSONB NOT NULL,
+    all_packages BOOLEAN NOT NULL DEFAULT FALSE,
       sdk_version VARCHAR(20),
       device_id VARCHAR(64),
       log_level VARCHAR(10),
@@ -366,6 +367,10 @@ CREATE TABLE IF NOT EXISTS sdk_log_export_jobs (
       CONSTRAINT chk_log_export_jobs_hour_bounds CHECK (
           (hour_from IS NULL OR hour_from BETWEEN 0 AND 23) AND
           (hour_to IS NULL OR hour_to BETWEEN 0 AND 23)
+      ),
+      CONSTRAINT chk_log_export_jobs_package_scope CHECK (
+          (all_packages = TRUE AND package_names = '[]'::jsonb) OR
+          (all_packages = FALSE AND jsonb_array_length(package_names) BETWEEN 1 AND 50)
       )
   );
 CREATE INDEX IF NOT EXISTS idx_log_export_jobs_status_created ON sdk_log_export_jobs (status, created_at);

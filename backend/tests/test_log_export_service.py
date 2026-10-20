@@ -16,7 +16,7 @@ def test_log_export_job_model_has_required_columns():
     assert set(columns.keys()) == {
         "id", "status", "package_names", "device_id", "log_level",
         "sdk_version", "date_from", "hour_from", "date_to", "hour_to", "file_path", "row_count", "error_message",
-        "created_at", "started_at", "finished_at", "export_mode",
+        "created_at", "started_at", "finished_at", "export_mode", "all_packages",
     }
     assert columns["package_names"].nullable is False
     assert columns["sdk_version"].nullable is True
@@ -32,6 +32,7 @@ def test_log_export_job_model_has_required_columns():
     assert "chk_log_export_jobs_hour_bounds" in constraints
     assert "chk_log_export_jobs_hour_pair" in constraints
     assert "chk_log_export_jobs_export_mode" in constraints
+    assert columns["all_packages"].nullable is False
 
 
 def test_log_export_job_is_registered_in_model_exports():
@@ -51,12 +52,14 @@ def test_log_export_migration_is_idempotent_and_indexed():
     assert "chk_log_export_jobs_hour_bounds" in sql
     assert "chk_log_export_jobs_hour_pair" in sql
     assert "ADD COLUMN IF NOT EXISTS export_mode VARCHAR(10)" in sql
+    assert "ADD COLUMN IF NOT EXISTS all_packages BOOLEAN" in sql
 
     init_sql = Path("scripts/init_db.sql").read_text(encoding="utf-8")
     assert "sdk_version VARCHAR(20)" in init_sql
     assert "hour_from SMALLINT" in init_sql
     assert "hour_to SMALLINT" in init_sql
     assert "export_mode VARCHAR(10)" in init_sql
+    assert "all_packages BOOLEAN" in init_sql
 
 
 def test_create_request_trims_and_deduplicates_packages():
@@ -78,6 +81,18 @@ def test_create_request_rejects_invalid_filters():
         LogExportCreateRequest(package_names=[])
     with pytest.raises(ValidationError):
         LogExportCreateRequest(package_names=["com.a"], date_from="2026-08-29", date_to="2026-08-28")
+
+
+def test_create_request_supports_explicit_all_packages_without_package_names():
+    from app.schemas.log_export_schemas import LogExportCreateRequest
+
+    body = LogExportCreateRequest(all_packages=True)
+    assert body.all_packages is True
+    assert body.package_names == []
+    with pytest.raises(ValidationError):
+        LogExportCreateRequest(all_packages=True, package_names=["com.a"])
+    with pytest.raises(ValidationError):
+        LogExportCreateRequest(all_packages=False, package_names=[])
 
 
 def test_export_request_accepts_complete_hour_range():
@@ -209,6 +224,23 @@ def test_apply_job_filters_omits_sdk_version_when_job_has_none():
         dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True},
     ))
     assert "sdk_events.sdk_version =" not in sql
+
+
+def test_apply_job_filters_all_packages_omits_package_in_predicate():
+    from sqlalchemy import select
+    from sqlalchemy.dialects import postgresql
+    from app.models.event import SdkEvent
+    from app.services.log_export_service import apply_job_filters
+
+    job = SimpleNamespace(
+        package_names=[], all_packages=True, sdk_version=None, device_id=None, log_level=None,
+        date_from=None, date_to=None,
+    )
+    sql = str(apply_job_filters(select(SdkEvent), job).compile(
+        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True},
+    ))
+    assert "sdk_events.event_type = 'log'" in sql
+    assert "package_name IN" not in sql
 
 
 def test_apply_job_filters_uses_the_same_utc_hour_range_as_event_queries():

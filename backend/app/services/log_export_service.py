@@ -140,7 +140,7 @@ async def get_job(db: AsyncSession, job_id: UUID) -> LogExportJob | None:
 
 def serialize_job(job: LogExportJob) -> dict[str, Any]:
     return {
-        "id": str(job.id), "status": job.status, "export_mode": getattr(job, "export_mode", "raw"), "row_count": int(job.row_count or 0),
+        "id": str(job.id), "status": job.status, "export_mode": getattr(job, "export_mode", "raw"), "all_packages": bool(getattr(job, "all_packages", False)), "row_count": int(job.row_count or 0),
         "error_message": job.error_message,
         "hour_from": getattr(job, "hour_from", None), "hour_to": getattr(job, "hour_to", None),
         "created_at": job.created_at.astimezone(SHANGHAI).isoformat(),
@@ -149,7 +149,9 @@ def serialize_job(job: LogExportJob) -> dict[str, Any]:
 
 
 def apply_job_filters(stmt, job):
-    stmt = stmt.where(SdkEvent.event_type == "log", SdkEvent.package_name.in_(job.package_names))
+    stmt = stmt.where(SdkEvent.event_type == "log")
+    if not getattr(job, "all_packages", False):
+        stmt = stmt.where(SdkEvent.package_name.in_(job.package_names))
     if job.sdk_version:
         stmt = stmt.where(SdkEvent.sdk_version == job.sdk_version)
     if job.device_id:

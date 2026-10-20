@@ -507,6 +507,14 @@ describe("LogViewer", () => {
 
     await wrapper.get("[data-testid='device-filter']").setValue("draft-device");
     await wrapper.get("[data-testid='date-from-filter']").setValue("2026-09-01");
+    expect(wrapper.findComponent(LogExportPanel).get("[data-testid='export-button']").attributes("disabled")).toBeDefined();
+    await wrapper.findComponent(LogExportPanel).get("[data-testid='export-button']").trigger("click");
+    await flushPromises();
+    expect(createLogExport).not.toHaveBeenCalled();
+    await wrapper.get("[data-testid='device-filter']").setValue("applied-device");
+    await wrapper.get("[data-testid='date-from-filter']").setValue("2026-08-01");
+    await wrapper.get("[data-testid='query-button']").trigger("click");
+    await flushPromises();
     await wrapper.findComponent(LogExportPanel).get("[data-testid='export-button']").trigger("click");
     await flushPromises();
     expect(createLogExport).toHaveBeenLastCalledWith(expect.objectContaining({
