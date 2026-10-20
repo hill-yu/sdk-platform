@@ -4,9 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getUsageDevices, getUsageSummary } from "@/api/usageDurations";
 import UsageDurationPanel from "@/components/UsageDurationPanel.vue";
 
+const searchUsagePackages = vi.hoisted(() => vi.fn());
+
 vi.mock("@/api/usageDurations", () => ({
   getUsageDevices: vi.fn(),
   getUsageSummary: vi.fn(),
+  searchUsagePackages,
 }));
 
 const summaryScope = { date_from: "2026-09-28", hour_from: 0, date_to: "2026-09-30", hour_to: 23 };
@@ -33,6 +36,18 @@ describe("UsageDurationPanel", () => {
     vi.mocked(getUsageDevices).mockResolvedValue({ data: { code: 0, data: { total: 1, page: 1, page_size: 20, items: [
       { package_name: "com.a", device_id: "device-a", device_model: "Pixel", duration_s: 270, sdk_version: "1.0", app_version: "2.0", last_report_at: "2026-09-30 10:00:00" },
     ] } } } as never);
+    searchUsagePackages.mockResolvedValue({ data: { items: ["com.a", "com.b"] } });
+  });
+
+  it("uses the usage-backed package combobox and keeps the typed draft separate from applied scope", async () => {
+    const wrapper = mount(UsageDurationPanel);
+    const input = wrapper.get("[data-testid='usage-package-name']");
+    await input.trigger("focus");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+
+    expect(searchUsagePackages).toHaveBeenCalledWith("");
+    expect(wrapper.find("[data-testid='usage-package-option']").exists()).toBe(true);
   });
 
   afterEach(() => vi.useRealTimers());

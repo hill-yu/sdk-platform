@@ -31,6 +31,7 @@
           :key="name"
           :data-package="name"
           :data-testid="optionTestId"
+          class="package-option"
           role="option"
           type="button"
           :class="{ highlighted: highlightedIndex === index }"
@@ -47,6 +48,8 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { searchLogPackages } from "@/api/logExports";
 
+type PackageSearch = (keyword: string) => Promise<{ data: { items: string[] } }>;
+
 const props = withDefaults(defineProps<{
   modelValue: string | string[];
   multiple?: boolean;
@@ -55,7 +58,9 @@ const props = withDefaults(defineProps<{
   inputTestId?: string;
   optionTestId?: string;
   removeTestId?: string;
-}>(), { multiple: false, placeholder: "搜索包名", disabled: false, inputTestId: "package-select-input", optionTestId: "package-select-option", removeTestId: "package-select-remove" });
+  searchPackages?: PackageSearch;
+  allowFreeText?: boolean;
+}>(), { multiple: false, placeholder: "搜索包名", disabled: false, inputTestId: "package-select-input", optionTestId: "package-select-option", removeTestId: "package-select-remove", allowFreeText: false });
 const emit = defineEmits<{ "update:modelValue": [value: string | string[]] }>();
 
 const root = ref<HTMLElement | null>(null);
@@ -76,7 +81,8 @@ function searchNow(currentId = ++requestId) {
   if (timer) clearTimeout(timer);
   loading.value = true;
   error.value = "";
-  void searchLogPackages(keyword.value.trim()).then((response) => {
+  const search = props.searchPackages ?? searchLogPackages;
+  void search(keyword.value.trim()).then((response) => {
     if (currentId !== requestId) return;
     options.value = response.data.items;
     highlightedIndex.value = -1;
@@ -144,7 +150,10 @@ function onDocumentClick(event: MouseEvent) {
 document.addEventListener("click", onDocumentClick);
 watch(keyword, () => {
   if (suppressKeywordSearch) { suppressKeywordSearch = false; return; }
-  if (!props.disabled && open.value) scheduleSearch();
+  if (props.allowFreeText && !props.multiple) emit("update:modelValue", keyword.value.trim());
+  if (!props.disabled && open.value) {
+    scheduleSearch();
+  }
 });
 watch(() => props.modelValue, (value) => { if (!open.value && !props.multiple) keyword.value = typeof value === "string" ? value : ""; }, { deep: true });
 onBeforeUnmount(() => { if (timer) clearTimeout(timer); ++requestId; document.removeEventListener("click", onDocumentClick); });
@@ -157,8 +166,9 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer); ++requestId; document.re
 .package-chip { padding: 4px 8px; border-radius: 6px; background: var(--warning-bg); }
 .package-chip button { border: 0; background: transparent; padding: 0 2px; cursor: pointer; }
 .package-options { position: absolute; z-index: 20; top: 100%; left: 0; right: 0; display: grid; gap: 4px; max-height: 240px; overflow: auto; padding: 6px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--panel-bg); box-shadow: var(--panel-shadow); }
-.package-options button { text-align: left; }
-.package-options button.highlighted { background: var(--hover-bg); }
+.package-options .package-option { appearance: none; width: 100%; border: 1px solid transparent; border-radius: 5px; text-align: left; color: var(--text-primary); background: var(--panel-bg); padding: 8px 10px; cursor: pointer; }
+.package-options .package-option:hover, .package-options .package-option.highlighted { border-color: var(--hover-border); background: var(--hover-bg); }
+.package-options .package-option:disabled { border-color: var(--disabled-border); color: var(--disabled-text); background: var(--disabled-bg); cursor: not-allowed; opacity: 1; }
 .package-options p { margin: 4px 6px; color: var(--text-muted); font-size: 12px; }
 .package-error { color: var(--error-text) !important; }
 </style>

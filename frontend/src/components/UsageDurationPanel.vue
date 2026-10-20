@@ -6,7 +6,7 @@
     </div>
 
     <form class="usage-filters" @submit.prevent="applyDraft">
-      <label>包名（可选）<input data-testid="usage-package-name" v-model="draft.package_name" type="text" placeholder="全部包名" :disabled="disabled || loading" /></label>
+      <label>包名（可选）<PackageSelect v-model="draft.package_name" input-test-id="usage-package-name" option-test-id="usage-package-option" placeholder="全部包名" :disabled="disabled || loading" :search-packages="searchUsagePackages" allow-free-text /></label>
       <label>开始日期<input data-testid="usage-date-from" v-model="draft.date_from" type="date" :disabled="disabled || loading" /></label>
       <label>开始小时<select data-testid="usage-hour-from" v-model.number="draft.hour_from" :disabled="disabled || loading"><option v-for="hour in hours" :key="`usage-from-${hour}`" :value="hour">{{ hour }}:00</option></select></label>
       <label>结束日期<input data-testid="usage-date-to" v-model="draft.date_to" type="date" :disabled="disabled || loading" /></label>
@@ -52,8 +52,9 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, reactive, ref } from "vue";
 
-import { getUsageDevices, getUsageSummary } from "@/api/usageDurations";
+import { getUsageDevices, getUsageSummary, searchUsagePackages } from "@/api/usageDurations";
 import type { UsageDevice, UsageScope, UsageSummaryItem } from "@/api/usageDurations";
+import PackageSelect from "@/components/PackageSelect.vue";
 import { defaultRecentThreeDays } from "@/utils/logDateRange";
 
 const props = withDefaults(defineProps<{ disabled?: boolean }>(), { disabled: false });

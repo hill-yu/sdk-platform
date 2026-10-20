@@ -5,7 +5,7 @@
       <p>按当前北京时间范围生成或刷新结构化解析结果。</p>
     </div>
     <div class="task-actions">
-      <button v-if="!activeJob" data-testid="start-parse" type="button" :disabled="disabled || starting || cancelling || !draftScope.package_name" @click="requestParse">{{ starting ? "创建中…" : "开始解析" }}</button>
+      <button v-if="!activeJob" data-testid="start-parse" class="ghost" type="button" :disabled="disabled || starting || cancelling || !draftScope.package_name" @click="requestParse">{{ starting ? "创建中…" : "开始解析" }}</button>
       <button v-if="activeJob" data-testid="cancel-parse" class="ghost" type="button" :disabled="cancelling" @click="requestCancel">{{ cancelling ? "取消中…" : "取消任务" }}</button>
     </div>
     <p v-if="job" data-testid="parse-status" class="task-status">状态：{{ statusLabel(job.status) }} · {{ job.processed_count }} / {{ job.total_count }} 条</p>

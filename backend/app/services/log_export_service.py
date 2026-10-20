@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.timezone import business_day_utc_range, business_hour_utc_range
 from app.models.event import SdkEvent
 from app.models.log_export_job import LogExportJob
+from app.models.usage_duration import SdkUsageDuration
 from app.schemas.log_export_schemas import LogExportCreateRequest
 from app.services.h1_extractor import extract_h1_records
 
@@ -115,6 +116,14 @@ async def search_packages(db: AsyncSession, keyword: str | None, limit: int) -> 
     if keyword and keyword.strip():
         stmt = stmt.where(SdkEvent.package_name.ilike(f"%{keyword.strip()}%"))
     rows = await db.execute(stmt.order_by(SdkEvent.package_name).limit(limit))
+    return list(rows.scalars().all())
+
+
+async def search_usage_packages(db: AsyncSession, keyword: str | None, limit: int) -> list[str]:
+    stmt = select(SdkUsageDuration.package_name).distinct()
+    if keyword and keyword.strip():
+        stmt = stmt.where(SdkUsageDuration.package_name.ilike(f"%{keyword.strip()}%"))
+    rows = await db.execute(stmt.order_by(SdkUsageDuration.package_name).limit(limit))
     return list(rows.scalars().all())
 
 

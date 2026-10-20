@@ -39,6 +39,11 @@ describe("LogParseTaskPanel", () => {
     expect(wrapper.emitted("request-parse")).toEqual([[scope]]);
   });
 
+  it("uses the neutral action treatment for starting a parse", () => {
+    const wrapper = mount(LogParseTaskPanel, { props: { draftScope: scope, job: null } });
+    expect(wrapper.get("[data-testid='start-parse']").classes()).toContain("ghost");
+  });
+
   it("renders status and progress supplied by LogViewer", () => {
     const wrapper = mount(LogParseTaskPanel, {
       props: { draftScope: scope, appliedScope: scope, job: runningJob },

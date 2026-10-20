@@ -47,6 +47,22 @@ def test_search_and_create_export(monkeypatch):
     assert created.json()["data"]["status"] == "pending"
 
 
+def test_search_usage_packages_is_admin_protected_and_uses_usage_source(monkeypatch):
+    from app.admin_main import app
+    from app.api.admin import log_exports
+
+    async def fake_search_usage(_db, keyword, limit):
+        assert (keyword, limit) == ("pivexa", 20)
+        return ["com.pivexa.app"]
+
+    monkeypatch.setattr(log_exports.log_export_service, "search_usage_packages", fake_search_usage)
+    with TestClient(app) as client:
+        unauthenticated = client.get("/api/admin/usage-package-names")
+        response = client.get("/api/admin/usage-package-names?keyword=pivexa", headers=HEADERS)
+    assert unauthenticated.status_code == 401
+    assert response.json()["data"]["items"] == ["com.pivexa.app"]
+
+
 def test_create_export_rejects_sdk_version_longer_than_20_characters():
     from app.admin_main import app
 

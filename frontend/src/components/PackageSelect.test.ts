@@ -23,6 +23,16 @@ describe("PackageSelect", () => {
     expect(wrapper.emitted("update:modelValue")?.[0]).toEqual(["com.example.a"]);
   });
 
+  it("marks options with the themeable option class while preserving combobox semantics", async () => {
+    const wrapper = mount(PackageSelect, { props: { modelValue: "", multiple: false } });
+    await wrapper.get("[data-testid='package-select-input']").trigger("focus");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    const option = wrapper.get("[data-testid='package-select-option']");
+    expect(option.classes()).toContain("package-option");
+    expect(option.attributes("role")).toBe("option");
+  });
+
   it("supports keyboard selection and escape closes the list", async () => {
     const wrapper = mount(PackageSelect, { props: { modelValue: "", multiple: false } });
     const input = wrapper.get("[data-testid='package-select-input']");

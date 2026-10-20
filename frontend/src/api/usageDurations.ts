@@ -10,3 +10,6 @@ export const getUsageSummary = (scope: UsageScope & { page?: number; page_size?:
   request.get<{ code: number; data: UsagePage<UsageSummaryItem> }>("/usage-durations/summary", { params: scope });
 export const getUsageDevices = (scope: UsageScope & { package_name: string; device_model?: string | null; page?: number; page_size?: number }) =>
   request.get<{ code: number; data: UsagePage<UsageDevice> }>("/usage-durations/devices", { params: scope });
+
+export const searchUsagePackages = (keyword: string) =>
+  request.get<{ code: number; data: { items: string[] } }>("/usage-package-names", { params: { keyword: keyword || undefined, limit: 20 } });

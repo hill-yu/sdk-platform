@@ -20,6 +20,7 @@ const {
   cancelParseJob,
   getUsageSummary,
   getUsageDevices,
+  searchUsagePackages,
   createLogExport,
   getLogExport,
   downloadLogExport,
@@ -39,6 +40,7 @@ const {
   cancelParseJob: vi.fn(),
   getUsageSummary: vi.fn(),
   getUsageDevices: vi.fn(),
+  searchUsagePackages: vi.fn(),
   createLogExport: vi.fn(),
   getLogExport: vi.fn(),
   downloadLogExport: vi.fn(),
@@ -74,7 +76,7 @@ vi.mock("@/api/logMetrics", () => ({
   getParseJob,
   cancelParseJob,
 }));
-vi.mock("@/api/usageDurations", () => ({ getUsageSummary, getUsageDevices }));
+vi.mock("@/api/usageDurations", () => ({ getUsageSummary, getUsageDevices, searchUsagePackages }));
 vi.mock("@/api/logExports", () => ({ createLogExport, getLogExport, downloadLogExport }));
 vi.mock("@/components/PackageSelect.vue", () => ({
   default: {
