@@ -91,4 +91,45 @@ try {
   $mutex.ReleaseMutex()
   $mutex.Dispose()
 }
-Write-Output (ConvertTo-Json @{ database = "sdk_prod_snapshot_20261018_001"; backend_pid = $backend.Id; frontend_pid = $frontend.Id; parse_worker_pid = $workerPid })
+$exportWorkerLockPath = Join-Path $runRoot "snapshot-export-worker.lock.json"
+$exportWorkerLauncher = (Resolve-Path (Join-Path $RepoRoot "scripts\start_snapshot_export_worker.py")).Path
+$exportMutexName = "Global\SDK-SnapshotExportWorker-" + ($RepoRoot -replace "[^A-Za-z0-9]", "_")
+$exportMutex = [Threading.Mutex]::new($false, $exportMutexName)
+if (-not $exportMutex.WaitOne(30000)) { throw "Timed out waiting for the local snapshot export worker lock" }
+try {
+  $exportWorkerRecord = $null
+  if (Test-Path -LiteralPath $exportWorkerLockPath) {
+    $candidate = $null
+    for ($attempt = 0; $attempt -lt 5 -and -not $candidate; $attempt++) {
+      try { $candidate = [IO.File]::ReadAllText($exportWorkerLockPath) | ConvertFrom-Json } catch { Start-Sleep -Milliseconds 100 }
+    }
+    if ($candidate -and $candidate.database -eq "sdk_prod_snapshot_20261018_001" -and $candidate.launcher -eq $exportWorkerLauncher -and $candidate.status -eq "running") {
+      try {
+        $candidateProcess = Get-Process -Id ([int]$candidate.pid) -ErrorAction Stop
+        $candidateWmi = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$candidate.pid)"
+        if ($candidateProcess.StartTime.ToUniversalTime().Ticks -eq [int64]$candidate.start_time_ticks -and ([string]$candidateWmi.CommandLine).Contains($exportWorkerLauncher)) { $exportWorkerRecord = $candidate }
+      } catch { $exportWorkerRecord = $null }
+    }
+    if (-not $exportWorkerRecord) { Remove-Item -LiteralPath $exportWorkerLockPath -Force -ErrorAction SilentlyContinue }
+  }
+  if (-not $exportWorkerRecord) {
+    $nakedExportWorker = Get-CimInstance Win32_Process | Where-Object {
+      $_.CommandLine -and $_.CommandLine -match "(^|\s)-m\s+app\.workers\.log_export_worker(\s|$)"
+    } | Select-Object -First 1
+    if ($nakedExportWorker) { throw "Unowned bare log_export_worker detected; refusing to adopt it" }
+    [IO.File]::WriteAllText($exportWorkerLockPath, (@{ status = "starting"; owner_pid = $PID; database = "sdk_prod_snapshot_20261018_001"; launcher = $exportWorkerLauncher } | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
+    try {
+      $exportProcess = Start-Process -WindowStyle Hidden -FilePath (Get-Command python).Source -WorkingDirectory (Join-Path $RepoRoot "backend") -ArgumentList @($exportWorkerLauncher) -RedirectStandardOutput (Join-Path $runRoot "snapshot-export-worker.out.log") -RedirectStandardError (Join-Path $runRoot "snapshot-export-worker.err.log") -PassThru
+      $exportWorkerRecord = @{ status = "running"; pid = $exportProcess.Id; start_time_ticks = $exportProcess.StartTime.ToUniversalTime().Ticks; database = "sdk_prod_snapshot_20261018_001"; launcher = $exportWorkerLauncher }
+      [IO.File]::WriteAllText($exportWorkerLockPath, ($exportWorkerRecord | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
+    } catch {
+      Remove-Item -LiteralPath $exportWorkerLockPath -Force -ErrorAction SilentlyContinue
+      throw
+    }
+  }
+  $exportWorkerPid = [int]$exportWorkerRecord.pid
+} finally {
+  $exportMutex.ReleaseMutex()
+  $exportMutex.Dispose()
+}
+Write-Output (ConvertTo-Json @{ database = "sdk_prod_snapshot_20261018_001"; backend_pid = $backend.Id; frontend_pid = $frontend.Id; parse_worker_pid = $workerPid; export_worker_pid = $exportWorkerPid })
