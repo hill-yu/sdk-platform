@@ -6,6 +6,10 @@ def test_snapshot_start_script_starts_only_the_local_parse_worker_once():
 
     assert "sdk_prod_snapshot_20261018_001" in script
     assert "app.workers.log_parse_worker" in script
+    assert "snapshot-parse-worker.lock.json" in script
+    assert "start_time_ticks" in script
+    assert "Threading.Mutex" in script
     assert "Get-CimInstance Win32_Process" in script
+    assert "candidate.database -eq \"sdk_prod_snapshot_20261018_001\"" in script
     assert "log_export_worker" not in script
     assert "cos_worker" not in script.lower()

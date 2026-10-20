@@ -35,14 +35,41 @@ $runRoot = Join-Path $RepoRoot ".local-run"
 New-Item -ItemType Directory -Force -Path $runRoot | Out-Null
 $backend = Start-Process -WindowStyle Hidden -FilePath (Get-Command python).Source -WorkingDirectory (Join-Path $RepoRoot "backend") -ArgumentList @("-m", "uvicorn", "app.admin_main:app", "--host", "127.0.0.1", "--port", "8101") -RedirectStandardOutput (Join-Path $runRoot "snapshot-admin-backend.out.log") -RedirectStandardError (Join-Path $runRoot "snapshot-admin-backend.err.log") -PassThru
 $frontend = Start-Process -WindowStyle Hidden -FilePath (Get-Command npm).Source -WorkingDirectory (Join-Path $RepoRoot "frontend") -ArgumentList @("run", "dev", "--", "--host", "127.0.0.1", "--port", "5173") -RedirectStandardOutput (Join-Path $runRoot "snapshot-frontend.out.log") -RedirectStandardError (Join-Path $runRoot "snapshot-frontend.err.log") -PassThru
-$repoPattern = [regex]::Escape($RepoRoot)
-$worker = Get-CimInstance Win32_Process | Where-Object {
-  $_.CommandLine -and $_.CommandLine -match "app\.workers\.log_parse_worker" -and $_.CommandLine -match $repoPattern
-} | Select-Object -First 1
-if ($worker) {
-  $workerPid = $worker.ProcessId
-} else {
-  $workerProcess = Start-Process -WindowStyle Hidden -FilePath (Get-Command python).Source -WorkingDirectory (Join-Path $RepoRoot "backend") -ArgumentList @("-m", "app.workers.log_parse_worker") -RedirectStandardOutput (Join-Path $runRoot "snapshot-parse-worker.out.log") -RedirectStandardError (Join-Path $runRoot "snapshot-parse-worker.err.log") -PassThru
-  $workerPid = $workerProcess.Id
+$workerLockPath = Join-Path $runRoot "snapshot-parse-worker.lock.json"
+$mutexName = "Global\SDK-SnapshotParseWorker-" + ($RepoRoot -replace "[^A-Za-z0-9]", "_")
+$mutex = [Threading.Mutex]::new($false, $mutexName)
+if (-not $mutex.WaitOne(30000)) { throw "Timed out waiting for the local snapshot worker lock" }
+try {
+  $workerRecord = $null
+  if (Test-Path -LiteralPath $workerLockPath) {
+    try { $candidate = Get-Content -LiteralPath $workerLockPath -Raw | ConvertFrom-Json } catch { $candidate = $null }
+    if ($candidate -and $candidate.database -eq "sdk_prod_snapshot_20261018_001" -and $candidate.status -eq "running") {
+      try {
+        $candidateProcess = Get-Process -Id ([int]$candidate.pid) -ErrorAction Stop
+        $candidateWmi = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$candidate.pid)"
+        $candidateStartTicks = $candidateProcess.StartTime.ToUniversalTime().Ticks
+        if ($candidateStartTicks -eq [int64]$candidate.start_time_ticks -and $candidateWmi.CommandLine -match "(^|\s)-m\s+app\.workers\.log_parse_worker(\s|$)") {
+          $workerRecord = $candidate
+        }
+      } catch { $workerRecord = $null }
+    }
+    if (-not $workerRecord) { Remove-Item -LiteralPath $workerLockPath -Force -ErrorAction SilentlyContinue }
+  }
+  if (-not $workerRecord) {
+    $startingRecord = @{ status = "starting"; owner_pid = $PID; database = "sdk_prod_snapshot_20261018_001" } | ConvertTo-Json -Compress
+    [IO.File]::WriteAllText($workerLockPath, $startingRecord, [Text.UTF8Encoding]::new($false))
+    try {
+      $workerProcess = Start-Process -WindowStyle Hidden -FilePath (Get-Command python).Source -WorkingDirectory (Join-Path $RepoRoot "backend") -ArgumentList @("-m", "app.workers.log_parse_worker") -RedirectStandardOutput (Join-Path $runRoot "snapshot-parse-worker.out.log") -RedirectStandardError (Join-Path $runRoot "snapshot-parse-worker.err.log") -PassThru
+      $workerRecord = @{ status = "running"; pid = $workerProcess.Id; start_time_ticks = $workerProcess.StartTime.ToUniversalTime().Ticks; database = "sdk_prod_snapshot_20261018_001" }
+      [IO.File]::WriteAllText($workerLockPath, ($workerRecord | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
+    } catch {
+      Remove-Item -LiteralPath $workerLockPath -Force -ErrorAction SilentlyContinue
+      throw
+    }
+  }
+  $workerPid = [int]$workerRecord.pid
+} finally {
+  $mutex.ReleaseMutex()
+  $mutex.Dispose()
 }
 Write-Output (ConvertTo-Json @{ database = "sdk_prod_snapshot_20261018_001"; backend_pid = $backend.Id; frontend_pid = $frontend.Id; parse_worker_pid = $workerPid })
