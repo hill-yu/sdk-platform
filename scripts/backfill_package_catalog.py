@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+from urllib.parse import quote_plus
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +21,13 @@ class BackfillReport:
     rows: int
     batches: int
     last_cursor: tuple[datetime, int] | None
+
+
+def resolve_database_url() -> str:
+    database_url = os.environ.get("DATABASE_URL", "")
+    if "${DB_PASSWORD}" in database_url:
+        database_url = database_url.replace("${DB_PASSWORD}", quote_plus(os.environ.get("DB_PASSWORD", "")))
+    return database_url
 
 
 def build_parser() -> argparse.ArgumentParser:
