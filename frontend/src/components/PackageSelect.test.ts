@@ -23,6 +23,20 @@ describe("PackageSelect", () => {
     expect(wrapper.emitted("update:modelValue")?.[0]).toEqual(["com.example.a"]);
   });
 
+  it("renders the real admin envelope after a delayed package search", async () => {
+    let resolve!: (value: unknown) => void;
+    searchLogPackages.mockReturnValueOnce(new Promise((nextResolve) => { resolve = nextResolve; }));
+    const wrapper = mount(PackageSelect, { props: { modelValue: "" } });
+    const input = wrapper.get("[data-testid='package-select-input']");
+    await input.trigger("focus");
+    await vi.advanceTimersByTimeAsync(300);
+    expect(wrapper.find("[data-testid='package-select-loading']").exists()).toBe(true);
+    resolve({ code: 0, data: { items: ["com.slow-result"] } });
+    await flushPromises();
+    expect(wrapper.find("[data-testid='package-select-loading']").exists()).toBe(false);
+    expect(wrapper.find("[data-package='com.slow-result']").exists()).toBe(true);
+  });
+
   it("marks options with the themeable option class while preserving combobox semantics", async () => {
     const wrapper = mount(PackageSelect, { props: { modelValue: "", multiple: false } });
     await wrapper.get("[data-testid='package-select-input']").trigger("focus");
@@ -120,5 +134,18 @@ describe("PackageSelect", () => {
     await wrapper.setProps({ modelValue: ["com.example.b"] });
     await wrapper.get("[data-testid='package-select-remove']").trigger("click");
     expect(wrapper.emitted("update:modelValue")?.at(-1)).toEqual([[]]);
+  });
+
+  it("preserves free text on focusout and commits it on Enter", async () => {
+    const wrapper = mount(PackageSelect, { props: { modelValue: "com.initial", allowFreeText: true } });
+    const input = wrapper.get("[data-testid='package-select-input']");
+    await input.trigger("focus");
+    expect((input.element as HTMLInputElement).value).toBe("com.initial");
+    await input.setValue("com.manual");
+    await input.trigger("keydown", { key: "Enter" });
+    expect((input.element as HTMLInputElement).value).toBe("com.manual");
+    expect(wrapper.emitted("update:modelValue")?.at(-1)).toEqual(["com.manual"]);
+    await input.trigger("focusout", { relatedTarget: null });
+    expect((input.element as HTMLInputElement).value).toBe("com.manual");
   });
 });

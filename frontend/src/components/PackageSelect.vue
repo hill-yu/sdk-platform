@@ -9,6 +9,7 @@
     <input
       v-model="keyword"
       :data-testid="inputTestId"
+      class="package-select-input"
       type="text"
       :placeholder="placeholder"
       :disabled="disabled"
@@ -103,7 +104,7 @@ function scheduleSearch() {
   error.value = "";
   timer = setTimeout(() => { timer = undefined; searchNow(currentId); }, 300);
 }
-function openPicker() { if (!props.disabled) { if (!props.multiple && keyword.value === props.modelValue) keyword.value = ""; open.value = true; scheduleSearch(); } }
+function openPicker() { if (!props.disabled) { open.value = true; scheduleSearch(); } }
 function select(name: string) {
   if (!options.value.includes(name) || selectedNames.value.includes(name)) return;
   if (props.multiple) emit("update:modelValue", [...selectedNames.value, name]);
@@ -121,12 +122,26 @@ function moveHighlight(direction: 1 | -1) {
 }
 function onKeydown(event: KeyboardEvent) {
   if (event.key === "Escape") { cancelSearchAndRestore(); return; }
+  if (event.key === "Enter" && props.allowFreeText && !props.multiple) {
+    event.preventDefault();
+    if (open.value && highlightedIndex.value >= 0 && options.value[highlightedIndex.value]) select(options.value[highlightedIndex.value]);
+    else commitFreeText();
+    return;
+  }
   if (!open.value || !options.value.length) return;
   if (event.key === "ArrowDown") { event.preventDefault(); moveHighlight(1); }
   else if (event.key === "ArrowUp") { event.preventDefault(); moveHighlight(-1); }
   else if (event.key === "Enter" && highlightedIndex.value >= 0 && !selectedNames.value.includes(options.value[highlightedIndex.value])) { event.preventDefault(); select(options.value[highlightedIndex.value]); }
 }
 function cancelSearchAndRestore() {
+  closePicker(true);
+}
+function commitFreeText() {
+  const value = keyword.value.trim();
+  emit("update:modelValue", value);
+  closePicker(false);
+}
+function closePicker(restore: boolean) {
   if (timer) { clearTimeout(timer); timer = undefined; }
   ++requestId;
   open.value = false;
@@ -134,17 +149,19 @@ function cancelSearchAndRestore() {
   error.value = "";
   options.value = [];
   highlightedIndex.value = -1;
-  suppressKeywordSearch = true;
-  keyword.value = props.multiple ? "" : (typeof props.modelValue === "string" ? props.modelValue : "");
+  if (restore) {
+    suppressKeywordSearch = true;
+    keyword.value = props.multiple ? "" : (typeof props.modelValue === "string" ? props.modelValue : "");
+  }
 }
 function onFocusout(event: FocusEvent) {
   const nextTarget = event.relatedTarget as Node | null;
   if (root.value && nextTarget && root.value.contains(nextTarget)) return;
-  cancelSearchAndRestore();
+  closePicker(!(props.allowFreeText && !props.multiple));
 }
 function onDocumentClick(event: MouseEvent) {
   if (root.value && !root.value.contains(event.target as Node)) {
-    cancelSearchAndRestore();
+    closePicker(!(props.allowFreeText && !props.multiple));
   }
 }
 document.addEventListener("click", onDocumentClick);
@@ -161,7 +178,9 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer); ++requestId; document.re
 
 <style scoped>
 .package-select { position: relative; display: grid; gap: 6px; min-width: 220px; }
-.package-select > input { width: 100%; box-sizing: border-box; }
+.package-select-input { width: 100%; box-sizing: border-box; height: 36px; border: 1px solid var(--border-soft); border-radius: 6px; color: var(--text-primary); background: var(--panel-bg); padding: 8px 10px; font: inherit; outline: none; }
+.package-select-input:focus { border-color: var(--focus-border, var(--primary)); box-shadow: 0 0 0 2px var(--focus-ring, rgba(59, 130, 246, .16)); }
+.package-select-input:disabled { cursor: not-allowed; opacity: .5; }
 .selected-packages { display: flex; flex-wrap: wrap; gap: 6px; }
 .package-chip { padding: 4px 8px; border-radius: 6px; background: var(--warning-bg); }
 .package-chip button { border: 0; background: transparent; padding: 0 2px; cursor: pointer; }
