@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.core.rate_limit import write_limiter
 from app.models.event import SdkEvent
 from app.schemas.sdk_schemas import LogReportRequest
+from app.services.package_catalog_service import ensure_package_sources
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,8 @@ async def report_log(
         returned_events = result.all()
         if len(returned_events) != len(values):
             raise RuntimeError("数据库未返回完整事件键")
+
+        await ensure_package_sources(db, [body.package_name], has_log=True)
 
         accepted = len(returned_events)
     except Exception:

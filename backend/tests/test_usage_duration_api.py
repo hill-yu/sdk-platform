@@ -51,6 +51,25 @@ def test_usage_duration_writes_normalized_record_and_returns_acceptance(client):
     assert record.server_ts.tzinfo is not None
 
 
+def test_usage_duration_ensures_catalog_source_in_same_write_session(client, monkeypatch):
+    from app.api.sdk import usage_duration as usage_api
+
+    captured = {}
+
+    async def ensure(_db, package_names, **flags):
+        captured["names"] = list(package_names)
+        captured["flags"] = flags
+        return ["com.example.app"]
+
+    monkeypatch.setattr(usage_api, "ensure_package_sources", ensure)
+    session = StubWriteSession()
+    client.app.dependency_overrides[get_db] = override_write_db(session)
+    response = client.post("/api/v1/usage-duration", json=VALID_BODY)
+
+    assert response.status_code == 200
+    assert captured == {"names": ["com.example.app"], "flags": {"has_usage": True}}
+
+
 @pytest.mark.parametrize("duration_s", [1, 3600])
 def test_usage_duration_accepts_inclusive_boundaries(client, duration_s):
     session = StubWriteSession()

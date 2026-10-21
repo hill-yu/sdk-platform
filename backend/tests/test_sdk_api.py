@@ -274,3 +274,29 @@ def test_log_returns_quickly_after_returning_insert_and_stores_only_event(client
     assert returning == ["id", "server_ts"]
     assert session.pending_statement is None
     assert [statement.table.name for statement in session.executed] == ["sdk_events"]
+
+
+def test_log_ensures_catalog_source_once_per_request(client, monkeypatch):
+    from app.api.sdk import log as log_api
+
+    captured = {}
+
+    async def ensure(_db, package_names, **flags):
+        captured["names"] = list(package_names)
+        captured["flags"] = flags
+        return ["com.example.app"]
+
+    monkeypatch.setattr(log_api, "ensure_package_sources", ensure)
+    session = _ReturningWriteSession()
+    client.app.dependency_overrides[get_db] = override_write_db(session)
+    response = client.post(
+        "/api/v1/log",
+        json={
+            "package_name": " COM.Example.App ",
+            "device_id": "device-1",
+            "logs": [{"level": "info", "extra": "one"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured == {"names": ["com.example.app"], "flags": {"has_log": True}}
