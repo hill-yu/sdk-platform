@@ -24,6 +24,8 @@ def test_snapshot_start_script_starts_only_the_local_parse_worker_once():
     assert "Unowned bare log_parse_worker detected" in script
     assert "-m\\s+app\\.workers\\.log_parse_worker" in script
     assert "cos_worker" not in script.lower()
+    assert "$env:LOG_EXPORT_DIR" in script
+    assert 'Join-Path $runRoot "exports"' in script
     assert "start_snapshot_export_worker.py" in script
     assert "app.workers.log_export_worker" in export_launcher
     assert "LOG_EXPORT_DIR" in export_launcher

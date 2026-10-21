@@ -66,7 +66,7 @@
 
 ### H1 混合导出
 
-现有日志导出接口 `POST /api/admin/log-exports` 接受 `export_mode=raw|h1`，默认 `raw`；查询和下载接口保持 `/api/admin/log-exports/{id}` 与 `/api/admin/log-exports/{id}/download`。H1 CSV 列为：
+现有日志导出接口 `POST /api/admin/log-exports` 接受 `export_mode=raw|h1`，默认 `raw`，并以 `all_packages` 显式表示全部包名范围；查询和下载接口保持 `/api/admin/log-exports/{id}` 与 `/api/admin/log-exports/{id}/download`。API 与 export worker 必须共享同一个持久绝对 `LOG_EXPORT_DIR`，否则成功任务会因下载路径安全校验返回 404。H1 CSV 列为：
 
 ```text
 event_id,server_time,package_name,device_id,device_model,os,ver,

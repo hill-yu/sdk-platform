@@ -33,6 +33,8 @@ $env:COS_BUCKET = "local-bucket"
 $env:CONFIG_META_LOCAL_BASE_URL = "http://127.0.0.1:8100"
 $runRoot = Join-Path $RepoRoot ".local-run"
 New-Item -ItemType Directory -Force -Path $runRoot | Out-Null
+$env:LOG_EXPORT_DIR = Join-Path $runRoot "exports"
+New-Item -ItemType Directory -Force -Path $env:LOG_EXPORT_DIR | Out-Null
 $backend = Start-Process -WindowStyle Hidden -FilePath (Get-Command python).Source -WorkingDirectory (Join-Path $RepoRoot "backend") -ArgumentList @("-m", "uvicorn", "app.admin_main:app", "--host", "127.0.0.1", "--port", "8101") -RedirectStandardOutput (Join-Path $runRoot "snapshot-admin-backend.out.log") -RedirectStandardError (Join-Path $runRoot "snapshot-admin-backend.err.log") -PassThru
 $frontend = Start-Process -WindowStyle Hidden -FilePath (Get-Command npm).Source -WorkingDirectory (Join-Path $RepoRoot "frontend") -ArgumentList @("run", "dev", "--", "--host", "127.0.0.1", "--port", "5173") -RedirectStandardOutput (Join-Path $runRoot "snapshot-frontend.out.log") -RedirectStandardError (Join-Path $runRoot "snapshot-frontend.err.log") -PassThru
 $workerLockPath = Join-Path $runRoot "snapshot-parse-worker.lock.json"

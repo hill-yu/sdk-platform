@@ -129,3 +129,19 @@ def test_download_successful_csv(monkeypatch, tmp_path):
     assert response.status_code == 200
     assert "text/csv" in response.headers["content-type"]
     assert "sdk-logs-" in response.headers["content-disposition"]
+
+
+def test_download_missing_file_returns_404(monkeypatch, tmp_path):
+    from app.admin_main import app
+    from app.api.admin import log_exports
+
+    missing = tmp_path / "missing.csv"
+
+    async def fake_get(_db, _job_id):
+        return SimpleNamespace(id=JOB_ID, status="success", file_path=str(missing))
+
+    monkeypatch.setattr(log_exports.log_export_service, "get_job", fake_get)
+    monkeypatch.setattr(log_exports.get_settings(), "LOG_EXPORT_DIR", str(tmp_path))
+    with TestClient(app) as client:
+        response = client.get(f"/api/admin/log-exports/{JOB_ID}/download", headers=HEADERS)
+    assert response.status_code == 404
