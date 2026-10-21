@@ -47,6 +47,7 @@ class Settings(BaseSettings):
 
     LOG_LEVEL: str = "INFO"
     LOG_EXPORT_DIR: str = "exports"
+    PACKAGE_CATALOG_READS_ENABLED: bool = False
     LOG_PARSE_BATCH_SIZE: int = Field(default=200, ge=1, le=200)
     LOG_PARSE_CONCURRENCY: int = Field(default=3, ge=1, le=3)
     LOG_PARSE_MAX_DAYS: int = Field(default=7, ge=1, le=7)
