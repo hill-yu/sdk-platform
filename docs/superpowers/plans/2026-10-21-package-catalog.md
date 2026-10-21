@@ -26,7 +26,7 @@
 
 - 创建：`scripts/migrate_package_catalog.sql` —— 幂等创建目录、`pg_trgm` 扩展、搜索索引和注释。
 - 修改：`scripts/init_db.sql` —— 新数据库初始化时创建相同目录和索引。
-- 创建：`scripts/backfill_package_catalog.py` —— 真实 PostgreSQL 的游标分批补齐、超时、进度、重跑和最终校验。
+- 创建：`scripts/backfill_package_catalog.py` —— 真实 PostgreSQL 的游标分批补齐、超时、进度、重跑和最终校验；只接受 `--env-file` 或环境变量，不接受 DSN 命令行参数。
 - 创建：`backend/app/models/package_catalog.py` —— SQLAlchemy 目录模型。
 - 修改：`backend/app/models/__init__.py` —— 导出模型，确保元数据和测试可发现。
 - 创建：`backend/app/services/package_catalog_service.py` —— distinct 包名来源 upsert 与目录搜索查询，集中保持来源语义。
@@ -46,6 +46,7 @@
 - [ ] 编写模型测试，断言列名、长度、非空、默认值和 `package_name` 主键与 SQL 一致。
 - [ ] 运行：`cd backend; pytest -q tests/test_package_catalog_migration.py`；预期先因文件/模型不存在失败。
 - [ ] 实现幂等 SQL。目录查询需要一个普通 `(package_name)` 索引或两个来源 partial B-tree 索引支持空关键字排序，并需要 `GIN (package_name gin_trgm_ops)` 支持包含搜索；扩展不存在时迁移明确失败，不允许隐式退回全表扫描。
+- [ ] 在迁移开头执行短事务锁/statement timeout 保护：用固定 advisory lock 串行化目录迁移；设置迁移级 `lock_timeout` 与 `statement_timeout`，锁或超时失败即退出且不部分宣称成功。预检当前用户具备 `pg_trgm` 扩展和创建目录/索引所需权限，失败时给出明确诊断。
 - [ ] 运行同一测试并提交：`git add scripts/migrate_package_catalog.sql scripts/init_db.sql backend/app/models backend/tests/test_package_catalog_migration.py && git commit -m "feat(db): add package catalog schema"`。
 
 ## 任务 2：实现同事务目录 ensure 与搜索服务
