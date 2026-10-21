@@ -152,7 +152,7 @@ onBeforeUnmount(() => { disposed = true; ++scopeRequestId; ++detailRequestId; })
 .panel-header { justify-content: space-between; }
 .panel-header h3 { margin: 0; }
 .timezone-note, .muted { color: var(--text-muted); font-size: 12px; }
-.usage-filters { flex-wrap: wrap; align-items: end; }
+.usage-filters { flex-wrap: wrap; align-items: end; --package-select-height: 36px; --package-select-padding: 8px 10px; }
 .usage-filters label { display: grid; gap: 6px; color: var(--text-muted); font-size: 12px; }
 .usage-filters input, .usage-filters select, .usage-filters button { border: 1px solid var(--border-soft); border-radius: 6px; color: var(--text-primary); background: var(--panel-bg); padding: 8px 10px; }
 .usage-filters button { cursor: pointer; }

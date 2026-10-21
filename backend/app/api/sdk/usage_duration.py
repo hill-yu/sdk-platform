@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.core.rate_limit import write_limiter
 from app.models.usage_duration import SdkUsageDuration
 from app.schemas.sdk_schemas import UsageDurationReportRequest
+from app.services.package_catalog_service import ensure_package_sources
 
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,7 @@ async def report_usage_duration(
     try:
         db.add(record)
         await db.flush()
+        await ensure_package_sources(db, [body.package_name], has_usage=True)
     except Exception:
         logger.exception("使用时长写入失败，package_name=%s", body.package_name)
         await db.rollback()

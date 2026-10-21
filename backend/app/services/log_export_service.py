@@ -14,11 +14,13 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.timezone import business_day_utc_range, business_hour_utc_range
+from app.core.config import get_settings
 from app.models.event import SdkEvent
 from app.models.log_export_job import LogExportJob
 from app.models.usage_duration import SdkUsageDuration
 from app.schemas.log_export_schemas import LogExportCreateRequest
 from app.services.h1_extractor import extract_h1_records
+from app.services.package_catalog_service import search_packages as search_catalog_packages
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 CSV_HEADER = ["id", "package_name", "device_id", "sdk_version", "level", "tag", "message", "extra", "client_ts", "server_ts"]
@@ -112,6 +114,8 @@ def csv_row_for_export(row: ExportRow) -> list[str]:
 
 
 async def search_packages(db: AsyncSession, keyword: str | None, limit: int) -> list[str]:
+    if get_settings().PACKAGE_CATALOG_READS_ENABLED:
+        return await search_catalog_packages(db, keyword, limit, source="log")
     stmt = select(SdkEvent.package_name).where(SdkEvent.event_type == "log").distinct()
     if keyword and keyword.strip():
         stmt = stmt.where(SdkEvent.package_name.ilike(f"%{keyword.strip()}%"))
@@ -120,6 +124,8 @@ async def search_packages(db: AsyncSession, keyword: str | None, limit: int) -> 
 
 
 async def search_usage_packages(db: AsyncSession, keyword: str | None, limit: int) -> list[str]:
+    if get_settings().PACKAGE_CATALOG_READS_ENABLED:
+        return await search_catalog_packages(db, keyword, limit, source="usage")
     stmt = select(SdkUsageDuration.package_name).distinct()
     if keyword and keyword.strip():
         stmt = stmt.where(SdkUsageDuration.package_name.ilike(f"%{keyword.strip()}%"))

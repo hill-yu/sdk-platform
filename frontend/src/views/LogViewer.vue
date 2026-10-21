@@ -488,7 +488,7 @@ onBeforeUnmount(() => { ++failureRequestSequence; ++parseRequestSequence; ++prof
 .view-tabs, .filters, .panel-header, .pager, .analysis-toolbar { display: flex; align-items: center; gap: 12px; }
 .view-tabs button, .ghost, .primary { border: 1px solid var(--border-soft); border-radius: 6px; color: var(--text-primary); background: var(--panel-bg); padding: 10px 14px; cursor: pointer; }
 .view-tabs button.active, .primary { border-color: var(--accent); background: var(--hover-bg); }
-.filters { flex-wrap: wrap; }.filters-panel .panel-header, .panel-header { justify-content: space-between; }.panel-header h3 { margin: 0; }.count { color: var(--text-muted); }
+.filters { flex-wrap: wrap; --package-select-height: 41px; --package-select-padding: 10px 12px; }.filters-panel .panel-header, .panel-header { justify-content: space-between; }.panel-header h3 { margin: 0; }.count { color: var(--text-muted); }
 .analysis-toolbar { justify-content: flex-end; margin: 14px 0 0; color: var(--text-muted); font-size: 12px; }.analysis-toolbar label { display: inline-flex; align-items: center; gap: 6px; }
 select, input, button { border: 1px solid var(--border-soft); border-radius: 6px; color: var(--text-primary); background: var(--panel-bg); padding: 10px 12px; }
 button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity: .45; }.timezone-note { margin: 12px 0 0; color: var(--text-muted); font-size: 12px; }

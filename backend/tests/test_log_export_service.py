@@ -9,6 +9,38 @@ import pytest
 from pydantic import ValidationError
 
 
+@pytest.mark.asyncio
+async def test_package_search_reads_catalog_only_when_explicit_switch_is_enabled(monkeypatch):
+    from app.services import log_export_service
+
+    captured = {}
+
+    async def catalog_search(db, keyword, limit, *, source):
+        captured.update(db=db, keyword=keyword, limit=limit, source=source)
+        return ["com.catalog.app"]
+
+    monkeypatch.setattr(log_export_service, "search_catalog_packages", catalog_search)
+    monkeypatch.setattr(log_export_service, "get_settings", lambda: type("Settings", (), {"PACKAGE_CATALOG_READS_ENABLED": True})())
+    result = await log_export_service.search_packages("db", "com", 20)
+
+    assert result == ["com.catalog.app"]
+    assert captured == {"db": "db", "keyword": "com", "limit": 20, "source": "log"}
+
+
+@pytest.mark.asyncio
+async def test_package_search_does_not_fallback_when_catalog_read_fails(monkeypatch):
+    from app.services import log_export_service
+
+    async def catalog_search(*_args, **_kwargs):
+        raise RuntimeError("catalog unavailable")
+
+    monkeypatch.setattr(log_export_service, "search_catalog_packages", catalog_search)
+    monkeypatch.setattr(log_export_service, "get_settings", lambda: type("Settings", (), {"PACKAGE_CATALOG_READS_ENABLED": True})())
+
+    with pytest.raises(RuntimeError, match="catalog unavailable"):
+        await log_export_service.search_packages("db", "com", 20)
+
+
 def test_log_export_job_model_has_required_columns():
     from app.models.log_export_job import LogExportJob
 
