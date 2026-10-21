@@ -1,6 +1,6 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { defineComponent, ref } from "vue";
+import { defineComponent, nextTick, ref } from "vue";
 
 const searchLogPackages = vi.hoisted(() => vi.fn());
 vi.mock("@/api/logExports", () => ({ searchLogPackages }));
@@ -187,5 +187,31 @@ describe("PackageSelect", () => {
     expect(wrapper.emitted("update:modelValue")?.at(-1)).toEqual(["com.manual"]);
     await input.trigger("focusout", { relatedTarget: null });
     expect((input.element as HTMLInputElement).value).toBe("com.manual");
+  });
+
+  it("does not swallow the first character after an outside click", async () => {
+    const wrapper = mount(PackageSelect, { props: { modelValue: "" } });
+    const input = wrapper.get("[data-testid='package-select-input']");
+    document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await input.trigger("focus");
+    searchLogPackages.mockClear();
+    await input.setValue("c");
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    expect(searchLogPackages).toHaveBeenCalledWith("c");
+  });
+
+  it("does not swallow the first character after Escape leaves the value unchanged", async () => {
+    const wrapper = mount(PackageSelect, { props: { modelValue: "" } });
+    const input = wrapper.get("[data-testid='package-select-input']");
+    await input.trigger("focus");
+    await input.trigger("keydown", { key: "Escape" });
+    searchLogPackages.mockClear();
+    await input.setValue("c");
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    expect(searchLogPackages).toHaveBeenCalledWith("c");
   });
 });

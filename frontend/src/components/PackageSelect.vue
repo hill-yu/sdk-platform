@@ -16,6 +16,7 @@
       role="combobox"
       :aria-expanded="open"
       @focus="openPicker"
+      @input="onInput"
       @keydown="onKeydown"
       @focusout="onFocusout"
     />
@@ -105,6 +106,7 @@ function scheduleSearch() {
   timer = setTimeout(() => { timer = undefined; searchNow(currentId); }, 300);
 }
 function openPicker() { if (!props.disabled) { open.value = true; scheduleSearch(); } }
+function onInput() { if (!props.disabled && !open.value) open.value = true; }
 function select(name: string) {
   if (!options.value.includes(name) || selectedNames.value.includes(name)) return;
   if (props.multiple) emit("update:modelValue", [...selectedNames.value, name]);
@@ -150,8 +152,11 @@ function closePicker(restore: boolean) {
   options.value = [];
   highlightedIndex.value = -1;
   if (restore) {
-    suppressKeywordSearch = true;
-    keyword.value = props.multiple ? "" : (typeof props.modelValue === "string" ? props.modelValue : "");
+    const restoredValue = props.multiple ? "" : (typeof props.modelValue === "string" ? props.modelValue : "");
+    if (keyword.value !== restoredValue) {
+      suppressKeywordSearch = true;
+      keyword.value = restoredValue;
+    }
   }
 }
 function onFocusout(event: FocusEvent) {
@@ -178,8 +183,8 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer); ++requestId; document.re
 
 <style scoped>
 .package-select { position: relative; display: grid; gap: 6px; min-width: 220px; }
-.package-select-input { width: 100%; box-sizing: border-box; height: 36px; border: 1px solid var(--border-soft); border-radius: 6px; color: var(--text-primary); background: var(--panel-bg); padding: 8px 10px; font: inherit; outline: none; }
-.package-select-input:focus { border-color: var(--focus-border, var(--primary)); box-shadow: 0 0 0 2px var(--focus-ring, rgba(59, 130, 246, .16)); }
+.package-select-input { width: 100%; box-sizing: border-box; height: var(--package-select-height, 36px); border: 1px solid var(--border-soft); border-radius: 6px; color: var(--text-primary); background: var(--panel-bg); padding: var(--package-select-padding, 8px 10px); font: inherit; outline: none; }
+.package-select-input:focus { border-color: var(--focus-ring); box-shadow: 0 0 0 2px var(--focus-ring); }
 .package-select-input:disabled { cursor: not-allowed; opacity: .5; }
 .selected-packages { display: flex; flex-wrap: wrap; gap: 6px; }
 .package-chip { padding: 4px 8px; border-radius: 6px; background: var(--warning-bg); }
