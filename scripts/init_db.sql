@@ -8,6 +8,22 @@
 -- 1. 扩展
 -- ============================================================
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+-- 包名来源目录；事实写入接口在同一事务中维护来源标记。
+CREATE TABLE IF NOT EXISTS sdk_package_catalog (
+    package_name VARCHAR(255) PRIMARY KEY,
+    has_log BOOLEAN NOT NULL DEFAULT FALSE,
+    has_usage BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_package_catalog_name_trgm
+    ON sdk_package_catalog USING GIN (package_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_package_catalog_log_name
+    ON sdk_package_catalog (package_name) WHERE has_log;
+CREATE INDEX IF NOT EXISTS idx_package_catalog_usage_name
+    ON sdk_package_catalog (package_name) WHERE has_usage;
 
 -- ============================================================
 -- 2. SDK 原始事件表（按月分区）

@@ -9,6 +9,7 @@ from app.models.log_metrics import (
     LogClickAttempt,
     LogClickAttemptStage,
 )
+from app.models.package_catalog import PackageCatalog
 from app.models.usage_duration import SdkUsageDuration
 from app.models.version import SdkVersion
 
@@ -22,6 +23,7 @@ __all__ = [
     "LogExportJob",
     "LogReparseJob",
     "PackageProfile",
+    "PackageCatalog",
     "SdkConfig",
     "SdkEvent",
     "SdkUsageDuration",
