@@ -1,5 +1,6 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { defineComponent, ref } from "vue";
 
 const searchLogPackages = vi.hoisted(() => vi.fn());
 vi.mock("@/api/logExports", () => ({ searchLogPackages }));
@@ -35,6 +36,31 @@ describe("PackageSelect", () => {
     await flushPromises();
     expect(wrapper.find("[data-testid='package-select-loading']").exists()).toBe(false);
     expect(wrapper.find("[data-package='com.slow-result']").exists()).toBe(true);
+  });
+
+  it("passes the selected candidate package to the event query", async () => {
+    const getEvents = vi.fn().mockResolvedValue({ data: { total: 1, items: [] } });
+    searchLogPackages.mockResolvedValueOnce({ code: 0, data: { items: ["com.real-candidate"] } });
+    const host = defineComponent({
+      components: { PackageSelect },
+      setup() {
+        const packageName = ref("");
+        async function apply(value: string) {
+          packageName.value = value;
+          await getEvents({ event_type: "log", package_name: value });
+        }
+        return { packageName, apply };
+      },
+      template: `<PackageSelect v-model="packageName" @update:model-value="apply" />`,
+    });
+    const wrapper = mount(host);
+    const input = wrapper.get("[data-testid='package-select-input']");
+    await input.trigger("focus");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    await wrapper.get("[data-package='com.real-candidate']").trigger("click");
+    await flushPromises();
+    expect(getEvents).toHaveBeenCalledWith({ event_type: "log", package_name: "com.real-candidate" });
   });
 
   it("marks options with the themeable option class while preserving combobox semantics", async () => {
@@ -134,6 +160,20 @@ describe("PackageSelect", () => {
     await wrapper.setProps({ modelValue: ["com.example.b"] });
     await wrapper.get("[data-testid='package-select-remove']").trigger("click");
     expect(wrapper.emitted("update:modelValue")?.at(-1)).toEqual([[]]);
+  });
+
+  it("shows a retry after a failed search and renders the next real envelope", async () => {
+    searchLogPackages.mockRejectedValueOnce(new Error("search unavailable"));
+    const wrapper = mount(PackageSelect, { props: { modelValue: "" } });
+    const input = wrapper.get("[data-testid='package-select-input']");
+    await input.trigger("focus");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    expect(wrapper.get("[data-testid='package-select-error']").text()).toContain("search unavailable");
+    searchLogPackages.mockResolvedValueOnce({ code: 0, data: { items: ["com.retry-result"] } });
+    await wrapper.get("[data-testid='package-select-retry']").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-package='com.retry-result']").exists()).toBe(true);
   });
 
   it("preserves free text on focusout and commits it on Enter", async () => {
