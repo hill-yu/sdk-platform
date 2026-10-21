@@ -107,10 +107,16 @@ function scheduleSearch() {
 }
 function openPicker() { if (!props.disabled) { open.value = true; scheduleSearch(); } }
 function onInput() { if (!props.disabled && !open.value) open.value = true; }
+function setKeywordWithoutSearch(value: string) {
+  if (keyword.value !== value) {
+    suppressKeywordSearch = true;
+    keyword.value = value;
+  }
+}
 function select(name: string) {
   if (!options.value.includes(name) || selectedNames.value.includes(name)) return;
   if (props.multiple) emit("update:modelValue", [...selectedNames.value, name]);
-  else { emit("update:modelValue", name); suppressKeywordSearch = true; keyword.value = name; open.value = false; }
+  else { emit("update:modelValue", name); setKeywordWithoutSearch(name); open.value = false; }
 }
 function remove(name: string) { if (props.multiple) emit("update:modelValue", selectedNames.value.filter((item) => item !== name)); }
 function moveHighlight(direction: 1 | -1) {
@@ -153,10 +159,7 @@ function closePicker(restore: boolean) {
   highlightedIndex.value = -1;
   if (restore) {
     const restoredValue = props.multiple ? "" : (typeof props.modelValue === "string" ? props.modelValue : "");
-    if (keyword.value !== restoredValue) {
-      suppressKeywordSearch = true;
-      keyword.value = restoredValue;
-    }
+    setKeywordWithoutSearch(restoredValue);
   }
 }
 function onFocusout(event: FocusEvent) {

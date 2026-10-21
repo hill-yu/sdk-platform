@@ -214,4 +214,23 @@ describe("PackageSelect", () => {
     await flushPromises();
     expect(searchLogPackages).toHaveBeenCalledWith("c");
   });
+
+  it("does not leave a suppression flag after selecting the already typed candidate", async () => {
+    const wrapper = mount(PackageSelect, { props: { modelValue: "" } });
+    const input = wrapper.get("[data-testid='package-select-input']");
+    await input.trigger("focus");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    await input.setValue("com.example.a");
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    await wrapper.get("[data-package='com.example.a']").trigger("click");
+    searchLogPackages.mockClear();
+    await input.setValue("xom.example.a");
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    expect(searchLogPackages).toHaveBeenCalledWith("xom.example.a");
+  });
 });
