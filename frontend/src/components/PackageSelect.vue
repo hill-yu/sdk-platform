@@ -48,7 +48,7 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { searchLogPackages } from "@/api/logExports";
 
-type PackageSearch = (keyword: string) => Promise<{ data: { items: string[] } }>;
+type PackageSearch = (keyword: string) => Promise<{ code: number; data: { items: string[] } }>;
 
 const props = withDefaults(defineProps<{
   modelValue: string | string[];

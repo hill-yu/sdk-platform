@@ -12,4 +12,4 @@ export const getUsageDevices = (scope: UsageScope & { package_name: string; devi
   request.get<{ code: number; data: UsagePage<UsageDevice> }>("/usage-durations/devices", { params: scope });
 
 export const searchUsagePackages = (keyword: string) =>
-  request.get<{ code: number; data: { items: string[] } }>("/usage-package-names", { params: { keyword: keyword || undefined, limit: 20 } });
+  request.get<{ code: number; data: { items: string[] } }>("/usage-package-names", { params: { keyword: keyword || undefined, limit: 20 } }) as unknown as Promise<{ code: number; data: { items: string[] } }>;
