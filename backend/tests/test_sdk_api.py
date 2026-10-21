@@ -19,6 +19,9 @@ class _Rows:
     def all(self):
         return self.rows
 
+    def mappings(self):
+        return self
+
 
 class _ReturningWriteSession(StubWriteSession):
     def __init__(self):
@@ -29,6 +32,8 @@ class _ReturningWriteSession(StubWriteSession):
     async def execute(self, statement, *args, **kwargs):
         from sqlalchemy.sql import Insert
 
+        if getattr(statement, "is_select", False):
+            return _Rows([])
         if isinstance(statement, Insert):
             table_name = statement.table.name
             self.executed.append(statement)
@@ -273,7 +278,9 @@ def test_log_returns_quickly_after_returning_insert_and_stores_only_event(client
     returning = [column.name for column in session.event_statement._returning]
     assert returning == ["id", "server_ts"]
     assert session.pending_statement is None
-    assert [statement.table.name for statement in session.executed] == ["sdk_events"]
+    executed_tables = [statement.table.name for statement in session.executed]
+    assert executed_tables[0] == "sdk_events"
+    assert set(executed_tables[1:]) == {"sdk_package_catalog"}
 
 
 def test_log_ensures_catalog_source_once_per_request(client, monkeypatch):
