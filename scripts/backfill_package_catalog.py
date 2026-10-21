@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+from urllib.parse import quote_plus
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +20,13 @@ class BackfillReport:
     rows: int
     batches: int
     last_cursor: tuple[datetime, int] | None
+
+
+def resolve_database_url() -> str:
+    database_url = os.environ.get("DATABASE_URL", "")
+    if "${DB_PASSWORD}" in database_url:
+        database_url = database_url.replace("${DB_PASSWORD}", quote_plus(os.environ.get("DB_PASSWORD", "")))
+    return database_url
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -132,7 +140,7 @@ async def backfill_source(
 
 async def run(args: argparse.Namespace) -> BackfillReport:
     load_env_file(args.env_file)
-    database_url = os.environ.get("DATABASE_URL", "")
+    database_url = resolve_database_url()
     if not database_url:
         raise RuntimeError("必须通过环境变量或 --env-file 设置 DATABASE_URL")
     if not args.apply:
