@@ -32,6 +32,14 @@ def test_source_query_is_keyset_ordered_and_bounded():
     assert "limit :batch_size" in normalized
 
 
+def test_database_url_resolves_password_placeholder_without_printing_it(monkeypatch):
+    from scripts.backfill_package_catalog import resolve_database_url
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://sdk_admin:${DB_PASSWORD}@127.0.0.1/sdk_platform")
+    monkeypatch.setenv("DB_PASSWORD", "p@ss word")
+    assert resolve_database_url() == "postgresql+asyncpg://sdk_admin:p%40ss+word@127.0.0.1/sdk_platform"
+
+
 def test_resume_cursor_advances_only_after_committed_batch():
     from scripts.backfill_package_catalog import advance_cursor
 
