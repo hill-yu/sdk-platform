@@ -54,22 +54,29 @@ async def _cached_sdk_versions(db: AsyncSession, package_name: str | None) -> li
             return list(cached[1])
         task = _sdk_version_inflight.get(key)
         if task is None:
-            task = asyncio.create_task(_query_sdk_versions(db, package_name))
+            task = asyncio.create_task(_load_sdk_versions(db, package_name, key))
             _sdk_version_inflight[key] = task
+    # A cancelled HTTP waiter must not cancel the shared query task and
+    # thereby fail another waiter for the same cache key. The task owns its
+    # cleanup, so a cancelled waiter cannot remove a task that a new waiter
+    # is about to join.
+    return list(await asyncio.shield(task))
+
+
+async def _load_sdk_versions(db: AsyncSession, package_name: str | None, key: str) -> list[str]:
     try:
-        # A cancelled HTTP waiter must not cancel the shared query task and
-        # thereby fail the other waiter for the same cache key.
-        values = await asyncio.shield(task)
-    finally:
+        values = await _query_sdk_versions(db, package_name)
         async with _sdk_version_cache_lock:
-            if _sdk_version_inflight.get(key) is task:
+            _sdk_version_cache[key] = (time.monotonic(), list(values))
+            _sdk_version_cache.move_to_end(key)
+            while len(_sdk_version_cache) > FILTER_OPTIONS_CACHE_MAX_ENTRIES:
+                _sdk_version_cache.popitem(last=False)
+        return list(values)
+    finally:
+        current = asyncio.current_task()
+        async with _sdk_version_cache_lock:
+            if _sdk_version_inflight.get(key) is current:
                 _sdk_version_inflight.pop(key, None)
-    async with _sdk_version_cache_lock:
-        _sdk_version_cache[key] = (time.monotonic(), list(values))
-        _sdk_version_cache.move_to_end(key)
-        while len(_sdk_version_cache) > FILTER_OPTIONS_CACHE_MAX_ENTRIES:
-            _sdk_version_cache.popitem(last=False)
-    return list(values)
 
 
 async def get_summary(db: AsyncSession) -> dict[str, int]:

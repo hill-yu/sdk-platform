@@ -478,10 +478,10 @@ async def test_cancelled_sdk_version_waiter_does_not_cancel_shared_query(monkeyp
     await analysis_service.clear_filter_options_cache()
     first = asyncio.create_task(analysis_service._cached_sdk_versions(object(), "com.cancel"))
     await started.wait()
-    second = asyncio.create_task(analysis_service._cached_sdk_versions(object(), "com.cancel"))
     first.cancel()
     with pytest.raises(asyncio.CancelledError):
         await first
+    second = asyncio.create_task(analysis_service._cached_sdk_versions(object(), "com.cancel"))
     release.set()
     assert await second == ["1.0"]
     assert calls == 1
