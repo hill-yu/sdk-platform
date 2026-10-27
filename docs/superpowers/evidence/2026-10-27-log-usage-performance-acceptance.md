@@ -3,7 +3,7 @@
 ## Implementation
 
 - Worktree: `C:\Users\喻远飞\.codex\worktrees\ef23\SDK`
-- Feature HEAD: `bb7e11c3e0dba7a4e524267efb1c4b8e845f5fec`
+- Feature HEAD: `1b3deb4de04a7d139ea138cae26c4ab7c9e43cce`
 - Previously merged master: `0732f4cdd5955b023bc7844408ed6bb71a2d7eb9`
 - Production: unchanged; no deployment or further merge performed.
 - `PACKAGE_CATALOG_READS_ENABLED=false` keeps the legacy fact-table package
@@ -27,7 +27,7 @@ Results:
 - Filter-option gate tests cover both flag branches and the no-fallback catalog
   error path. Cancellation tests cover a cancelled first waiter, a later
   second waiter, independent session ownership, and session close.
-- Real PostgreSQL integration test file: `backend/tests/test_usage_duration_postgres_integration.py`; automated run was skipped without its dedicated test URL, so the HTTP acceptance above is the authoritative real-DB evidence.
+- Real PostgreSQL integration: `test_usage_duration_postgres_integration.py` passed 1, and `test_package_catalog_postgres_integration.py` passed 1, using isolated loopback databases cloned from the local snapshot. The default no-URL run remains 2 skipped.
 
 ## Performance decision
 
@@ -50,6 +50,10 @@ candidate `18.85ms` (not selected); usage old count + page `77.82ms +
 & C:\pgsql\bin\pg_ctl.exe -D C:\Users\喻远飞\.codex\local-pg-admin-login-20261017-pgdata -w start -o "-p 55432"
 $env:SDK_LOG_PAGE_TEST_DATABASE_URL = "postgresql+asyncpg://postgres@127.0.0.1:55432/sdk_log_page_test_20261027"
 python scripts/benchmark_log_page_performance.py --iterations 10
+$env:SDK_USAGE_DURATION_TEST_DATABASE_URL = "postgresql+asyncpg://postgres@127.0.0.1:55432/sdk_usage_duration_test_20261027"
+python -m pytest backend/tests/test_usage_duration_postgres_integration.py -q
+$env:SDK_PACKAGE_CATALOG_TEST_DATABASE_URL = "postgresql+asyncpg://postgres@127.0.0.1:55432/sdk_package_catalog_test_20261027"
+python -m pytest backend/tests/test_package_catalog_postgres_integration.py -q
 python -m pytest backend/tests -q
 cd frontend; npm test -- --run; npm run build
 & C:\pgsql\bin\pg_ctl.exe -D C:\Users\喻远飞\.codex\local-pg-admin-login-20261017-pgdata -w stop
