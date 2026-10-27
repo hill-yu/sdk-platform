@@ -9,7 +9,7 @@
       <button data-testid="usage-view-tab" type="button" :class="{ active: view === 'usage' }" @click="switchView('usage')">使用时长</button>
     </div>
 
-    <template v-if="view === 'analysis'">
+    <div v-show="view === 'analysis'" data-testid="analysis-view">
       <section class="panel filters-panel">
         <div class="panel-header">
           <h3>解析统计</h3>
@@ -23,6 +23,7 @@
           @reset="resetAnalysis"
         />
       </section>
+      <LogHistoryPanel :package-name="appliedFilters.package_name" :selected-job-id="historyJob?.id ?? null" @select="selectHistoricalJob" />
 
       <LogParseTaskPanel
         :draft-scope="analysisScopeFromFilters(draftFilters)"
@@ -33,7 +34,7 @@
         @request-parse="requestParse"
         @request-cancel="requestCancel"
       />
-      <LogMetricsPanel :scope="metricScope" :job="parseJob" :profile="packageProfile" :visible-columns="visibleColumns" @failure-select="openFailureDrawer" @configure-columns="columnSettingsOpen = true" @profile-update="updatePackageProfile" @profile-error="showProfileError" />
+      <LogMetricsPanel :scope="historyJob ? historicalScope(historyJob) : metricScope" :job="historyJob ?? parseJob" :history-job-id="historyJob?.id ?? null" :profile="packageProfile" :visible-columns="visibleColumns" @failure-select="openFailureDrawer" @configure-columns="columnSettingsOpen = true" @profile-update="updatePackageProfile" @profile-error="showProfileError" />
       <LogFailureDrawer :open="failureDrawerOpen" :items="failureItems" :loading="failureLoading" :error="failureError" @close="closeFailureDrawer" />
 
       <div v-if="columnSettingsOpen" class="modal-backdrop" data-testid="column-settings-modal">
@@ -50,15 +51,13 @@
           />
         </section>
       </div>
-    </template>
+    </div>
 
-    <template v-else-if="view === 'raw'">
+    <div v-show="view === 'raw'" data-testid="raw-view">
       <section class="panel filters-panel">
         <div class="filters">
-          <select v-model="rawFilters.package_name" data-testid="package-filter" :aria-busy="filterOptionsLoading" @change="changePackageFilter(rawFilters.package_name)">
-            <option value="">全部包名</option>
-            <option v-for="packageName in filterOptions.package_names" :key="packageName" :value="packageName">{{ packageName }}</option>
-          </select>
+          <PackageSelect :model-value="rawFilters.package_name" input-test-id="package-filter" placeholder="搜索包名" @update:model-value="changePackageFilter" />
+          <button data-testid="package-filter-clear" class="ghost" type="button" @click="clearPackageFilter">全部包名</button>
           <select v-model="rawFilters.sdk_version" data-testid="sdk-version-filter" :disabled="!rawFilters.package_name || filterOptionsLoading">
             <option value="">全部 SDK 版本</option>
             <option v-for="sdkVersion in filterOptions.sdk_versions" :key="sdkVersion" :value="sdkVersion">{{ sdkVersion }}</option>
@@ -90,6 +89,9 @@
           :hour-from="appliedRawFilters.hour_from"
           :date-to="appliedRawFilters.date_to"
           :hour-to="appliedRawFilters.hour_to"
+          :scope-ready="rawScopeReady"
+          :scope-busy="rawLoadState === 'loading'"
+          :scope-error="rawLoadState === 'error' ? rawLoadError : ''"
         />
       </section>
       <div class="viewer-grid">
@@ -113,9 +115,9 @@
         </section>
         <section class="panel detail-panel"><div class="panel-header"><h3>日志详情</h3></div><LogDetail :item="selected" @copy-success="showCopySuccess" @copy-error="showCopyError" /></section>
       </div>
-    </template>
-    <section v-else class="panel usage-placeholder" data-testid="usage-view">
-      <UsageDurationPanel />
+    </div>
+    <section v-show="view === 'usage'" class="panel usage-placeholder" data-testid="usage-view">
+      <KeepAlive><UsageDurationPanel v-if="view === 'usage'" /></KeepAlive>
     </section>
   </div>
 </template>
@@ -125,7 +127,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 
 import { getEventFilterOptions, getEvents } from "@/api/dashboard";
 import type { EventFilterOptions, EventItem, EventQuery, LogLevel } from "@/api/dashboard";
-import { cancelParseJob, getLatestParseJob, getMetricFailures, getParseJob, postParseJob } from "@/api/logMetrics";
+import { cancelParseJob, getHistoricalMetricFailures, getLatestParseJob, getMetricFailures, getParseJob, postParseJob } from "@/api/logMetrics";
 import type { FailureBreakdownItem, LogMetricScope, ParseJob } from "@/api/logMetrics";
 import { getLogAnalysisColumns, getPackageProfile, putLogAnalysisColumns } from "@/api/logAnalysis";
 import { FORMAL_METRIC_COLUMN_MAPPING } from "@/api/logAnalysis";
@@ -137,7 +139,9 @@ import LogDetail from "@/components/LogDetail.vue";
 import LogExportPanel from "@/components/LogExportPanel.vue";
 import LogMetricsPanel from "@/components/LogMetricsPanel.vue";
 import LogParseTaskPanel from "@/components/LogParseTaskPanel.vue";
+import LogHistoryPanel from "@/components/LogHistoryPanel.vue";
 import UsageDurationPanel from "@/components/UsageDurationPanel.vue";
+import PackageSelect from "@/components/PackageSelect.vue";
 import { formatBusinessTime } from "@/utils/dateTime";
 import { beginFeedback, setFeedbackError, setFeedbackSuccess } from "@/utils/feedback";
 import { defaultRecentThreeDays } from "@/utils/logDateRange";
@@ -159,6 +163,7 @@ const draftFilters = ref<LogAnalysisFilterValues>({ date_from: recentAnalysisRan
 const appliedFilters = ref<LogAnalysisFilterValues>({ ...draftFilters.value });
 const metricScope = ref<LogMetricScope>({ package_name: "", date_from: recentAnalysisRange.date_from, hour_from: recentAnalysisRange.hour_from, date_to: recentAnalysisRange.date_to, hour_to: recentAnalysisRange.hour_to });
 const parseJob = ref<ParseJob | null>(null);
+const historyJob = ref<ParseJob | null>(null);
 const parseStarting = ref(false);
 const parseCancelling = ref(false);
 const packageProfile = ref<PackageProfile | null>(null);
@@ -268,8 +273,24 @@ function applyAnalysisScope(value: LogAnalysisFilterValues): LogMetricScope | nu
   const error = validateAnalysisScope(scope);
   if (error) { setFeedbackError(feedback, error); return null; }
   appliedFilters.value = { ...value };
+  historyJob.value = null;
   metricScope.value = scope;
   return scope;
+}
+
+function historicalScope(job: ParseJob): LogMetricScope {
+  const start = new Date(job.range_start_utc ?? job.range_start);
+  const end = new Date(job.range_end_utc ?? job.range_end);
+  const date = (value: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai" }).format(value);
+  const hour = (value: Date) => Number(new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Shanghai", hour: "numeric", hour12: false }).format(value));
+  return { package_name: job.package_name ?? "", date_from: date(start), hour_from: hour(start), date_to: date(new Date(end.getTime() - 1)), hour_to: hour(new Date(end.getTime() - 1)) };
+}
+function selectHistoricalJob(job: ParseJob) {
+  clearParsePoll();
+  ++failureRequestSequence;
+  failureDrawerOpen.value = false;
+  historyJob.value = job;
+  packageProfile.value = null;
 }
 
 function queryAnalysis(value: LogAnalysisFilterValues) {
@@ -291,6 +312,7 @@ function resetAnalysis(value: LogAnalysisFilterValues) {
   ++parseRequestSequence;
   ++profileRequestSequence;
   parseJob.value = null;
+  historyJob.value = null;
   packageProfile.value = null;
   appliedFilters.value = { ...value };
   metricScope.value = { package_name: "", date_from: value.date_from, hour_from: value.hour_from, date_to: value.date_to, hour_to: value.hour_to };
@@ -300,6 +322,7 @@ async function requestParse(snapshot: LogMetricScope) {
   if (parseStarting.value || parseCancelling.value) return;
   const scope = applyAnalysisScope({ ...draftFilters.value, ...snapshot });
   if (!scope) return;
+  historyJob.value = null;
   clearParsePoll();
   parseJob.value = null;
   const requestSequence = ++parseRequestSequence;
@@ -344,7 +367,9 @@ async function openFailureDrawer(selection: { target_kind: "web_element" | "ad_a
   const scope = { ...metricScope.value };
   failureDrawerOpen.value = true; failureLoading.value = true; failureError.value = ""; failureItems.value = [];
   try {
-    const response = await getMetricFailures({ ...scope, ...(parseJob.value?.snapshot_end_utc ? { snapshot_end_utc: parseJob.value.snapshot_end_utc } : {}), ...selection });
+    const response = historyJob.value
+      ? await getHistoricalMetricFailures(historyJob.value.id, selection)
+      : await getMetricFailures({ ...scope, ...(parseJob.value?.snapshot_end_utc ? { snapshot_end_utc: parseJob.value.snapshot_end_utc } : {}), ...selection });
     if (requestSequence !== failureRequestSequence) return;
     let value: unknown = response;
     if (value && typeof value === "object" && "data" in value) value = (value as { data: unknown }).data;
@@ -386,7 +411,11 @@ const filterOptionsError = ref("");
 const filterOptionsLoading = ref(false);
 let filterOptionsRequestSequence = 0;
 const rawResult = reactive({ total: 0, items: [] as EventItem[] });
+const rawLoadState = ref<"idle" | "loading" | "success" | "error">("idle");
+const rawLoadError = ref("");
 const rawPage = ref(1); const rawRequestedPage = ref(1); const rawPageSize = 20; const selected = ref<EventItem | null>(null); let rawRequestSequence = 0;
+const rawScopeKey = (filters: RawFilters) => JSON.stringify(filters);
+const rawScopeReady = computed(() => rawLoadState.value === "success" && rawScopeKey(rawFilters) === rawScopeKey(appliedRawFilters.value));
 function display(value: unknown): string { return value == null || value === "" ? "-" : String(value); }
 function levelClass(value: unknown): string { return typeof value === "string" ? `level-${value}` : "level-unknown"; }
 function rawQueryParams(targetPage: number): EventQuery {
@@ -431,16 +460,18 @@ async function loadFilterOptions(packageName?: string): Promise<void> {
     if (requestSequence === filterOptionsRequestSequence) filterOptionsLoading.value = false;
   }
 }
-function changePackageFilter(packageName: string): void {
+function changePackageFilter(value: string | string[]): void {
+  const packageName = typeof value === "string" ? value : (value[0] ?? "");
   rawFilters.package_name = packageName;
   rawFilters.sdk_version = "";
   filterOptions.sdk_versions = [];
   void loadFilterOptions(packageName || undefined);
 }
+function clearPackageFilter(): void { changePackageFilter(""); }
 async function loadLogs(options: { resetPage?: boolean; targetPage?: number } = {}): Promise<void> {
-  const targetPage = options.resetPage ? 1 : (options.targetPage ?? rawPage.value); rawRequestedPage.value = targetPage; const requestSequence = ++rawRequestSequence; beginFeedback(feedback);
-  try { const response = await getEvents(rawQueryParams(targetPage)); if (requestSequence !== rawRequestSequence) return; rawResult.total = response.data.total; rawResult.items = response.data.items; rawPage.value = targetPage; rawRequestedPage.value = targetPage; if (selected.value) selected.value = rawResult.items.find((item) => item.id === selected.value?.id) ?? null; }
-  catch (error) { if (requestSequence !== rawRequestSequence) return; rawRequestedPage.value = rawPage.value; setFeedbackError(feedback, error instanceof Error ? error.message : "日志查询失败"); }
+  const targetPage = options.resetPage ? 1 : (options.targetPage ?? rawPage.value); rawRequestedPage.value = targetPage; const requestSequence = ++rawRequestSequence; rawLoadState.value = "loading"; rawLoadError.value = ""; beginFeedback(feedback);
+  try { const response = await getEvents(rawQueryParams(targetPage)); if (requestSequence !== rawRequestSequence) return; rawResult.total = response.data.total; rawResult.items = response.data.items; rawPage.value = targetPage; rawRequestedPage.value = targetPage; rawLoadState.value = "success"; if (selected.value) selected.value = rawResult.items.find((item) => item.id === selected.value?.id) ?? null; }
+  catch (error) { if (requestSequence !== rawRequestSequence) return; rawRequestedPage.value = rawPage.value; rawLoadState.value = "error"; rawLoadError.value = error instanceof Error ? error.message : "日志查询失败"; setFeedbackError(feedback, rawLoadError.value); }
 }
 const rawTotalPages = computed(() => Math.max(1, Math.ceil(rawResult.total / rawPageSize)));
 async function changePage(nextPage: number): Promise<void> { const boundedPage = Math.min(rawTotalPages.value, Math.max(1, nextPage)); if (boundedPage !== rawRequestedPage.value) await loadLogs({ targetPage: boundedPage }); }
@@ -455,17 +486,17 @@ onBeforeUnmount(() => { ++failureRequestSequence; ++parseRequestSequence; ++prof
 .stack { display: flex; flex-direction: column; gap: 20px; min-width: 0; min-height: 0; }
 .panel { padding: 22px; border: 1px solid var(--border-soft); border-radius: 24px; background: var(--panel-bg); box-shadow: var(--panel-shadow); }
 .view-tabs, .filters, .panel-header, .pager, .analysis-toolbar { display: flex; align-items: center; gap: 12px; }
-.view-tabs button, .ghost, .primary { border: 1px solid var(--border-soft); border-radius: 12px; color: var(--text-primary); background: rgba(255, 255, 255, .05); padding: 10px 14px; cursor: pointer; }
-.view-tabs button.active, .primary { border-color: rgba(214, 140, 69, .5); background: rgba(214, 140, 69, .24); }
-.filters { flex-wrap: wrap; }.filters-panel .panel-header, .panel-header { justify-content: space-between; }.panel-header h3 { margin: 0; }.count { color: var(--text-muted); }
-.analysis-toolbar { justify-content: flex-end; margin: 14px 0 0; color: var(--text-secondary); font-size: 12px; }.analysis-toolbar label { display: inline-flex; align-items: center; gap: 6px; }
-select, input, button { border: 1px solid var(--border-soft); border-radius: 12px; color: var(--text-primary); background: rgba(255, 255, 255, .05); padding: 10px 12px; }
+.view-tabs button, .ghost, .primary { border: 1px solid var(--border-soft); border-radius: 6px; color: var(--text-primary); background: var(--panel-bg); padding: 10px 14px; cursor: pointer; }
+.view-tabs button.active, .primary { border-color: var(--accent); background: var(--hover-bg); }
+.filters { flex-wrap: wrap; --package-select-height: 41px; --package-select-padding: 10px 12px; }.filters-panel .panel-header, .panel-header { justify-content: space-between; }.panel-header h3 { margin: 0; }.count { color: var(--text-muted); }
+.analysis-toolbar { justify-content: flex-end; margin: 14px 0 0; color: var(--text-muted); font-size: 12px; }.analysis-toolbar label { display: inline-flex; align-items: center; gap: 6px; }
+select, input, button { border: 1px solid var(--border-soft); border-radius: 6px; color: var(--text-primary); background: var(--panel-bg); padding: 10px 12px; }
 button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity: .45; }.timezone-note { margin: 12px 0 0; color: var(--text-muted); font-size: 12px; }
 .viewer-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); gap: 18px; align-items: start; min-width: 0; min-height: 0; }.viewer-grid > *, .panel, .panel-header, .filters, .analysis-toolbar { min-width: 0; }.table-scroll { min-width: 0; max-width: 100%; overflow-x: auto; }
-.table { width: 100%; margin-top: 14px; border-collapse: collapse; }.table th, .table td { padding: 12px 10px; border-bottom: 1px solid rgba(255, 255, 255, .08); text-align: left; white-space: nowrap; }
-.clickable-row { cursor: pointer; }.clickable-row.selected { background: rgba(214, 140, 69, .1); }.message-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.level-tag { display: inline-block; padding: 4px 8px; border-radius: 999px; background: rgba(255, 255, 255, .08); }.level-debug { color: #c6cbd3; }.level-info { color: #8cc8ff; }.level-warn { color: #ffd27a; }.level-error { color: #ff9f96; }
-.empty-state { color: var(--text-muted); text-align: center; }.pager { justify-content: space-between; margin-top: 16px; }.feedback { margin: 0; padding: 12px 14px; border-radius: 14px; background: rgba(255, 255, 255, .06); }.feedback.error { color: #ffb0a8; background: rgba(209, 89, 89, .18); }.feedback.success { color: #a8e5bd; background: rgba(73, 150, 99, .18); }
-.modal-backdrop { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 20px; background: rgba(0, 0, 0, .55); }.modal-panel { width: min(760px, 100%); max-height: calc(100dvh - 40px); min-width: 0; overflow: auto; }
+.table { width: 100%; margin-top: 14px; border-collapse: collapse; }.table th, .table td { padding: 12px 10px; border-bottom: 1px solid var(--border-soft); text-align: left; white-space: nowrap; }
+.clickable-row { cursor: pointer; }.clickable-row.selected { background: var(--hover-bg); }.message-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.level-tag { display: inline-block; padding: 4px 8px; border-radius: 999px; background: var(--border-soft); }.level-debug { color: var(--text-muted); }.level-info { color: var(--accent); }.level-warn { color: var(--warning-text); }.level-error { color: var(--error-text); }
+.empty-state { color: var(--text-muted); text-align: center; }.pager { justify-content: space-between; margin-top: 16px; }.feedback { margin: 0; padding: 12px 14px; border-radius: 6px; background: var(--panel-bg); }.feedback.error { color: var(--error-text); background: var(--error-bg); }.feedback.success { color: var(--success-text); background: var(--success-bg); }
+.modal-backdrop { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 20px; background: var(--overlay); }.modal-panel { width: min(760px, 100%); max-height: calc(100dvh - 40px); min-width: 0; overflow: auto; }
 @media (max-width: 1200px) { .viewer-grid { grid-template-columns: 1fr; } }
 </style>

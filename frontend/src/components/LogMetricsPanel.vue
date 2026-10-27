@@ -73,7 +73,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
-import { getMetricConfigs, getMetricOverview, getMetricTargets } from "@/api/logMetrics";
+import { getHistoricalMetricConfigs, getHistoricalMetricOverview, getHistoricalMetricTargets, getMetricConfigs, getMetricOverview, getMetricTargets } from "@/api/logMetrics";
 import type { ConfigMetricItem, LogMetricScope, MetricOverview, ParseJob, TargetMetric } from "@/api/logMetrics";
 import type { PackageProfile } from "@/api/logAnalysis";
 import PackageProfileCell, { type PackageProfileField } from "@/components/PackageProfileCell.vue";
@@ -82,7 +82,7 @@ import { analysisScopeUtcRange } from "@/utils/logAnalysisScope";
 type MetricViewKind = "web_element" | "ad_area";
 type VisibleTarget = Omit<TargetMetric, "target_kind">;
 
-const props = withDefaults(defineProps<{ scope: LogMetricScope; job?: ParseJob | null; profile?: PackageProfile | null; visibleColumns?: string[] }>(), { job: null, profile: null, visibleColumns: () => [] });
+const props = withDefaults(defineProps<{ scope: LogMetricScope; job?: ParseJob | null; profile?: PackageProfile | null; visibleColumns?: string[]; historyJobId?: number | null }>(), { job: null, profile: null, visibleColumns: () => [], historyJobId: null });
 const emit = defineEmits<{
   "failure-select": [value: { target_kind: MetricViewKind; config_id?: number }];
   "configure-columns": [];
@@ -157,7 +157,7 @@ function queryScope(scope: LogMetricScope) {
 
 async function loadTargets(scope: LogMetricScope, requestId: number, kind: MetricViewKind) {
   const targetRequest = ++targetRequestId;
-  const response = await getMetricTargets(scope);
+  const response = props.historyJobId ? await getHistoricalMetricTargets(props.historyJobId) : await getMetricTargets(scope);
   if (disposed || requestId !== scopeRequestId || targetRequest !== targetRequestId || targetKind.value !== kind) return;
   rawTargets.value = unwrap<{ items: TargetMetric[] }>(response).items;
 }
@@ -171,7 +171,10 @@ async function load() {
   disabled.value = false; loading.value = true; error.value = "";
   const scopedQuery = queryScope(scope);
   try {
-    const [overviewResponse, configsResponse] = await Promise.all([getMetricOverview(scopedQuery), getMetricConfigs(scopedQuery)]);
+    const [overviewResponse, configsResponse] = await Promise.all([
+      props.historyJobId ? getHistoricalMetricOverview(props.historyJobId) : getMetricOverview(scopedQuery),
+      props.historyJobId ? getHistoricalMetricConfigs(props.historyJobId) : getMetricConfigs(scopedQuery),
+    ]);
     if (disposed || requestId !== scopeRequestId) return;
     overview.value = unwrap<MetricOverview>(overviewResponse);
     configs.value = unwrap<{ total: number; items: ConfigMetricItem[] }>(configsResponse).items;
@@ -203,7 +206,7 @@ function showColumn(column: string) { return !props.visibleColumns.length || pro
 function emitProfileUpdate(payload: { field: PackageProfileField; value: string; profile: Partial<PackageProfile> }) { emit("profile-update", payload); }
 function emitProfileError(message: string) { emit("profile-error", message); }
 
-watch(() => [props.scope, props.job], () => { void load(); }, { deep: true });
+watch(() => [props.scope, props.job, props.historyJobId], () => { void load(); }, { deep: true });
 onMounted(() => { void load(); });
 onBeforeUnmount(() => { disposed = true; ++scopeRequestId; ++targetRequestId; });
 </script>
@@ -212,20 +215,20 @@ onBeforeUnmount(() => { disposed = true; ++scopeRequestId; ++targetRequestId; })
 .metrics-panel { display: grid; gap: 16px; }
 .panel-header, .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .panel-header h3, .section-heading h4 { margin: 0; }
-.scope-note { margin: 4px 0 0; color: var(--text-secondary); font-size: 12px; }
-.package-profile { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; color: var(--text-secondary); font-size: 12px; }
+.scope-note { margin: 4px 0 0; color: var(--text-muted); font-size: 12px; }
+.package-profile { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; color: var(--text-muted); font-size: 12px; }
 .metric-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
-.metric-cards article { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--border-soft); border-radius: 10px; background: rgba(8, 13, 13, .35); }
-.metric-cards span { color: var(--text-secondary); font-size: 12px; }
+.metric-cards article { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--panel-bg); }
+.metric-cards span { color: var(--text-muted); font-size: 12px; }
 .metric-cards strong { font-size: 22px; }
 .metric-section { display: grid; gap: 10px; }
 .metric-table-scroll { max-height: 250px; overflow: auto; }
-.mismatch-alert { margin: 0; padding: 10px 12px; border: 1px solid rgba(217, 120, 93, .45); border-radius: 8px; color: var(--danger, #d9785d); }
+.mismatch-alert { margin: 0; padding: 10px 12px; border: 1px solid var(--error-border); border-radius: 6px; color: var(--danger, var(--error-text)); }
 .tabs, .config-tabs { display: flex; gap: 6px; }
-.tabs button, .config-tabs button, .ghost, .config-button, .failure-count { border: 1px solid var(--border-soft); border-radius: 8px; background: transparent; color: var(--text-primary); padding: 6px 10px; cursor: pointer; }
-.tabs button.active, .config-tabs button.active, .config-button.active { background: rgba(182, 98, 43, .22); }
+.tabs button, .config-tabs button, .ghost, .config-button, .failure-count { border: 1px solid var(--border-soft); border-radius: 6px; background: transparent; color: var(--text-primary); padding: 6px 10px; cursor: pointer; }
+.tabs button.active, .config-tabs button.active, .config-button.active { background: var(--hover-bg); }
 .config-button:disabled { cursor: not-allowed; opacity: .6; }
 .failure-count { min-width: 34px; color: var(--text-primary); }
-.feedback.error { color: var(--danger, #d9785d); }
-.empty-state { color: var(--text-secondary); }
+.feedback.error { color: var(--danger, var(--error-text)); }
+.empty-state { color: var(--text-muted); }
 </style>

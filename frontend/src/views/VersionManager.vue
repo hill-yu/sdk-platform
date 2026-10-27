@@ -181,7 +181,7 @@ onMounted(loadVersions);
 
 .panel {
   padding: 22px;
-  border-radius: 24px;
+  border-radius: 6px;
   background: var(--panel-bg);
   border: 1px solid var(--border-soft);
   box-shadow: var(--panel-shadow);
@@ -215,7 +215,7 @@ onMounted(loadVersions);
 .ghost,
 .primary,
 .input {
-  border-radius: 12px;
+  border-radius: 6px;
   border: 1px solid var(--border-soft);
   color: var(--text-primary);
 }
@@ -224,26 +224,31 @@ onMounted(loadVersions);
 .ghost,
 .primary {
   padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--panel-bg);
 }
 
 .tabs button.active {
-  background: rgba(214, 140, 69, 0.22);
+  background: var(--hover-bg);
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .primary {
-  background: linear-gradient(135deg, rgba(214, 140, 69, 0.92), rgba(182, 98, 43, 0.92));
+  background: var(--accent);
+  color: #fff;
 }
 
 .table {
   width: 100%;
+  min-width: 680px;
   border-collapse: collapse;
 }
 
 .table th,
 .table td {
   padding: 12px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--border-soft);
+  white-space: nowrap;
 }
 
 .form-grid {
@@ -258,7 +263,7 @@ onMounted(loadVersions);
 }
 
 .input {
-  background: rgba(8, 13, 13, 0.5);
+  background: var(--panel-bg);
   padding: 12px;
 }
 
@@ -273,7 +278,7 @@ onMounted(loadVersions);
 .dialog-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(4, 10, 12, 0.55);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -285,7 +290,7 @@ onMounted(loadVersions);
   max-height: calc(100dvh - 40px);
   overflow: auto;
   padding: 22px;
-  border-radius: 24px;
+  border-radius: 6px;
   background: var(--panel-bg);
   border: 1px solid var(--border-soft);
   box-shadow: var(--panel-shadow);
@@ -295,8 +300,8 @@ onMounted(loadVersions);
   margin: 0;
   padding: 12px 14px;
   border-radius: 14px;
-  background: rgba(209, 89, 89, 0.18);
-  color: #ffb0a8;
+  background: var(--error-bg);
+  color: var(--error-text);
 }
 
 .empty-state {

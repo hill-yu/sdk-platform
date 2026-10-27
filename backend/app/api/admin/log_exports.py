@@ -22,6 +22,14 @@ async def get_log_packages(
     return {"code": 0, "data": {"items": await log_export_service.search_packages(db, keyword, limit)}}
 
 
+@router.get("/usage-package-names")
+async def get_usage_package_names(
+    keyword: str | None = Query(None, max_length=255), limit: int = Query(20, ge=1, le=50),
+    db: AsyncSession = Depends(get_db_no_commit),
+):
+    return {"code": 0, "data": {"items": await log_export_service.search_usage_packages(db, keyword, limit)}}
+
+
 @router.post("/log-exports")
 async def create_log_export(body: LogExportCreateRequest, db: AsyncSession = Depends(get_db)):
     return {"code": 0, "data": await log_export_service.create_job(db, body)}

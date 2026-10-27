@@ -44,6 +44,9 @@ ALTER TABLE sdk_log_export_jobs
 ALTER TABLE sdk_log_export_jobs
     ADD COLUMN IF NOT EXISTS hour_to SMALLINT;
 
+ALTER TABLE sdk_log_export_jobs
+    ADD COLUMN IF NOT EXISTS all_packages BOOLEAN NOT NULL DEFAULT FALSE;
+
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -79,6 +82,19 @@ BEGIN
             ADD CONSTRAINT chk_log_export_jobs_hour_bounds CHECK (
                 (hour_from IS NULL OR hour_from BETWEEN 0 AND 23) AND
                 (hour_to IS NULL OR hour_to BETWEEN 0 AND 23)
+            );
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_log_export_jobs_package_scope'
+          AND conrelid = 'sdk_log_export_jobs'::regclass
+    ) THEN
+        ALTER TABLE sdk_log_export_jobs
+            ADD CONSTRAINT chk_log_export_jobs_package_scope CHECK (
+                (all_packages = TRUE AND package_names = '[]'::jsonb) OR
+                (all_packages = FALSE AND jsonb_array_length(package_names) BETWEEN 1 AND 50)
             );
     END IF;
 END $$;

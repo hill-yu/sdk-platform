@@ -277,18 +277,18 @@ async function copyNode(): Promise<void> {
 </script>
 
 <style scoped>
-.tree-node { margin: 8px 0; }
+.tree-node { margin: 8px 0; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .node-row, .add-row, .sibling-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .node-row input, .node-row select, .add-row input, .add-row select, .sibling-row input, .sibling-row select,
-.tree-node button { padding: 7px 9px; border: 1px solid var(--border-soft); border-radius: 8px; color: var(--text-primary); background: rgba(8, 13, 13, 0.5); }
-.key-input { width: 150px; }
+.tree-node button { padding: 7px 9px; border: 1px solid var(--border-soft); border-radius: 6px; color: var(--text-primary); background: var(--panel-bg); }
+.key-input { width: min(150px, 100%); max-width: 100%; }
 .node-key { min-width: 80px; font-weight: 600; }
 .node-value { color: var(--text-muted); }
 .icon-button { min-width: 32px; }
 .toggle-placeholder { width: 32px; }
-.container-children { margin-left: 22px; padding-left: 14px; border-left: 1px solid var(--border-soft); }
+.container-children { margin-left: 22px; padding-left: 14px; border-left: 1px solid var(--border-soft); min-width: 0; max-width: 100%; }
 .add-row { margin: 8px 0 12px; }
-.sibling-row { margin: 6px 0 6px 54px; }
-.node-error { margin: 6px 0 6px 54px; color: #ffb0a8; }
+.sibling-row { margin: 6px 0 6px 54px; max-width: calc(100% - 54px); }
+.node-error { margin: 6px 0 6px 54px; color: var(--error-text); }
 button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity: 0.5; }
 </style>

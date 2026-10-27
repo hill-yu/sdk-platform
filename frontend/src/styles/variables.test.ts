@@ -9,32 +9,33 @@ const css = readFileSync(
   'utf8',
 );
 
-describe('global dark select styles', () => {
-  it('keeps the dark color scheme', () => {
-    expect(css).toContain('color-scheme: dark;');
+describe('global light theme styles', () => {
+  it('uses the light color scheme', () => {
+    expect(css).toContain('color-scheme: light;');
   });
 
-  it('sets an explicit dark theme for select controls', () => {
+  it('sets explicit light theme tokens for select controls', () => {
     expect(css).toMatch(
       /select\s*\{[^}]*background-color:\s*var\(--panel-bg\);[^}]*color:\s*var\(--text-primary\);/s,
     );
   });
 
-  it('sets an explicit dark theme for options and option groups', () => {
+  it('sets explicit light theme tokens for options and option groups', () => {
     expect(css).toMatch(
-      /option\s*,\s*optgroup\s*\{[^}]*background-color:\s*var\(--bg-secondary\);[^}]*color:\s*var\(--text-primary\);/s,
+      /option\s*,\s*optgroup\s*\{[^}]*background-color:\s*var\(--panel-bg\);[^}]*color:\s*var\(--text-primary\);/s,
     );
   });
 
   it('keeps disabled selects readable', () => {
     expect(css).toMatch(
-      /select:disabled\s*\{[^}]*background-color:\s*var\(--bg-secondary\);[^}]*color:\s*var\(--text-muted\);/s,
+      /select:disabled\s*\{[^}]*background-color:\s*var\(--disabled-bg\);[^}]*color:\s*var\(--disabled-text\);/s,
     );
   });
 
-  it('does not use light or system colors for the select theme', () => {
-    expect(css).not.toMatch(
-      /(?:background-color|color):\s*(?:white|#fff(?:fff)?|Canvas|CanvasText)\s*;/i,
-    );
+  it('defines semantic status tokens for shared component states', () => {
+    expect(css).toContain('--success-text: #15803d;');
+    expect(css).toContain('--warning-text: #b45309;');
+    expect(css).toContain('--error-text: #b91c1c;');
+    expect(css).toContain('--focus-ring: #2563eb;');
   });
 });

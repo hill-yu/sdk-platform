@@ -3,6 +3,7 @@ import type { LogLevel } from "@/api/dashboard";
 
 export interface LogExportFilters {
   package_names: string[];
+  all_packages: boolean;
   export_mode?: "raw" | "h1";
   sdk_version?: string;
   device_id?: string;
@@ -22,7 +23,7 @@ export interface LogExportJob {
 }
 
 export const searchLogPackages = (keyword: string) =>
-  request.get("/log-packages", { params: { keyword: keyword || undefined, limit: 20 } });
+  request.get<{ code: number; data: { items: string[] } }>("/log-packages", { params: { keyword: keyword || undefined, limit: 20 } }) as unknown as Promise<{ code: number; data: { items: string[] } }>;
 export const createLogExport = (body: LogExportFilters) => request.post("/log-exports", body);
 export const getLogExport = (id: string) => request.get(`/log-exports/${id}`);
 export const downloadLogExport = (id: string) =>

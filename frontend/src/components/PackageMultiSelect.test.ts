@@ -13,7 +13,9 @@ describe("PackageMultiSelect", () => {
 
   it("searches, selects without duplicates, and removes packages", async () => {
     const wrapper = mount(PackageMultiSelect, { props: { modelValue: [] } });
-    await wrapper.get("[data-testid='package-search']").setValue("tech");
+    const input = wrapper.get("[data-testid='package-search']");
+    await input.trigger("focus");
+    await input.setValue("tech");
     await vi.advanceTimersByTimeAsync(300);
     await flushPromises();
     expect(searchLogPackages).toHaveBeenCalledWith("tech");
@@ -29,7 +31,9 @@ describe("PackageMultiSelect", () => {
     const oldRequest = new Promise((resolve) => { resolveOld = resolve; });
     searchLogPackages.mockReturnValueOnce(oldRequest).mockResolvedValueOnce({ data: { items: ["new.package"] } });
     const wrapper = mount(PackageMultiSelect, { props: { modelValue: [] } });
-    await wrapper.get("[data-testid='package-search']").setValue("old");
+    const input = wrapper.get("[data-testid='package-search']");
+    await input.trigger("focus");
+    await input.setValue("old");
     await vi.advanceTimersByTimeAsync(300);
     await wrapper.get("[data-testid='package-search']").setValue("new");
     await vi.advanceTimersByTimeAsync(300);

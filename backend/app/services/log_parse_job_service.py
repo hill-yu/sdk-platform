@@ -29,12 +29,35 @@ from app.services.h1_extractor import extract_h1_records
 
 PARSE_JOB_ADVISORY_LOCK_KEY = 20260930
 MAX_PARSE_BATCH_SIZE = 200
+STAGE_INSERT_PARAMETER_BUDGET = 30_000
+STAGE_INSERT_ROW_CAP = 1_000
 PARSE_BATCH_SIZE = min(get_settings().LOG_PARSE_BATCH_SIZE, MAX_PARSE_BATCH_SIZE)
 PARSE_LEASE_SECONDS = get_settings().LOG_PARSE_LEASE_SECONDS
 PARSE_TIMEOUT_SECONDS = 1.0
 PARSE_EXECUTOR_FACTORY = ProcessPoolExecutor
 MAX_PARSE_CONCURRENCY = get_settings().LOG_PARSE_CONCURRENCY
 PARSE_DECODE_FUNCTION = None
+
+
+async def _insert_stage_rows_in_chunks(
+    db: AsyncSession,
+    model: type[Any],
+    rows: list[dict[str, object]],
+) -> None:
+    """Insert expanded stage rows without exceeding the asyncpg bind limit."""
+    if not rows:
+        return
+    field_sets = {frozenset(row) for row in rows}
+    if len(field_sets) != 1:
+        raise ValueError("stage rows must have a consistent field set")
+    field_count = len(next(iter(field_sets)))
+    if field_count == 0:
+        return
+    rows_per_chunk = min(STAGE_INSERT_ROW_CAP, STAGE_INSERT_PARAMETER_BUDGET // field_count)
+    if rows_per_chunk < 1:
+        raise ValueError("stage row has too many fields for the parameter budget")
+    for offset in range(0, len(rows), rows_per_chunk):
+        await db.execute(insert(model).values(rows[offset : offset + rows_per_chunk]))
 
 
 class ActiveParseJobError(RuntimeError):
@@ -543,10 +566,8 @@ async def process_parse_job_batch(
         staged_h1_rows.extend(h1_rows)
         staged_click_rows.extend(click_rows)
 
-    if staged_h1_rows:
-        await db.execute(insert(H1DeclarationStage).values(staged_h1_rows))
-    if staged_click_rows:
-        await db.execute(insert(LogClickAttemptStage).values(staged_click_rows))
+    await _insert_stage_rows_in_chunks(db, H1DeclarationStage, staged_h1_rows)
+    await _insert_stage_rows_in_chunks(db, LogClickAttemptStage, staged_click_rows)
 
     last_event = events[-1]
     job.processed_count = (job.processed_count or 0) + len(events)

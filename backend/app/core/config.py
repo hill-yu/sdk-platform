@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     SDK_API_PORT: int = 8100
     ADMIN_API_PORT: int = 8101
     ADMIN_TOKEN: str = Field(default="", repr=False)
+    ADMIN_PASSWORD_LOGIN_ENABLED: bool = False
+    ADMIN_USERNAME: str = "admin"
+    ADMIN_PASSWORD_HASH: str = Field(default="", repr=False)
+    ADMIN_SESSION_COOKIE_SECURE: bool = True
+    ADMIN_AUTH_ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
+    ADMIN_SESSION_TTL_SECONDS: int = Field(default=28800, ge=300, le=28800)
     SDK_CONFIG_TOKEN: str = Field(default="", repr=False)
 
     # 腾讯云 COS
@@ -41,6 +47,7 @@ class Settings(BaseSettings):
 
     LOG_LEVEL: str = "INFO"
     LOG_EXPORT_DIR: str = "exports"
+    PACKAGE_CATALOG_READS_ENABLED: bool = False
     LOG_PARSE_BATCH_SIZE: int = Field(default=200, ge=1, le=200)
     LOG_PARSE_CONCURRENCY: int = Field(default=3, ge=1, le=3)
     LOG_PARSE_MAX_DAYS: int = Field(default=7, ge=1, le=7)

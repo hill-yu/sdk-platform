@@ -315,17 +315,28 @@ cd backend
 source venv/bin/activate
 pip install -r requirements.txt  # 如有新增依赖
 
-# 4. 执行数据库迁移
+# 4. 执行 additive 数据库迁移
 psql -U sdk_admin -d sdk_platform -f ../scripts/migrate_cos_upload_status.sql
+psql -U sdk_admin -d sdk_platform -f ../scripts/migrate_package_catalog.sql
 if [ $? -ne 0 ]; then
     echo "数据库迁移失败，禁止重启服务"
     exit 1
 fi
 
-# 5. 重启服务
+# 5. 以目录读取开关关闭状态部署新 writer
+# PACKAGE_CATALOG_READS_ENABLED=false
 sudo systemctl restart sdk-api sdk-admin
 
-# 6. 验证
+# 6. 确认旧 writer 已排空后，在受保护 env 文件中设置 DATABASE_URL，执行从头 final pass
+python ../scripts/backfill_package_catalog.py --env-file /etc/sdk-platform/migration.env --source log --batch-size 1000 --statement-timeout-ms 5000 --apply
+python ../scripts/backfill_package_catalog.py --env-file /etc/sdk-platform/migration.env --source usage --batch-size 1000 --statement-timeout-ms 5000 --apply
+# 完成 sdk_events/sdk_usage_durations 到目录、目录到事实表的双向差集校验；失败则停止发布。
+
+# 7. 显式开启目录读取并重启 admin
+# PACKAGE_CATALOG_READS_ENABLED=true
+sudo systemctl restart sdk-api sdk-admin
+
+# 8. 验证
 curl http://localhost:8100/health
 curl http://localhost:8101/api/admin/health \
   -H "Authorization: Bearer your_admin_token_here"

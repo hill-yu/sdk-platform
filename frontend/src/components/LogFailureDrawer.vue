@@ -34,12 +34,12 @@ function formatShare(value: number | null) {
 </script>
 
 <style scoped>
-.failure-drawer { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--surface-raised, rgba(18, 25, 24, .96)); }
+.failure-drawer { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--surface-raised, var(--surface-raised)); }
 .drawer-header { display: flex; align-items: center; justify-content: space-between; }
 .drawer-header h4 { margin: 0; }
 .table-scroll { overflow: auto; }
 .failure-scroll { max-height: 240px; }
-.ghost { border: 1px solid var(--border-soft); border-radius: 8px; background: transparent; color: var(--text-primary); padding: 6px 10px; cursor: pointer; }
-.muted, .empty-state { color: var(--text-secondary); }
-.error { color: var(--danger, #d9785d); }
+.ghost { border: 1px solid var(--border-soft); border-radius: 6px; background: transparent; color: var(--text-primary); padding: 6px 10px; cursor: pointer; }
+.muted, .empty-state { color: var(--text-muted); }
+.error { color: var(--danger, var(--error-text)); }
 </style>

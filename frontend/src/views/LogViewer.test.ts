@@ -20,6 +20,7 @@ const {
   cancelParseJob,
   getUsageSummary,
   getUsageDevices,
+  searchUsagePackages,
   createLogExport,
   getLogExport,
   downloadLogExport,
@@ -39,6 +40,7 @@ const {
   cancelParseJob: vi.fn(),
   getUsageSummary: vi.fn(),
   getUsageDevices: vi.fn(),
+  searchUsagePackages: vi.fn(),
   createLogExport: vi.fn(),
   getLogExport: vi.fn(),
   downloadLogExport: vi.fn(),
@@ -74,8 +76,15 @@ vi.mock("@/api/logMetrics", () => ({
   getParseJob,
   cancelParseJob,
 }));
-vi.mock("@/api/usageDurations", () => ({ getUsageSummary, getUsageDevices }));
+vi.mock("@/api/usageDurations", () => ({ getUsageSummary, getUsageDevices, searchUsagePackages }));
 vi.mock("@/api/logExports", () => ({ createLogExport, getLogExport, downloadLogExport }));
+vi.mock("@/components/PackageSelect.vue", () => ({
+  default: {
+    props: ["modelValue", "inputTestId", "placeholder", "disabled"],
+    emits: ["update:modelValue"],
+    template: `<input :data-testid="inputTestId" :placeholder="placeholder" :disabled="disabled" :value="modelValue" @input="$emit('update:modelValue', $event.target.value)" />`,
+  },
+}));
 
 import LogViewer from "@/views/LogViewer.vue";
 import LogExportPanel from "@/components/LogExportPanel.vue";
@@ -249,6 +258,17 @@ describe("LogViewer", () => {
     expect(getUsageSummary).toHaveBeenCalledWith(expect.objectContaining({ date_from: expect.any(String), hour_from: 0, date_to: expect.any(String), hour_to: 23 }));
   });
 
+  it("preserves usage draft state when switching tabs", async () => {
+    const wrapper = mount(LogViewer);
+    await flushPromises();
+    await wrapper.get("[data-testid='usage-view-tab']").trigger("click");
+    const packageInput = wrapper.get("[data-testid='usage-package-name']");
+    await packageInput.setValue("com.example.app");
+    await wrapper.get("[data-testid='raw-view-tab']").trigger("click");
+    await wrapper.get("[data-testid='usage-view-tab']").trigger("click");
+    expect((wrapper.get("[data-testid='usage-package-name']").element as HTMLInputElement).value).toBe("com.example.app");
+  });
+
   it("refreshes every analysis surface from the current legal draft", async () => {
     const wrapper = await mountAnalysisViewer();
     await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
@@ -312,6 +332,8 @@ describe("LogViewer", () => {
     const wrapper = await mountAnalysisViewer();
     await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
     const scopeA = { package_name: "com.example.app", date_from: "2026-10-06", hour_from: 0, date_to: "2026-10-08", hour_to: 23 };
+    await wrapper.get("[data-testid='filter-date-from']").setValue(scopeA.date_from);
+    await wrapper.get("[data-testid='filter-date-to']").setValue(scopeA.date_to);
     postParseJob.mockResolvedValueOnce({ data: { code: 0, data: { id: 91, package_name: scopeA.package_name, ...analysisScopeUtcRange(scopeA), status: "running", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
     await wrapper.get("[data-testid='start-parse']").trigger("click");
     await flushPromises();
@@ -326,10 +348,13 @@ describe("LogViewer", () => {
 
   it("polls after cancellation returns running until the worker reports cancelled", async () => {
     vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-08T12:00:00+08:00"));
     try {
       const wrapper = await mountAnalysisViewer();
       await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
       const scope = { package_name: "com.example.app", date_from: "2026-10-06", hour_from: 0, date_to: "2026-10-08", hour_to: 23 };
+      await wrapper.get("[data-testid='filter-date-from']").setValue(scope.date_from);
+      await wrapper.get("[data-testid='filter-date-to']").setValue(scope.date_to);
       postParseJob.mockResolvedValueOnce({ data: { code: 0, data: { id: 92, package_name: scope.package_name, ...analysisScopeUtcRange(scope), status: "running", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
       cancelParseJob.mockResolvedValueOnce({ data: { code: 0, data: { id: 92, package_name: scope.package_name, ...analysisScopeUtcRange(scope), status: "running", cancel_requested_at: "2026-10-08T00:00:00Z", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
       getParseJob.mockResolvedValueOnce({ data: { code: 0, data: { id: 92, package_name: scope.package_name, ...analysisScopeUtcRange(scope), status: "cancelled", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
@@ -346,10 +371,13 @@ describe("LogViewer", () => {
 
   it("restores polling when cancellation fails", async () => {
     vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-08T12:00:00+08:00"));
     try {
       const wrapper = await mountAnalysisViewer();
       await wrapper.get("[data-testid='filter-package-name']").setValue("com.example.app");
       const scope = { package_name: "com.example.app", date_from: "2026-10-06", hour_from: 0, date_to: "2026-10-08", hour_to: 23 };
+      await wrapper.get("[data-testid='filter-date-from']").setValue(scope.date_from);
+      await wrapper.get("[data-testid='filter-date-to']").setValue(scope.date_to);
       postParseJob.mockResolvedValueOnce({ data: { code: 0, data: { id: 93, package_name: scope.package_name, ...analysisScopeUtcRange(scope), status: "running", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
       cancelParseJob.mockRejectedValueOnce(new Error("cancel unavailable"));
       getParseJob.mockResolvedValueOnce({ data: { code: 0, data: { id: 93, package_name: scope.package_name, ...analysisScopeUtcRange(scope), status: "running", total_count: 1, processed_count: 0, h1_count: 0, failed_h1_count: 0, no_h1_count: 0 } } });
@@ -479,6 +507,14 @@ describe("LogViewer", () => {
 
     await wrapper.get("[data-testid='device-filter']").setValue("draft-device");
     await wrapper.get("[data-testid='date-from-filter']").setValue("2026-09-01");
+    expect(wrapper.findComponent(LogExportPanel).get("[data-testid='export-button']").attributes("disabled")).toBeDefined();
+    await wrapper.findComponent(LogExportPanel).get("[data-testid='export-button']").trigger("click");
+    await flushPromises();
+    expect(createLogExport).not.toHaveBeenCalled();
+    await wrapper.get("[data-testid='device-filter']").setValue("applied-device");
+    await wrapper.get("[data-testid='date-from-filter']").setValue("2026-08-01");
+    await wrapper.get("[data-testid='query-button']").trigger("click");
+    await flushPromises();
     await wrapper.findComponent(LogExportPanel).get("[data-testid='export-button']").trigger("click");
     await flushPromises();
     expect(createLogExport).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -576,14 +612,13 @@ describe("LogViewer", () => {
   it("ignores a late package options response from an older request", async () => {
     const oldOptions = deferred<{ data: { package_names: string[]; sdk_versions: string[] } }>();
     const newOptions = deferred<{ data: { package_names: string[]; sdk_versions: string[] } }>();
-    getEventFilterOptions
-      .mockResolvedValueOnce({ data: { package_names: ["com.example.app", "com.example.other"], sdk_versions: [] } })
-      .mockReturnValueOnce(oldOptions.promise)
-      .mockReturnValueOnce(newOptions.promise);
     const wrapper = await mountViewer();
+
+    getEventFilterOptions.mockReset().mockReturnValueOnce(oldOptions.promise).mockReturnValueOnce(newOptions.promise);
 
     await wrapper.get("[data-testid='package-filter']").setValue("com.example.app");
     await wrapper.get("[data-testid='package-filter']").setValue("com.example.other");
+    await flushPromises();
     newOptions.resolve({ data: { package_names: ["com.example.app", "com.example.other"], sdk_versions: ["2.0.0"] } });
     await flushPromises();
     oldOptions.resolve({ data: { package_names: ["com.example.app", "com.example.other"], sdk_versions: ["1.0.0"] } });

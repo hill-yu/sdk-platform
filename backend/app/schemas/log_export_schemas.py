@@ -7,7 +7,8 @@ from app.core.timezone import business_hour_utc_range
 
 
 class LogExportCreateRequest(BaseModel):
-    package_names: list[str] = Field(min_length=1, max_length=50)
+    package_names: list[str] = Field(default_factory=list, max_length=50)
+    all_packages: bool = False
     export_mode: Literal["raw", "h1"] = "raw"
     sdk_version: str | None = Field(default=None, max_length=20)
     device_id: str | None = Field(default=None, max_length=64)
@@ -21,8 +22,6 @@ class LogExportCreateRequest(BaseModel):
     @classmethod
     def normalize_packages(cls, values: list[str]) -> list[str]:
         result = list(dict.fromkeys(value.strip() for value in values if value.strip()))
-        if not result:
-            raise ValueError("至少选择一个包名")
         if any(len(value) > 255 for value in result):
             raise ValueError("包名长度不能超过 255")
         return result
@@ -34,6 +33,10 @@ class LogExportCreateRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_dates(self):
+        if self.all_packages and self.package_names:
+            raise ValueError("all_packages=true 时不能同时提供 package_names")
+        if not self.all_packages and not self.package_names:
+            raise ValueError("all_packages=false 时至少需要一个包名")
         if self.date_from and self.date_to and self.date_from > self.date_to:
             raise ValueError("开始日期不能晚于结束日期")
         if (self.hour_from is None) != (self.hour_to is None):

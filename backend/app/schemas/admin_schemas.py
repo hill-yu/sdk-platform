@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -28,6 +29,10 @@ class ConfigCreateRequest(ConfigUpsertRequest):
     @classmethod
     def validate_package_name(cls, value: str) -> str:
         return normalize_package_name(value)
+
+
+class ConfigPublishRequest(BaseModel):
+    expected_updated_at: datetime | None = None
 
 
 class VersionCreateRequest(BaseModel):

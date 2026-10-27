@@ -1,25 +1,29 @@
 <template>
-  <div class="stack">
-    <p v-if="errorMessage" class="feedback error">{{ errorMessage }}</p>
-    <p v-if="loading" class="feedback">正在加载数据...</p>
-    <section class="stats-grid">
-      <StatCard title="今日 PV" :value="summary.today_pv" :trend="trend(summary.today_pv, summary.yesterday_pv)" />
-      <StatCard title="今日 UV" :value="summary.today_uv" :trend="trend(summary.today_uv, summary.yesterday_uv)" />
+  <div class="stack dashboard-page">
+    <p v-if="errorMessage" data-testid="dashboard-error" class="feedback error">{{ errorMessage }}</p>
+    <p v-if="loading" data-testid="dashboard-loading" class="feedback">正在加载数据...</p>
+    <div class="dashboard-heading">
+      <h2>数据大盘</h2>
+      <span>示例数据 · 非生产环境</span>
+    </div>
+    <section class="stats-grid light-stats">
+      <StatCard title="今日 PV" :value="summary.today_pv" :trend="trend(summary.today_pv, summary.yesterday_pv)" light />
+      <StatCard title="今日 UV" :value="summary.today_uv" :trend="trend(summary.today_uv, summary.yesterday_uv)" light />
       <StatCard
         title="今日事件数"
         :value="summary.today_events"
-        :trend="trend(summary.today_events, summary.yesterday_events)"
+        :trend="trend(summary.today_events, summary.yesterday_events)" light
       />
       <StatCard
         title="活跃设备"
         :value="summary.active_devices"
-        :trend="trend(summary.active_devices, summary.yesterday_active_devices)"
+        :trend="trend(summary.active_devices, summary.yesterday_active_devices)" light
       />
     </section>
 
-    <section class="panel">
-      <div class="panel-header">
-        <h3>趋势图</h3>
+    <section class="panel light-panel">
+      <div class="panel-header panel-toolbar">
+        <span class="sr-only">事件趋势</span>
         <div class="controls">
           <select v-model="trendRange" @change="loadTrend">
             <option value="24h">24 小时</option>
@@ -33,24 +37,25 @@
           </select>
         </div>
       </div>
-      <TrendChart :title="'事件趋势'" :labels="trendLabels" :counts="trendCounts" :uv="trendUvs" />
+      <p v-if="!loading && trendLabels.length === 0" class="empty-state">当前没有可展示的趋势数据。</p>
+      <TrendChart v-else :title="'事件趋势'" :labels="trendLabels" :counts="trendCounts" :uv="trendUvs" light />
     </section>
 
     <div class="dual-grid">
-      <section class="panel">
+      <section class="panel light-panel">
         <div class="panel-header">
-          <h3>事件分布</h3>
+          <span class="sr-only">事件分布</span>
           <select v-model="breakdownDimension" @change="loadBreakdown">
             <option value="event_type">事件类型</option>
             <option value="page">页面</option>
             <option value="element">元素</option>
           </select>
         </div>
-        <TrendChart :title="'分布图'" :labels="breakdownLabels" :counts="breakdownCounts" pie />
+        <TrendChart v-if="breakdownLabels.length" :title="'事件分布'" :labels="breakdownLabels" :counts="breakdownCounts" pie light />
         <p v-if="breakdownLabels.length === 0" class="empty-state">当前没有可展示的分布数据。</p>
       </section>
 
-      <section class="panel">
+      <section class="panel light-panel">
         <div class="panel-header">
           <h3>事件明细</h3>
           <button class="ghost" @click="loadEvents">刷新</button>
@@ -216,6 +221,11 @@ onMounted(async () => {
   min-height: 0;
 }
 
+.dashboard-page { gap: 16px; }
+.dashboard-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.dashboard-heading h2 { margin: 0; color: var(--text-primary); font-size: 26px; letter-spacing: -0.03em; }
+.dashboard-heading span { color: var(--text-muted); font-size: 13px; }
+
 .stats-grid,
 .dual-grid {
   display: grid;
@@ -226,8 +236,10 @@ onMounted(async () => {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.light-stats { padding: 0; overflow: hidden; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--panel-bg); }
+
 .dual-grid {
-  grid-template-columns: 1.1fr 1fr;
+  grid-template-columns: 1fr 3fr;
 }
 
 .stats-grid > *,
@@ -253,6 +265,11 @@ onMounted(async () => {
   box-shadow: var(--panel-shadow);
 }
 
+.light-panel { padding: 18px; border-radius: 6px; background: var(--panel-bg); border-color: var(--border-soft); box-shadow: var(--panel-shadow); }
+.light-panel select, .light-panel input, .light-panel .ghost { border-radius: 6px; }
+.dashboard-page h3 { color: var(--text-primary); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
 .panel-header,
 .controls,
 .filters,
@@ -262,31 +279,41 @@ onMounted(async () => {
   gap: 12px;
 }
 
+.filters { flex-wrap: wrap; }
+
 .panel-header,
 .pager {
   justify-content: space-between;
 }
 
+.panel-toolbar .controls,
+.light-panel > .panel-header > select { margin-left: auto; }
+
 select,
 .ghost,
 input {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--panel-bg);
   color: var(--text-primary);
   border: 1px solid var(--border-soft);
   border-radius: 12px;
   padding: 10px 12px;
 }
 
+.light-panel select, .light-panel input, .light-panel .ghost { color: var(--text-primary); background: var(--panel-bg); border-color: var(--border-soft); }
+.light-panel .filters input { min-width: 0; flex: 1 1 130px; }
+.light-panel .filters select, .light-panel .filters .ghost { flex: 0 1 auto; }
+.light-panel select:focus-visible, .light-panel input:focus-visible, .light-panel button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+
 .feedback {
   margin: 0;
   padding: 12px 14px;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
 }
 
 .feedback.error {
-  background: rgba(209, 89, 89, 0.18);
-  color: #ffb0a8;
+  background: var(--error-bg);
+  color: var(--error-text);
 }
 
 .table-scroll {
@@ -305,7 +332,7 @@ input {
 .table td {
   text-align: left;
   padding: 12px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .clickable-row {
@@ -326,10 +353,38 @@ input {
   text-align: center;
 }
 
+.light-panel .empty-state { color: var(--text-muted); padding: 32px 12px; }
+.light-panel .table th, .light-panel .table td { padding: 3px 10px; border-bottom-color: var(--border-soft); color: var(--text-primary); }
+.light-panel .expanded-row pre { color: var(--text-secondary); background: var(--code-bg); }
+.light-panel .pager { color: var(--text-muted); }
+.dashboard-page :deep(.chart) { height: 220px; }
+.dashboard-page .table { min-width: 680px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-page *, .dashboard-page *::before, .dashboard-page *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
 @media (max-width: 1120px) {
   .stats-grid,
   .dual-grid {
     grid-template-columns: 1fr;
   }
+}
+
+@media (max-width: 720px) {
+  .light-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .light-stats > * { border-bottom: 1px solid var(--border-soft); }
+  .light-stats > *:nth-child(even) { border-right: 0; }
+  .dual-grid { gap: 12px; }
+  .panel-header, .controls { flex-wrap: wrap; }
+  .dashboard-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .card.light .value-row { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .card.light .trend-wrap { gap: 6px; }
+  .panel-toolbar .controls { width: 100%; margin-left: 0; }
+  .panel-toolbar .controls select { flex: 1 1 0; min-width: 0; }
+  .light-panel { overflow: hidden; }
+  .light-panel .chart { max-width: 100%; }
+  .filters { align-items: stretch; }
+  .filters > * { min-width: min(100%, 140px); }
 }
 </style>

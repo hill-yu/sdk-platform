@@ -295,5 +295,5 @@ function moveNode(payload: MovePayload): void {
 </script>
 
 <style scoped>
-.config-tree-editor { min-width: 0; overflow-x: auto; }
+.config-tree-editor { min-width: 0; max-width: 100%; overflow-x: auto; padding: 12px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--panel-bg); }
 </style>

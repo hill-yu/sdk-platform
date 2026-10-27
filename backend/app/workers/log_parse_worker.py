@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import re
 import signal
+import traceback
 from datetime import datetime, timezone
 
 from app.core.database import async_session_factory
@@ -20,6 +23,51 @@ from app.services.log_parse_job_service import (
     process_parse_job_batch,
     release_parse_job,
 )
+
+
+logger = logging.getLogger(__name__)
+
+
+_SQLSTATE_RE = re.compile(r"^[0-9A-Z]{5}$")
+
+
+def _exception_chain(error: BaseException) -> list[BaseException]:
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen and len(chain) < 8:
+        seen.add(id(current))
+        chain.append(current)
+        cause = current.__cause__ or (None if current.__suppress_context__ else current.__context__)
+        if cause is None:
+            cause = getattr(current, "orig", None)
+        current = cause if isinstance(cause, BaseException) else None
+    return chain
+
+
+def _safe_exception_chain(error: BaseException) -> str:
+    details = []
+    for item in _exception_chain(error):
+        sqlstate = getattr(item, "sqlstate", None) or getattr(item, "pgcode", None)
+        if not isinstance(sqlstate, str) or not _SQLSTATE_RE.fullmatch(sqlstate):
+            sqlstate = None
+        details.append(
+            f"{type(item).__name__}"
+            + (f"[sqlstate={sqlstate}]" if sqlstate is not None else "")
+        )
+    return " <- ".join(details)
+
+
+def _safe_traceback(error: BaseException) -> str:
+    frames = []
+    for index, item in enumerate(_exception_chain(error)):
+        locations = " <- ".join(
+            f"{frame.filename}:{frame.lineno} in {frame.name}"
+            for frame in traceback.extract_tb(item.__traceback__)
+        )
+        if locations:
+            frames.append(f"chain{index}:{locations}")
+    return " || ".join(frames)
 
 
 BATCH_SIZE = PARSE_BATCH_SIZE
@@ -97,6 +145,12 @@ async def run_worker_once(
                 return True
             except Exception as error:
                 await db.rollback()
+                logger.error(
+                    "parse job failed job_id=%s error_chain=%s traceback=%s",
+                    claimed_job_id,
+                    _safe_exception_chain(error),
+                    _safe_traceback(error),
+                )
                 await mark_parse_job_failed(db, claimed_job_id, error, now=utc_now())
                 await db.commit()
                 return True

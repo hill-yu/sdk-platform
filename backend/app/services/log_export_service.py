@@ -14,10 +14,13 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.timezone import business_day_utc_range, business_hour_utc_range
+from app.core.config import get_settings
 from app.models.event import SdkEvent
 from app.models.log_export_job import LogExportJob
+from app.models.usage_duration import SdkUsageDuration
 from app.schemas.log_export_schemas import LogExportCreateRequest
 from app.services.h1_extractor import extract_h1_records
+from app.services.package_catalog_service import search_packages as search_catalog_packages
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 CSV_HEADER = ["id", "package_name", "device_id", "sdk_version", "level", "tag", "message", "extra", "client_ts", "server_ts"]
@@ -111,10 +114,22 @@ def csv_row_for_export(row: ExportRow) -> list[str]:
 
 
 async def search_packages(db: AsyncSession, keyword: str | None, limit: int) -> list[str]:
+    if get_settings().PACKAGE_CATALOG_READS_ENABLED:
+        return await search_catalog_packages(db, keyword, limit, source="log")
     stmt = select(SdkEvent.package_name).where(SdkEvent.event_type == "log").distinct()
     if keyword and keyword.strip():
         stmt = stmt.where(SdkEvent.package_name.ilike(f"%{keyword.strip()}%"))
     rows = await db.execute(stmt.order_by(SdkEvent.package_name).limit(limit))
+    return list(rows.scalars().all())
+
+
+async def search_usage_packages(db: AsyncSession, keyword: str | None, limit: int) -> list[str]:
+    if get_settings().PACKAGE_CATALOG_READS_ENABLED:
+        return await search_catalog_packages(db, keyword, limit, source="usage")
+    stmt = select(SdkUsageDuration.package_name).distinct()
+    if keyword and keyword.strip():
+        stmt = stmt.where(SdkUsageDuration.package_name.ilike(f"%{keyword.strip()}%"))
+    rows = await db.execute(stmt.order_by(SdkUsageDuration.package_name).limit(limit))
     return list(rows.scalars().all())
 
 
@@ -131,7 +146,7 @@ async def get_job(db: AsyncSession, job_id: UUID) -> LogExportJob | None:
 
 def serialize_job(job: LogExportJob) -> dict[str, Any]:
     return {
-        "id": str(job.id), "status": job.status, "export_mode": getattr(job, "export_mode", "raw"), "row_count": int(job.row_count or 0),
+        "id": str(job.id), "status": job.status, "export_mode": getattr(job, "export_mode", "raw"), "all_packages": bool(getattr(job, "all_packages", False)), "row_count": int(job.row_count or 0),
         "error_message": job.error_message,
         "hour_from": getattr(job, "hour_from", None), "hour_to": getattr(job, "hour_to", None),
         "created_at": job.created_at.astimezone(SHANGHAI).isoformat(),
@@ -140,7 +155,9 @@ def serialize_job(job: LogExportJob) -> dict[str, Any]:
 
 
 def apply_job_filters(stmt, job):
-    stmt = stmt.where(SdkEvent.event_type == "log", SdkEvent.package_name.in_(job.package_names))
+    stmt = stmt.where(SdkEvent.event_type == "log")
+    if not getattr(job, "all_packages", False):
+        stmt = stmt.where(SdkEvent.package_name.in_(job.package_names))
     if job.sdk_version:
         stmt = stmt.where(SdkEvent.sdk_version == job.sdk_version)
     if job.device_id:

@@ -15,28 +15,31 @@ from app.models.log_metrics import H1Declaration, LogClickAttempt
 TARGET_KINDS = ("banner", "anchored", "web_element")
 
 
-def build_metric_filters(*, package_name: str, range_start: datetime, range_end: datetime):
+def build_metric_filters(*, package_name: str, range_start: datetime, range_end: datetime, h1_model=H1Declaration, job_id: int | None = None):
     return [
-        H1Declaration.package_name == package_name,
-        H1Declaration.status == "success",
-        H1Declaration.event_server_ts >= range_start,
-        H1Declaration.event_server_ts < range_end,
+        h1_model.package_name == package_name,
+        h1_model.status == "success",
+        h1_model.event_server_ts >= range_start,
+        h1_model.event_server_ts < range_end,
+        *([h1_model.job_id == job_id] if job_id is not None else []),
     ]
 
 
-def build_h1_detail_filters(*, package_name: str, range_start: datetime, range_end: datetime):
+def build_h1_detail_filters(*, package_name: str, range_start: datetime, range_end: datetime, h1_model=H1Declaration, job_id: int | None = None):
     return [
-        H1Declaration.package_name == package_name,
-        H1Declaration.event_server_ts >= range_start,
-        H1Declaration.event_server_ts < range_end,
+        h1_model.package_name == package_name,
+        h1_model.event_server_ts >= range_start,
+        h1_model.event_server_ts < range_end,
+        *([h1_model.job_id == job_id] if job_id is not None else []),
     ]
 
 
-def _click_filters(*, package_name: str, range_start: datetime, range_end: datetime):
+def _click_filters(*, package_name: str, range_start: datetime, range_end: datetime, click_model=LogClickAttempt, job_id: int | None = None):
     return [
-        LogClickAttempt.package_name == package_name,
-        LogClickAttempt.event_server_ts >= range_start,
-        LogClickAttempt.event_server_ts < range_end,
+        click_model.package_name == package_name,
+        click_model.event_server_ts >= range_start,
+        click_model.event_server_ts < range_end,
+        *([click_model.job_id == job_id] if job_id is not None else []),
     ]
 
 
@@ -66,29 +69,31 @@ def _target_metrics(row: Any) -> dict[str, object]:
     }
 
 
-def _target_stmt(*, package_name: str, range_start: datetime, range_end: datetime):
+def _target_stmt(*, package_name: str, range_start: datetime, range_end: datetime, click_model=LogClickAttempt, job_id: int | None = None):
     filters = _click_filters(
         package_name=package_name,
         range_start=range_start,
         range_end=range_end,
+        click_model=click_model,
+        job_id=job_id,
     )
     return (
         select(
-            LogClickAttempt.target_kind,
-            func.count(LogClickAttempt.attempt_index).label("planned_count"),
-            func.count(LogClickAttempt.attempt_index)
-            .filter(LogClickAttempt.did_click.is_(True))
+            click_model.target_kind,
+            func.count(click_model.attempt_index).label("planned_count"),
+            func.count(click_model.attempt_index)
+            .filter(click_model.did_click.is_(True))
             .label("actual_count"),
-            func.count(LogClickAttempt.attempt_index)
-            .filter(LogClickAttempt.navigation_code == 1)
+            func.count(click_model.attempt_index)
+            .filter(click_model.navigation_code == 1)
             .label("success_count"),
-            func.count(LogClickAttempt.attempt_index)
-            .filter(LogClickAttempt.navigation_code.is_distinct_from(1))
+            func.count(click_model.attempt_index)
+            .filter(click_model.navigation_code.is_distinct_from(1))
             .label("failure_count"),
         )
         .where(*filters)
-        .group_by(LogClickAttempt.target_kind)
-        .order_by(LogClickAttempt.target_kind)
+        .group_by(click_model.target_kind)
+        .order_by(click_model.target_kind)
     )
 
 
@@ -98,11 +103,15 @@ async def _get_target_rows(
     package_name: str,
     range_start: datetime,
     range_end: datetime,
+    click_model=LogClickAttempt,
+    job_id: int | None = None,
 ) -> list[dict[str, object]]:
     rows = (await db.execute(_target_stmt(
         package_name=package_name,
         range_start=range_start,
         range_end=range_end,
+        click_model=click_model,
+        job_id=job_id,
     ))).all()
     return [
         {"target_kind": _row_value(row, "target_kind"), **_target_metrics(row)}
@@ -116,16 +125,23 @@ async def get_overview(
     package_name: str,
     range_start: datetime,
     range_end: datetime,
+    h1_model=H1Declaration,
+    click_model=LogClickAttempt,
+    job_id: int | None = None,
 ) -> dict[str, object]:
-    h1 = select(H1Declaration).where(*build_metric_filters(
+    h1 = select(h1_model).where(*build_metric_filters(
         package_name=package_name,
         range_start=range_start,
         range_end=range_end,
+        h1_model=h1_model,
+        job_id=job_id,
     )).subquery()
-    click = select(LogClickAttempt).where(*_click_filters(
+    click = select(click_model).where(*_click_filters(
         package_name=package_name,
         range_start=range_start,
         range_end=range_end,
+        click_model=click_model,
+        job_id=job_id,
     )).subquery()
     attempt_counts = (
         select(
@@ -171,6 +187,8 @@ async def get_overview(
         package_name=package_name,
         range_start=range_start,
         range_end=range_end,
+        click_model=click_model,
+        job_id=job_id,
     )
     target_map = {str(row["target_kind"]): _target_metrics(row) for row in target_rows}
     for target_kind in TARGET_KINDS:
@@ -200,14 +218,14 @@ async def get_overview(
     }
 
 
-async def get_config_breakdown(db: AsyncSession, *, package_name: str, range_start: datetime, range_end: datetime):
-    filters = build_metric_filters(package_name=package_name, range_start=range_start, range_end=range_end)
-    total = int((await db.execute(select(func.count()).select_from(select(H1Declaration.event_id).where(*filters).subquery()))).scalar_one() or 0)
+async def get_config_breakdown(db: AsyncSession, *, package_name: str, range_start: datetime, range_end: datetime, h1_model=H1Declaration, job_id: int | None = None):
+    filters = build_metric_filters(package_name=package_name, range_start=range_start, range_end=range_end, h1_model=h1_model, job_id=job_id)
+    total = int((await db.execute(select(func.count()).select_from(select(h1_model.event_id).where(*filters).subquery()))).scalar_one() or 0)
     rows = (await db.execute(
-        select(H1Declaration.config_id, func.count(H1Declaration.event_id).label("declaration_count"))
+        select(h1_model.config_id, func.count(h1_model.event_id).label("declaration_count"))
         .where(*filters)
-        .group_by(H1Declaration.config_id)
-        .order_by(H1Declaration.config_id)
+        .group_by(h1_model.config_id)
+        .order_by(h1_model.config_id)
     )).all()
     return {
         "total": total,
@@ -222,8 +240,8 @@ async def get_config_breakdown(db: AsyncSession, *, package_name: str, range_sta
     }
 
 
-async def get_target_breakdown(db: AsyncSession, *, package_name: str, range_start: datetime, range_end: datetime):
-    return {"items": await _get_target_rows(db, package_name=package_name, range_start=range_start, range_end=range_end)}
+async def get_target_breakdown(db: AsyncSession, *, package_name: str, range_start: datetime, range_end: datetime, click_model=LogClickAttempt, job_id: int | None = None):
+    return {"items": await _get_target_rows(db, package_name=package_name, range_start=range_start, range_end=range_end, click_model=click_model, job_id=job_id)}
 
 
 async def get_failure_breakdown(
@@ -234,26 +252,28 @@ async def get_failure_breakdown(
     range_end: datetime,
     target_kind: str | None = None,
     config_id: int | None = None,
+    click_model=LogClickAttempt,
+    job_id: int | None = None,
 ):
-    filters = _click_filters(package_name=package_name, range_start=range_start, range_end=range_end)
-    filters.append(LogClickAttempt.navigation_code.is_distinct_from(1))
+    filters = _click_filters(package_name=package_name, range_start=range_start, range_end=range_end, click_model=click_model, job_id=job_id)
+    filters.append(click_model.navigation_code.is_distinct_from(1))
     if target_kind:
         if target_kind == "ad_area":
-            filters.append(LogClickAttempt.target_kind.in_(("banner", "anchored")))
+            filters.append(click_model.target_kind.in_(("banner", "anchored")))
         else:
-            filters.append(LogClickAttempt.target_kind == target_kind)
+            filters.append(click_model.target_kind == target_kind)
     if config_id is not None:
-        filters.append(LogClickAttempt.config_id == config_id)
-    total = int((await db.execute(select(func.count(LogClickAttempt.attempt_index)).where(*filters))).scalar_one() or 0)
-    category_expr = func.coalesce(LogClickAttempt.failure_category, "未知原因")
+        filters.append(click_model.config_id == config_id)
+    total = int((await db.execute(select(func.count(click_model.attempt_index)).where(*filters))).scalar_one() or 0)
+    category_expr = func.coalesce(click_model.failure_category, "未知原因")
     rows = (await db.execute(
         select(
             category_expr.label("failure_category"),
-            func.count(LogClickAttempt.attempt_index).label("failure_count"),
+            func.count(click_model.attempt_index).label("failure_count"),
         )
         .where(*filters)
         .group_by(category_expr)
-        .order_by(func.count(LogClickAttempt.attempt_index).desc())
+        .order_by(func.count(click_model.attempt_index).desc())
     )).all()
     return [
         {
@@ -301,28 +321,31 @@ async def get_h1_details(
     page: int = 1,
     page_size: int = 20,
     sort_order: str = "desc",
+    h1_model=H1Declaration,
+    click_model=LogClickAttempt,
+    job_id: int | None = None,
 ):
     if page < 1 or page_size < 1 or page_size > 100 or sort_order not in {"asc", "desc"}:
         raise ValueError("分页或排序参数无效")
-    filters = build_h1_detail_filters(package_name=package_name, range_start=range_start, range_end=range_end)
-    total = int((await db.execute(select(func.count()).select_from(select(H1Declaration.event_id).where(*filters).subquery()))).scalar_one() or 0)
+    filters = build_h1_detail_filters(package_name=package_name, range_start=range_start, range_end=range_end, h1_model=h1_model, job_id=job_id)
+    total = int((await db.execute(select(func.count()).select_from(select(h1_model.event_id).where(*filters).subquery()))).scalar_one() or 0)
     direction = lambda column: column.asc() if sort_order == "asc" else column.desc()
     order = (
-        direction(H1Declaration.event_server_ts),
-        direction(H1Declaration.event_id),
-        direction(H1Declaration.record_index),
+        direction(h1_model.event_server_ts),
+        direction(h1_model.event_id),
+        direction(h1_model.record_index),
     )
     h1_rows = (await db.execute(
-        select(H1Declaration).where(*filters).order_by(*order).limit(page_size).offset((page - 1) * page_size)
+        select(h1_model).where(*filters).order_by(*order).limit(page_size).offset((page - 1) * page_size)
     )).scalars().all()
     clicks = []
     if h1_rows:
         keys = [(row.event_id, row.event_server_ts, row.record_index) for row in h1_rows]
-        click_filters = _click_filters(package_name=package_name, range_start=range_start, range_end=range_end)
+        click_filters = _click_filters(package_name=package_name, range_start=range_start, range_end=range_end, click_model=click_model, job_id=job_id)
         click_filters.append(
-            tuple_(LogClickAttempt.event_id, LogClickAttempt.event_server_ts, LogClickAttempt.record_index).in_(keys)
+            tuple_(click_model.event_id, click_model.event_server_ts, click_model.record_index).in_(keys)
         )
-        clicks = (await db.execute(select(LogClickAttempt).where(*click_filters).order_by(LogClickAttempt.event_id, LogClickAttempt.attempt_index))).scalars().all()
+        clicks = (await db.execute(select(click_model).where(*click_filters).order_by(click_model.event_id, click_model.attempt_index))).scalars().all()
     by_key: dict[tuple[object, object, object], list[dict[str, object]]] = {}
     for click in clicks:
         key = (click.event_id, click.event_server_ts, click.record_index)

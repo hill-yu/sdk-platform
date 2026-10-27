@@ -4,9 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getUsageDevices, getUsageSummary } from "@/api/usageDurations";
 import UsageDurationPanel from "@/components/UsageDurationPanel.vue";
 
+const searchUsagePackages = vi.hoisted(() => vi.fn());
+
 vi.mock("@/api/usageDurations", () => ({
   getUsageDevices: vi.fn(),
   getUsageSummary: vi.fn(),
+  searchUsagePackages,
 }));
 
 const summaryScope = { date_from: "2026-09-28", hour_from: 0, date_to: "2026-09-30", hour_to: 23 };
@@ -15,11 +18,11 @@ const summary = {
   page: 1,
   page_size: 20,
   items: [
-    { package_name: "com.a", device_model: "Pixel", device_count: 2, total_duration_s: 540, average_duration_s: 270, buckets: [
-      { key: "le_300", count: 1, share: 0.5 }, { key: "301_600", count: 1, share: 0.5 }, { key: "601_899", count: 0, share: 0 }, { key: "ge_900", count: 0, share: 0 },
+    { package_name: "com.a", device_model: null, device_count: 3, total_duration_s: 1020, average_duration_s: 340, buckets: [
+      { key: "le_120", count: 1, share: 0.333, total_duration_s: 120 }, { key: "121_300", count: 1, share: 0.333, total_duration_s: 300 }, { key: "301_600", count: 1, share: 0.333, total_duration_s: 600 }, { key: "601_899", count: 0, share: 0, total_duration_s: 0 }, { key: "900_1199", count: 0, share: 0, total_duration_s: 0 }, { key: "1200_1499", count: 0, share: 0, total_duration_s: 0 }, { key: "ge_1500", count: 0, share: 0, total_duration_s: 0 },
     ], last_report_at: "2026-09-30 10:00:00" },
-    { package_name: "com.b", device_model: "iPhone", device_count: 1, total_duration_s: 900, average_duration_s: 900, buckets: [
-      { key: "le_300", count: 0, share: 0 }, { key: "301_600", count: 0, share: 0 }, { key: "601_899", count: 0, share: 0 }, { key: "ge_900", count: 1, share: 1 },
+    { package_name: "com.b", device_model: null, device_count: 1, total_duration_s: 1500, average_duration_s: 1500, buckets: [
+      { key: "le_120", count: 0, share: 0, total_duration_s: 0 }, { key: "121_300", count: 0, share: 0, total_duration_s: 0 }, { key: "301_600", count: 0, share: 0, total_duration_s: 0 }, { key: "601_899", count: 0, share: 0, total_duration_s: 0 }, { key: "900_1199", count: 0, share: 0, total_duration_s: 0 }, { key: "1200_1499", count: 0, share: 0, total_duration_s: 0 }, { key: "ge_1500", count: 1, share: 1, total_duration_s: 1500 },
     ], last_report_at: "2026-09-30 11:00:00" },
   ],
 };
@@ -33,6 +36,18 @@ describe("UsageDurationPanel", () => {
     vi.mocked(getUsageDevices).mockResolvedValue({ data: { code: 0, data: { total: 1, page: 1, page_size: 20, items: [
       { package_name: "com.a", device_id: "device-a", device_model: "Pixel", duration_s: 270, sdk_version: "1.0", app_version: "2.0", last_report_at: "2026-09-30 10:00:00" },
     ] } } } as never);
+    searchUsagePackages.mockResolvedValue({ data: { items: ["com.a", "com.b"] } });
+  });
+
+  it("uses the usage-backed package combobox and keeps the typed draft separate from applied scope", async () => {
+    const wrapper = mount(UsageDurationPanel);
+    const input = wrapper.get("[data-testid='usage-package-name']");
+    await input.trigger("focus");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+
+    expect(searchUsagePackages).toHaveBeenCalledWith("");
+    expect(wrapper.find("[data-testid='usage-package-option']").exists()).toBe(true);
   });
 
   afterEach(() => vi.useRealTimers());
@@ -44,10 +59,10 @@ describe("UsageDurationPanel", () => {
     expect(getUsageSummary).toHaveBeenCalledWith(summaryScope);
     expect((wrapper.get("[data-testid='usage-date-from']").element as HTMLInputElement).value).toBe("2026-09-28");
     expect((wrapper.get("[data-testid='usage-date-to']").element as HTMLInputElement).value).toBe("2026-09-30");
-    expect(wrapper.get("[data-testid='usage-summary-row']").text()).toContain("540 秒");
-    expect(wrapper.get("[data-testid='usage-summary-row']").text()).toContain("9 分钟");
-    expect(wrapper.get("[data-testid='usage-bucket-le_300']").text()).toContain("1");
-    expect(wrapper.get("[data-testid='usage-bucket-ge_900']").text()).toContain("0");
+    expect(wrapper.get("[data-testid='usage-summary-row']").text()).toContain("1020 秒");
+    expect(wrapper.get("[data-testid='usage-summary-row']").text()).toContain("17 分钟");
+    expect(wrapper.get("[data-testid='usage-bucket-le_120']").text()).toContain("120 秒");
+    expect(wrapper.get("[data-testid='usage-bucket-ge_1500']").text()).toContain("0");
   });
 
   it("loads one row's devices on expand, caches collapse/re-expand, and preserves applied scope", async () => {
@@ -113,6 +128,33 @@ describe("UsageDurationPanel", () => {
     expect(wrapper.get("[data-testid='usage-error']").text()).toContain("usage unavailable");
     expect(wrapper.find("[data-testid='usage-empty']").exists()).toBe(false);
     wrapper.unmount();
+  });
+
+  it("keeps the last successful rows when an applied query fails", async () => {
+    const wrapper = mount(UsageDurationPanel);
+    await flushPromises();
+    vi.mocked(getUsageSummary).mockRejectedValueOnce(new Error("query unavailable"));
+    await wrapper.get("[data-testid='usage-package-name']").setValue("com.failed");
+    await wrapper.get("[data-testid='usage-query']").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get("[data-testid='usage-error']").text()).toContain("query unavailable");
+    expect(wrapper.get("[data-testid='usage-summary-row']").text()).toContain("com.a");
+    expect(wrapper.get<HTMLInputElement>("[data-testid='usage-package-name']").element.value).toBe("com.failed");
+    expect(wrapper.get("[data-testid='usage-applied-scope']").text()).toContain("全部包名");
+    expect(wrapper.get("[data-testid='usage-applied-scope']").text()).toContain("2026-09-28");
+    expect(wrapper.get("[data-testid='usage-applied-scope']").text()).not.toContain("com.failed");
+  });
+
+  it("keeps the last successful rows when refresh fails", async () => {
+    const wrapper = mount(UsageDurationPanel);
+    await flushPromises();
+    vi.mocked(getUsageSummary).mockRejectedValueOnce(new Error("refresh unavailable"));
+    await wrapper.get("[data-testid='usage-refresh']").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get("[data-testid='usage-error']").text()).toContain("refresh unavailable");
+    expect(wrapper.get("[data-testid='usage-summary-row']").text()).toContain("com.a");
   });
 
   it("ignores an in-flight summary response after unmount", async () => {

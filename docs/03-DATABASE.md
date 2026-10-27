@@ -90,6 +90,17 @@ CREATE DATABASE sdk_platform
 
 ---
 
+### 3.1.1 sdk_package_catalog — 包名来源目录
+
+`sdk_package_catalog` 以 `package_name` 为主键，`has_log` 只表示
+`sdk_events.event_type='log'`，`has_usage` 表示 `sdk_usage_durations` 中存在记录。
+SDK 写入接口在事实表事务中对缺失来源做条件 upsert；管理端下拉只读取目录，
+不会回退扫描事实表。已有来源只做主键读取，不刷新 `updated_at`。
+
+已有数据库使用 `scripts/migrate_package_catalog.sql`；新数据库由 `scripts/init_db.sql`
+创建。发布时必须先保持 `PACKAGE_CATALOG_READS_ENABLED=false`，完成新 writer、旧 writer
+排空、final backfill 和双向差集校验后，再显式开启目录读取。
+
 ## 3. 建表 DDL（完整可执行 SQL）
 
 ### 3.1 sdk_events — 原始事件表

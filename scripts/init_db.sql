@@ -8,6 +8,22 @@
 -- 1. 扩展
 -- ============================================================
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+-- 包名来源目录；事实写入接口在同一事务中维护来源标记。
+CREATE TABLE IF NOT EXISTS sdk_package_catalog (
+    package_name VARCHAR(255) PRIMARY KEY,
+    has_log BOOLEAN NOT NULL DEFAULT FALSE,
+    has_usage BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_package_catalog_name_trgm
+    ON sdk_package_catalog USING GIN (package_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_package_catalog_log_name
+    ON sdk_package_catalog (package_name) WHERE has_log;
+CREATE INDEX IF NOT EXISTS idx_package_catalog_usage_name
+    ON sdk_package_catalog (package_name) WHERE has_usage;
 
 -- ============================================================
 -- 2. SDK 原始事件表（按月分区）
@@ -344,6 +360,7 @@ CREATE TABLE IF NOT EXISTS sdk_log_export_jobs (
     status VARCHAR(20) NOT NULL DEFAULT 'pending',
     export_mode VARCHAR(10) NOT NULL DEFAULT 'raw',
     package_names JSONB NOT NULL,
+    all_packages BOOLEAN NOT NULL DEFAULT FALSE,
       sdk_version VARCHAR(20),
       device_id VARCHAR(64),
       log_level VARCHAR(10),
@@ -366,6 +383,10 @@ CREATE TABLE IF NOT EXISTS sdk_log_export_jobs (
       CONSTRAINT chk_log_export_jobs_hour_bounds CHECK (
           (hour_from IS NULL OR hour_from BETWEEN 0 AND 23) AND
           (hour_to IS NULL OR hour_to BETWEEN 0 AND 23)
+      ),
+      CONSTRAINT chk_log_export_jobs_package_scope CHECK (
+          (all_packages = TRUE AND package_names = '[]'::jsonb) OR
+          (all_packages = FALSE AND jsonb_array_length(package_names) BETWEEN 1 AND 50)
       )
   );
 CREATE INDEX IF NOT EXISTS idx_log_export_jobs_status_created ON sdk_log_export_jobs (status, created_at);

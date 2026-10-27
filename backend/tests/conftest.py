@@ -28,6 +28,15 @@ class StubScalarResult:
     def scalar_one_or_none(self) -> Any:
         return self._value
 
+    def mappings(self) -> "StubScalarResult":
+        return self
+
+    def all(self) -> list[Any]:
+        return self._value if isinstance(self._value, list) else []
+
+    def scalars(self) -> "StubScalarResult":
+        return self
+
 
 class StubReadSession:
     def __init__(self, execute_result: Any):
@@ -64,6 +73,9 @@ class StubWriteSession:
     async def execute(self, stmt, *args: Any, **kwargs: Any):
         from sqlalchemy.sql import Insert
         if isinstance(stmt, Insert):
+            if getattr(stmt.table, "name", None) == "sdk_package_catalog":
+                self.executed.append(stmt)
+                return StubScalarResult(None)
             # For pg_insert with .values([...]), extract from compiled parameters
             try:
                 compiled = stmt.compile(

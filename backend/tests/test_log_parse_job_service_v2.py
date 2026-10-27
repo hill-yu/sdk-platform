@@ -20,6 +20,92 @@ def sleeping_decode_for_process_test(snapshot, _job_id):
     return [], [], 1, 0.0
 
 
+def _stage_rows(model, count: int) -> list[dict[str, object]]:
+    columns = [column.name for column in model.__table__.columns]
+    return [{column: index for column in columns} for index in range(count)]
+
+
+def test_stage_insert_helper_splits_by_parameter_budget_and_row_cap() -> None:
+    from app.models.log_metrics import H1DeclarationStage, LogClickAttemptStage
+    from app.services.log_parse_job_service import _insert_stage_rows_in_chunks
+
+    class Db:
+        def __init__(self) -> None:
+            self.statements = []
+
+        async def execute(self, statement):
+            self.statements.append(statement)
+
+    db = Db()
+    rows = _stage_rows(LogClickAttemptStage, 2501)
+
+    asyncio.run(_insert_stage_rows_in_chunks(db, LogClickAttemptStage, rows))
+
+    assert len(db.statements) == 3
+    parameters = [len(statement.compile(dialect=postgresql.dialect()).params) for statement in db.statements]
+    assert parameters == [17000, 17000, 8517]
+    assert all(parameter_count <= 30000 for parameter_count in parameters)
+    assert all(parameter_count // 17 <= 1000 for parameter_count in parameters)
+
+    h1_db = Db()
+    asyncio.run(_insert_stage_rows_in_chunks(h1_db, H1DeclarationStage, _stage_rows(H1DeclarationStage, 1001)))
+    assert len(h1_db.statements) == 2
+    assert [len(statement.compile(dialect=postgresql.dialect()).params) for statement in h1_db.statements] == [20000, 20]
+
+
+def test_stage_insert_helper_handles_empty_and_single_row() -> None:
+    from app.models.log_metrics import H1DeclarationStage
+    from app.services.log_parse_job_service import _insert_stage_rows_in_chunks
+
+    class Db:
+        def __init__(self) -> None:
+            self.statements = []
+
+        async def execute(self, statement):
+            self.statements.append(statement)
+
+    db = Db()
+    asyncio.run(_insert_stage_rows_in_chunks(db, H1DeclarationStage, []))
+    assert db.statements == []
+
+    asyncio.run(_insert_stage_rows_in_chunks(db, H1DeclarationStage, _stage_rows(H1DeclarationStage, 1)))
+    assert len(db.statements) == 1
+    assert len(db.statements[0].compile(dialect=postgresql.dialect()).params) == 20
+
+
+def test_stage_insert_helper_keeps_exactly_1000_rows_in_one_chunk() -> None:
+    from app.models.log_metrics import LogClickAttemptStage
+    from app.services.log_parse_job_service import _insert_stage_rows_in_chunks
+
+    class Db:
+        def __init__(self) -> None:
+            self.statements = []
+
+        async def execute(self, statement):
+            self.statements.append(statement)
+
+    db = Db()
+    asyncio.run(_insert_stage_rows_in_chunks(db, LogClickAttemptStage, _stage_rows(LogClickAttemptStage, 1000)))
+
+    assert len(db.statements) == 1
+    assert len(db.statements[0].compile(dialect=postgresql.dialect()).params) == 17_000
+
+
+def test_stage_insert_helper_rejects_mixed_fields_without_dropping_data() -> None:
+    from app.models.log_metrics import H1DeclarationStage
+    from app.services.log_parse_job_service import _insert_stage_rows_in_chunks
+
+    class Db:
+        async def execute(self, _statement):
+            raise AssertionError("mixed rows must be rejected before execute")
+
+    rows = _stage_rows(H1DeclarationStage, 2)
+    rows[1].pop("decoded_payload")
+
+    with pytest.raises(ValueError, match="consistent field set"):
+        asyncio.run(_insert_stage_rows_in_chunks(Db(), H1DeclarationStage, rows))
+
+
 class Result:
     def __init__(self, *, scalar=None, rows=()):
         self.scalar = scalar

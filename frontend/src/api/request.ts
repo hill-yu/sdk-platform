@@ -1,29 +1,17 @@
 import axios from "axios";
+import { clearAdminSession, getCsrfToken } from "@/stores/adminAuth";
 
 const request = axios.create({
   baseURL: "/api/admin",
   timeout: 10000,
+  withCredentials: true,
 });
 
-const getToken = (): string => {
-  // 优先从 sessionStorage 读取
-  const stored = sessionStorage.getItem("admin_token");
-  if (stored) return stored;
-  // 弹出输入框
-  const input = prompt("请输入 Admin Token:");
-  if (input) {
-    sessionStorage.setItem("admin_token", input);
-    return input;
-  }
-  return "";
-};
-
 request.interceptors.request.use((config) => {
-  const token = getToken();
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  } else if (config.headers.Authorization) {
-    delete config.headers.Authorization;
+  const method = (config.method || "get").toUpperCase();
+  const csrf = getCsrfToken();
+  if (csrf && ["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+    config.headers["X-CSRF-Token"] = csrf;
   }
   return config;
 });
@@ -31,6 +19,10 @@ request.interceptors.request.use((config) => {
 request.interceptors.response.use(
   (response) => response.data,
   (error) => {
+    if (error?.response?.status === 401 && !String(error?.config?.url || "").includes("/auth/")) {
+      clearAdminSession();
+      window.dispatchEvent(new CustomEvent("admin-auth-expired"));
+    }
     const message = error?.response?.data?.detail || error?.message || "Request failed";
     error.message = message;
     return Promise.reject(error);

@@ -123,20 +123,20 @@ function changePage(nextPage: number) {
 .detail-header, .detail-header > div, .pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 h3, h4, h5, p { margin: 0; }
 .count { color: var(--text-muted); font-size: 12px; }
-.error { color: #ffb0a8; font-size: 12px; }
+.error { color: var(--error-text); font-size: 12px; }
 .table-scroll { overflow-x: auto; }
 .detail-table { width: max-content; min-width: 100%; border-collapse: collapse; }
-.detail-table th, .detail-table td { padding: 10px; border-bottom: 1px solid rgba(255, 255, 255, .08); text-align: left; white-space: nowrap; }
+.detail-table th, .detail-table td { padding: 10px; border-bottom: 1px solid var(--border-soft); text-align: left; white-space: nowrap; }
 .clickable-row { cursor: pointer; }
-.clickable-row.selected { background: rgba(214, 140, 69, .12); }
+.clickable-row.selected { background: var(--hover-bg); }
 .empty-state { width: 100%; color: var(--text-muted); text-align: center; }
-.status-tag { border-radius: 999px; padding: 4px 8px; background: rgba(255, 255, 255, .08); }
-.status-success { color: #a8e5bd; }.status-failed { color: #ffb0a8; }.status-unsupported { color: #ffd27a; }
-button { border: 1px solid var(--border-soft); border-radius: 8px; background: rgba(8, 13, 13, .5); color: var(--text-primary); padding: 7px 11px; cursor: pointer; }
+.status-tag { border-radius: 999px; padding: 4px 8px; background: var(--border-soft); }
+.status-success { color: var(--success-text); }.status-failed { color: var(--error-text); }.status-unsupported { color: var(--warning-text); }
+button { border: 1px solid var(--border-soft); border-radius: 6px; background: var(--panel-bg); color: var(--text-primary); padding: 7px 11px; cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .5; }
 .detail-inspector { display: grid; gap: 10px; border-top: 1px solid var(--border-soft); padding-top: 14px; }
 .detail-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin: 0; }
-.detail-summary div { padding: 8px; border-radius: 8px; background: rgba(255, 255, 255, .04); }
+.detail-summary div { padding: 8px; border-radius: 6px; background: var(--code-bg); }
 dt { color: var(--text-muted); font-size: 11px; } dd { margin: 3px 0 0; color: var(--text-primary); font-size: 12px; }
-pre { max-height: 280px; overflow: auto; margin: 0; border-radius: 8px; background: rgba(0, 0, 0, .25); color: var(--text-secondary); padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+pre { max-height: 280px; overflow: auto; margin: 0; border-radius: 6px; background: var(--code-bg); color: var(--text-muted); padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 </style>

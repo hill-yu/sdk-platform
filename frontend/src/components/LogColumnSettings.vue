@@ -157,13 +157,13 @@ function save() {
 .settings-header, .settings-actions, .column-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 h3, h4, p { margin: 0; }
 h3 { color: var(--text-primary); }
-h4 { margin-bottom: 8px; color: var(--text-secondary); font-size: 12px; }
-p, .empty { color: var(--text-secondary); font-size: 12px; }
-.save-error { color: #ef8f82; font-size: 12px; }
+h4 { margin-bottom: 8px; color: var(--text-muted); font-size: 12px; }
+p, .empty { color: var(--text-muted); font-size: 12px; }
+.save-error { color: var(--error-text); font-size: 12px; }
 .column-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 .column-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
-.column-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid var(--border-soft); border-radius: 8px; padding: 7px 9px; color: var(--text-primary); }
-button { border: 1px solid var(--border-soft); border-radius: 7px; background: rgba(8, 13, 13, .5); color: var(--text-primary); padding: 5px 8px; cursor: pointer; }
+.column-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid var(--border-soft); border-radius: 6px; padding: 7px 9px; color: var(--text-primary); }
+button { border: 1px solid var(--border-soft); border-radius: 7px; background: var(--panel-bg); color: var(--text-primary); padding: 5px 8px; cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .5; }
 @media (max-width: 700px) { .column-groups { grid-template-columns: 1fr; } }
 </style>

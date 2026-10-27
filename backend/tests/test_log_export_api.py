@@ -47,6 +47,38 @@ def test_search_and_create_export(monkeypatch):
     assert created.json()["data"]["status"] == "pending"
 
 
+def test_search_usage_packages_is_admin_protected_and_uses_usage_source(monkeypatch):
+    from app.admin_main import app
+    from app.api.admin import log_exports
+
+    async def fake_search_usage(_db, keyword, limit):
+        assert (keyword, limit) == ("pivexa", 20)
+        return ["com.pivexa.app"]
+
+    monkeypatch.setattr(log_exports.log_export_service, "search_usage_packages", fake_search_usage)
+    with TestClient(app) as client:
+        unauthenticated = client.get("/api/admin/usage-package-names")
+        response = client.get("/api/admin/usage-package-names?keyword=pivexa", headers=HEADERS)
+    assert unauthenticated.status_code == 401
+    assert response.json()["data"]["items"] == ["com.pivexa.app"]
+
+
+def test_create_all_package_export_scope_is_explicit(monkeypatch):
+    from app.admin_main import app
+    from app.api.admin import log_exports
+
+    async def fake_create(_db, body):
+        assert body.all_packages is True
+        assert body.package_names == []
+        return {"id": str(JOB_ID), "status": "pending"}
+
+    monkeypatch.setattr(log_exports.log_export_service, "create_job", fake_create)
+    with TestClient(app) as client:
+        response = client.post("/api/admin/log-exports", headers=HEADERS, json={"all_packages": True})
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "pending"
+
+
 def test_create_export_rejects_sdk_version_longer_than_20_characters():
     from app.admin_main import app
 
@@ -97,3 +129,19 @@ def test_download_successful_csv(monkeypatch, tmp_path):
     assert response.status_code == 200
     assert "text/csv" in response.headers["content-type"]
     assert "sdk-logs-" in response.headers["content-disposition"]
+
+
+def test_download_missing_file_returns_404(monkeypatch, tmp_path):
+    from app.admin_main import app
+    from app.api.admin import log_exports
+
+    missing = tmp_path / "missing.csv"
+
+    async def fake_get(_db, _job_id):
+        return SimpleNamespace(id=JOB_ID, status="success", file_path=str(missing))
+
+    monkeypatch.setattr(log_exports.log_export_service, "get_job", fake_get)
+    monkeypatch.setattr(log_exports.get_settings(), "LOG_EXPORT_DIR", str(tmp_path))
+    with TestClient(app) as client:
+        response = client.get(f"/api/admin/log-exports/{JOB_ID}/download", headers=HEADERS)
+    assert response.status_code == 404

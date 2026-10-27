@@ -2,7 +2,7 @@
 
 ## 一、功能与接口
 
-后台日志页可检索并选择多个包名，结合设备 ID、日志等级和日期条件创建异步任务。独立 Worker 从 PostgreSQL 分批读取原始日志并生成 CSV。
+后台日志页按原始日志页已生效的筛选条件创建异步任务；包名为空时显式导出全部包名，不能用候选列表前 N 条代替全量。独立 Worker 从 PostgreSQL 分批读取原始日志并生成 CSV。
 
 以下接口统一要求 `Authorization: Bearer <ADMIN_TOKEN>`：
 
@@ -25,7 +25,7 @@
 }
 ```
 
-只有 `package_names` 必传。状态为 `pending`、`running`、`success` 或 `failed`；只有 `success` 可下载，其他状态返回 409。CSV 表头为：
+`all_packages=false` 时 `package_names` 必须为 1–50 个包名；`all_packages=true` 时 `package_names` 必须省略或为空，禁止矛盾输入。状态为 `pending`、`running`、`success` 或 `failed`；只有 `success` 可下载，其他状态返回 409。CSV 表头为：
 
 ```text
 id,package_name,device_id,sdk_version,level,tag,message,extra,client_ts,server_ts
@@ -50,11 +50,13 @@ sudo chown -R www:www /www/wwwroot/sdk-api/exports
 sudo chmod 750 /www/wwwroot/sdk-api/exports
 ```
 
-在 `backend/.env` 增加：
+在 API 与 export worker 共同读取的持久 `backend/.env` 增加：
 
 ```dotenv
 LOG_EXPORT_DIR=/www/wwwroot/sdk-api/exports
 ```
+
+API 的下载路径校验和 export worker 的写入路径必须逐字符解析到同一个绝对目录。不要把目录放在会随 release 切换删除的 release 私有目录；切换前备份该目录，回滚时保留旧任务 `file_path` 可读。若已有任务文件在旧目录，先备份并审核迁移映射，不得直接改写任务记录或放宽下载路径校验。
 
 宝塔实际运行用户不是 `www` 时，同时替换目录所属用户和 systemd 模板中的 `User`。
 
@@ -97,5 +99,5 @@ Import-Csv ".\sdk-logs-$JobId.csv" | Select-Object -First 3
 
 - 一直 `pending`：检查 Worker 状态和数据库连接；
 - 状态 `failed`：查看状态接口 `error_message` 和 Worker journal；
-- 下载 404：检查 Admin API 与 Worker 的 `LOG_EXPORT_DIR` 是否一致以及目录权限；
+- 下载 404：检查 Admin API 与 Worker 的 `LOG_EXPORT_DIR` 是否一致、任务 `file_path` 是否存在以及目录权限；安全父目录校验不应被绕过；
 - 下载 409：任务尚未完成。
