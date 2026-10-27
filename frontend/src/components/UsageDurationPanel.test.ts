@@ -88,7 +88,7 @@ describe("UsageDurationPanel", () => {
           total: 25,
           page: scope.page,
           page_size: scope.page_size,
-          items: Array.from({ length: Math.min(scope.page_size ?? 10, scope.page === 3 ? 5 : 10) }, (_, index) => ({
+          items: Array.from({ length: Math.max(0, Math.min(scope.page_size ?? 10, 25 - ((scope.page ?? 1) - 1) * (scope.page_size ?? 10))) }, (_, index) => ({
             package_name: "com.a",
             device_id: `device-${scope.page}-${index}`,
             device_model: "Pixel",
@@ -111,10 +111,18 @@ describe("UsageDurationPanel", () => {
     await wrapper.get("[data-testid='usage-device-next']").trigger("click");
     await flushPromises();
     expect(getUsageDevices).toHaveBeenLastCalledWith({ ...summaryScope, package_name: "com.a", page: 2, page_size: 10 });
-
-    await wrapper.get("[data-testid='usage-device-page-size']").setValue("20");
+    expect(wrapper.findAll("[data-testid='usage-device-row']")).toHaveLength(10);
+    await wrapper.get("[data-testid='usage-device-next']").trigger("click");
     await flushPromises();
-    expect(getUsageDevices).toHaveBeenLastCalledWith({ ...summaryScope, package_name: "com.a", page: 1, page_size: 20 });
+    expect(getUsageDevices).toHaveBeenLastCalledWith({ ...summaryScope, package_name: "com.a", page: 3, page_size: 10 });
+    expect(wrapper.findAll("[data-testid='usage-device-row']")).toHaveLength(5);
+    expect(wrapper.get("[data-testid='usage-device-prev']").element.hasAttribute("disabled")).toBe(false);
+
+    await wrapper.get("[data-testid='usage-device-page-size']").setValue("50");
+    await flushPromises();
+    expect(getUsageDevices).toHaveBeenLastCalledWith({ ...summaryScope, package_name: "com.a", page: 1, page_size: 50 });
+    expect(wrapper.findAll("[data-testid='usage-device-row']")).toHaveLength(25);
+    expect(wrapper.get("[data-testid='usage-device-next']").element.hasAttribute("disabled")).toBe(true);
   });
 
   it("clears detail cache on scope query and prevents an old device response entering another row", async () => {
