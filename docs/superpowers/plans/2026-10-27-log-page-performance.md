@@ -16,7 +16,7 @@
 - 修改 `backend/app/services/usage_duration_service.py`：汇总查询复用 latest 集合，保持 count、分页、排序、七桶和占比语义。
 - 修改 `backend/app/services/analysis_service.py`：以单次精确窗口查询返回日志页面与总数。
 - 修改 `backend/app/api/admin/usage_duration.py`、`backend/app/services/usage_duration_service.py`：设备明细响应补充已有 `os` 字段。
-- 修改 `frontend/src/api/usageDurations.ts`、`frontend/src/components/UsageDurationPanel.vue`：设备类型和明细中展示 OS，不增加 OS 筛选或导出。
+- 修改 `frontend/src/api/usageDurations.ts`、`frontend/src/components/UsageDurationPanel.vue`：设备明细展示 OS，并支持默认 10、可选 20/50 的分页，不增加 OS 筛选或导出。
 - 修改对应后端测试：验证目录读取、缓存 key/TTL/合并、精确 count、usage 空页与排序语义、OS 响应。
 - 修改对应前端测试：验证设备明细 OS 展示、加载/取消过期结果和现有 scope/export 绑定不变。
 - 创建 `scripts/benchmark_log_page_performance.py` 或复用现有测试辅助：对同一 PostgreSQL 快照、同一参数重复测量空包/指定包、短窗/最大合法范围、空结果/深页，输出样本数、p50、p95 和 SQL 统计；不得连接生产。
@@ -105,8 +105,8 @@
 - 修改：`frontend/src/components/UsageDurationPanel.vue`
 - 修改：`frontend/src/components/UsageDurationPanel.test.ts`
 
-- [ ] **步骤 1：编写失败测试。** 断言 `/usage-durations/devices` item 返回已有 `os`，并断言展开的设备明细显示 OS；不添加 OS 筛选、导出或日志 schema 字段。
-- [ ] **步骤 2：实现最小响应和 UI 改动。** 从现有 `SdkUsageDuration.os` 透传到 devices item，在当前明亮风格表格中增加 OS 列；保留现有加载、取消过期结果、错误保留旧结果、scope 和导出绑定。
+- [ ] **步骤 1：编写失败测试。** 断言 `/usage-durations/devices` item 返回已有 `os`，并断言展开的设备明细支持超过 10 条、最后一页、切换 20/50、上一页/下一页、包名/日期变化重置页码、失败后可重试；缓存 key 必须包含 scope、包名、page 和 page_size，过期响应不能覆盖新请求；不添加 OS 筛选、导出或日志 schema 字段。
+- [ ] **步骤 2：实现最小响应和 UI 改动。** 从现有 `SdkUsageDuration.os` 透传到 devices item，在当前明亮风格表格中增加 OS 列；API 保留精确 `total`，前端默认 `page_size=10`，提供 10/20/50，按已生效包名和时间范围分页，筛选变化重置页码；缓存 key 包含 `scope+package+page+page_size`，保留取消过期结果、错误保留旧结果、scope 和导出绑定。
 - [ ] **步骤 3：运行前后端测试。**
   运行：`python -m pytest -q backend/tests/test_usage_duration_api.py backend/tests/test_usage_duration_admin_api.py`
   运行：`npm run test -- --run frontend/src/components/UsageDurationPanel.test.ts`
