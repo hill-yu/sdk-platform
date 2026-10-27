@@ -24,15 +24,23 @@ Results:
 
 - HTTP device pagination for `com.ly.sixthshort`: full-day total `1280`; page size `10`, pages 1–3 returned 10 rows each and 30 unique devices; page `128` returned 10 rows and contained `os`; page size `50` returned 50 rows.
 - Edge-scope HTTP check (`2026-10-18`, Beijing hours `0–2`): total `284`; page size `20` last page `15` returned 4 rows, previous page returned 20, page size `50` returned 50, and a missing package returned total/items `0/0`.
+- The same edge scope with page size `50` returned last page `6` with `34` rows and previous page `5` with `50` rows; every last-page item included `os`.
 - New vs baseline `79aef8cceac23682cee6bb7ee18e9dc991e6d5c3`: raw all/package/not-found/deep, summary all/package/short/31-day/empty/deep, and devices page-size-50 results were equal after ignoring the intentionally added `os` field.
 - Filter-option gate tests cover both flag branches and the no-fallback catalog
   error path. Cancellation tests cover a cancelled first waiter, a later
   second waiter, independent session ownership, and session close.
+- Frontend detail suite: `11 passed`, including “paginates more than ten device
+  details and resets pagination with the applied scope”, “retries a failed
+  device page without losing the applied scope”, and stale/out-of-order scope
+  response isolation.
 - Real PostgreSQL integration: `test_usage_duration_postgres_integration.py` passed 1, and `test_package_catalog_postgres_integration.py` passed 1, using isolated loopback databases cloned from the local snapshot. The default no-URL run remains 2 skipped.
 
 ## Performance decision
 
-Ten HTTP samples per case were collected against the same isolated snapshot.
+The before/after numbers below are ten-sample HTTP measurements from the old
+baseline API and the new API against the same isolated snapshot. The checked-in
+`scripts/benchmark_log_page_performance.py` is a service-layer benchmark (it
+does not claim HTTP latency) and covers 11 data-driven cases.
 Usage summary improved: all-package p50/p95 `216.39/264.51ms` to
 `123.07/163.77ms`; package p50/p95 `46.19/66.03ms` to `23.98/41.51ms`.
 
@@ -45,12 +53,19 @@ database: raw old count + page execution `5.98ms + 40.19ms`, raw window
 candidate `18.85ms` (not selected); usage old count + page `77.82ms +
 80.53ms`, usage window candidate `78.14ms` (selected).
 
+The checked-in `scripts/explain_log_page_performance.py` prints the controlled
+plan summary. Its verified relation names were `sdk_events_202610`,
+`sdk_events_202611`, `sdk_events_202612` for raw queries, `sdk_usage_durations`
+for usage queries, and `sdk_package_catalog` for catalog candidates; the
+catalog candidate plan did not reference a fact table.
+
 ## Reproduction commands
 
 ```powershell
 & C:\pgsql\bin\pg_ctl.exe -D C:\Users\喻远飞\.codex\local-pg-admin-login-20261017-pgdata -w start -o "-p 55432"
 $env:SDK_LOG_PAGE_TEST_DATABASE_URL = "postgresql+asyncpg://postgres@127.0.0.1:55432/sdk_log_page_test_20261027"
 python scripts/benchmark_log_page_performance.py --iterations 10
+python scripts/explain_log_page_performance.py
 $env:SDK_USAGE_DURATION_TEST_DATABASE_URL = "postgresql+asyncpg://postgres@127.0.0.1:55432/sdk_usage_duration_test_20261027"
 python -m pytest backend/tests/test_usage_duration_postgres_integration.py -q
 $env:SDK_PACKAGE_CATALOG_TEST_DATABASE_URL = "postgresql+asyncpg://postgres@127.0.0.1:55432/sdk_package_catalog_test_20261027"
