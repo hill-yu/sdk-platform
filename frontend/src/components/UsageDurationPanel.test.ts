@@ -34,7 +34,7 @@ describe("UsageDurationPanel", () => {
     vi.clearAllMocks();
     vi.mocked(getUsageSummary).mockResolvedValue({ data: { code: 0, data: summary } } as never);
     vi.mocked(getUsageDevices).mockResolvedValue({ data: { code: 0, data: { total: 1, page: 1, page_size: 20, items: [
-      { package_name: "com.a", device_id: "device-a", device_model: "Pixel", duration_s: 270, sdk_version: "1.0", app_version: "2.0", last_report_at: "2026-09-30 10:00:00" },
+      { package_name: "com.a", device_id: "device-a", device_model: "Pixel", os: "14", duration_s: 270, sdk_version: "1.0", app_version: "2.0", last_report_at: "2026-09-30 10:00:00" },
     ] } } } as never);
     searchUsagePackages.mockResolvedValue({ data: { items: ["com.a", "com.b"] } });
   });
@@ -71,12 +71,50 @@ describe("UsageDurationPanel", () => {
     await wrapper.get("[data-testid='usage-expand-0']").trigger("click");
     await flushPromises();
 
-    expect(getUsageDevices).toHaveBeenCalledWith({ ...summaryScope, package_name: "com.a", page: 1, page_size: 20 });
+    expect(getUsageDevices).toHaveBeenCalledWith({ ...summaryScope, package_name: "com.a", page: 1, page_size: 10 });
     expect(wrapper.get("[data-testid='usage-device-row']").text()).toContain("device-a");
+    expect(wrapper.get("[data-testid='usage-device-row']").text()).toContain("14");
     await wrapper.get("[data-testid='usage-expand-0']").trigger("click");
     await wrapper.get("[data-testid='usage-expand-0']").trigger("click");
     await flushPromises();
     expect(getUsageDevices).toHaveBeenCalledTimes(1);
+  });
+
+  it("paginates more than ten device details and resets pagination with the applied scope", async () => {
+    vi.mocked(getUsageDevices).mockImplementation(async (scope) => ({
+      data: {
+        code: 0,
+        data: {
+          total: 25,
+          page: scope.page,
+          page_size: scope.page_size,
+          items: Array.from({ length: Math.min(scope.page_size ?? 10, scope.page === 3 ? 5 : 10) }, (_, index) => ({
+            package_name: "com.a",
+            device_id: `device-${scope.page}-${index}`,
+            device_model: "Pixel",
+            os: "14",
+            duration_s: 270,
+            sdk_version: "1.0",
+            app_version: "2.0",
+            last_report_at: null,
+          })),
+        },
+      },
+    }) as never);
+    const wrapper = mount(UsageDurationPanel);
+    await flushPromises();
+    await wrapper.get("[data-testid='usage-expand-0']").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.findAll("[data-testid='usage-device-row']")).toHaveLength(10);
+    expect(wrapper.find("[data-testid='usage-device-next']").exists()).toBe(true);
+    await wrapper.get("[data-testid='usage-device-next']").trigger("click");
+    await flushPromises();
+    expect(getUsageDevices).toHaveBeenLastCalledWith({ ...summaryScope, package_name: "com.a", page: 2, page_size: 10 });
+
+    await wrapper.get("[data-testid='usage-device-page-size']").setValue("20");
+    await flushPromises();
+    expect(getUsageDevices).toHaveBeenLastCalledWith({ ...summaryScope, package_name: "com.a", page: 1, page_size: 20 });
   });
 
   it("clears detail cache on scope query and prevents an old device response entering another row", async () => {
@@ -101,6 +139,21 @@ describe("UsageDurationPanel", () => {
     await flushPromises();
     expect(wrapper.find("[data-testid='usage-device-row']").exists()).toBe(false);
     expect(getUsageSummary).toHaveBeenLastCalledWith({ ...summaryScope, package_name: "com.next" });
+  });
+
+  it("retries a failed device page without losing the applied scope", async () => {
+    vi.mocked(getUsageDevices)
+      .mockRejectedValueOnce(new Error("device timeout"))
+      .mockResolvedValueOnce({ data: { code: 0, data: { total: 25, page: 1, page_size: 10, items: [{ package_name: "com.a", device_id: "retry-device", device_model: "Pixel", os: "14", duration_s: 120, sdk_version: "1.0", app_version: "2.0", last_report_at: null }] } } } as never);
+    const wrapper = mount(UsageDurationPanel);
+    await flushPromises();
+    await wrapper.get("[data-testid='usage-expand-0']").trigger("click");
+    await flushPromises();
+    expect(wrapper.get("[data-testid='usage-device-retry']").text()).toContain("重试");
+    await wrapper.get("[data-testid='usage-device-retry']").trigger("click");
+    await flushPromises();
+    expect(getUsageDevices).toHaveBeenLastCalledWith({ ...summaryScope, package_name: "com.a", page: 1, page_size: 10 });
+    expect(wrapper.get("[data-testid='usage-device-row']").text()).toContain("retry-device");
   });
 
   it("keeps only the newest summary scope when date/package queries resolve out of order", async () => {
