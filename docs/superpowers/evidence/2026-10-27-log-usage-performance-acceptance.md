@@ -53,17 +53,27 @@ database: raw old count + page execution `5.98ms + 40.19ms`, raw window
 candidate `18.85ms` (not selected); usage old count + page `77.82ms +
 80.53ms`, usage window candidate `78.14ms` (selected).
 
-The checked-in `scripts/explain_log_page_performance.py` prints the controlled
-plan summary. Its verified relation names were `sdk_events_202610`,
-`sdk_events_202611`, `sdk_events_202612` for raw queries, `sdk_usage_durations`
-for usage queries, and `sdk_package_catalog` for catalog candidates; the
-catalog candidate plan did not reference a fact table.
+The checked-in `scripts/explain_log_page_performance.py` captures the actual
+service-generated SQLAlchemy statements, prints redacted SQL and plan JSON, and
+requires both database environment variables to target the same whitelisted
+loopback database. Its verified categories were: `catalog_candidates` using
+only `sdk_package_catalog`; `sdk_versions_from_facts` using the permitted
+`sdk_events` version query; raw events using `sdk_events_202610`; usage summary
+and devices using `sdk_usage_durations`. The catalog candidate plan did not
+reference a fact table.
+
+The final real-service capture reported execution times of approximately
+`0.031ms` for catalog candidates, `20.833ms` for SDK versions, `23.361ms` and
+`8.033ms` for raw count/page, `92.219ms` for the usage summary page, and
+`9.178ms`/`8.853ms` for usage device count/page. The output SQL was literal-
+redacted and the plan JSON retained relation names, buffer counts, and timing.
 
 ## Reproduction commands
 
 ```powershell
 & C:\pgsql\bin\pg_ctl.exe -D C:\Users\喻远飞\.codex\local-pg-admin-login-20261017-pgdata -w start -o "-p 55432"
 $env:SDK_LOG_PAGE_TEST_DATABASE_URL = "postgresql+asyncpg://postgres@127.0.0.1:55432/sdk_log_page_test_20261027"
+$env:DATABASE_URL = $env:SDK_LOG_PAGE_TEST_DATABASE_URL
 python scripts/benchmark_log_page_performance.py --iterations 10
 python scripts/explain_log_page_performance.py
 $env:SDK_USAGE_DURATION_TEST_DATABASE_URL = "postgresql+asyncpg://postgres@127.0.0.1:55432/sdk_usage_duration_test_20261027"
