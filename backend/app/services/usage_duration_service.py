@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 from sqlalchemy import case, cast, distinct, func, select
@@ -24,6 +25,16 @@ SUMMARY_BUCKETS = (
     ("1200_1499", 1200, 1499),
     ("ge_1500", 1500, None),
 )
+
+BUCKET_INTERVAL_TEXT = {
+    "le_120": "≤120 秒",
+    "121_300": "121–300 秒",
+    "301_600": "301–600 秒",
+    "601_899": "601–899 秒",
+    "900_1199": "900–1199 秒",
+    "1200_1499": "1200–1499 秒",
+    "ge_1500": "≥1500 秒",
+}
 
 
 def resolve_usage_date_range(date_from: date | None, date_to: date | None):
@@ -110,6 +121,53 @@ def _value(row: Any, name: str, default=None):
     return getattr(row, name, default)
 
 
+def _total_pages(total: int, page_size: int) -> int:
+    if page_size <= 0:
+        raise ValueError("分页参数无效")
+    return 0 if total == 0 else (total + page_size - 1) // page_size
+
+
+def _decimal(value: Any) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _format_exact_seconds(value: Any) -> str:
+    decimal_value = _decimal(value)
+    if decimal_value is None:
+        return "-"
+    return f"{decimal_value.normalize():f} 秒"
+
+
+def _format_duration(value: Any) -> str:
+    decimal_value = _decimal(value)
+    if decimal_value is None:
+        return "-"
+    seconds = int(decimal_value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    parts = []
+    if hours:
+        parts.append(f"{hours} 小时")
+    if minutes:
+        parts.append(f"{minutes} 分")
+    if seconds or not parts:
+        parts.append(f"{seconds} 秒")
+    return " ".join(parts)
+
+
+def _format_share(value: Any) -> str:
+    decimal_value = _decimal(value)
+    if decimal_value is None:
+        return "-"
+    percentage = (decimal_value * 100).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    return f"{percentage:.1f}%"
+
+
 def _bucket_items(row: Any, device_count: int) -> list[dict[str, object]]:
     return [
         {
@@ -117,6 +175,11 @@ def _bucket_items(row: Any, device_count: int) -> list[dict[str, object]]:
             "count": count,
             "share": (count / device_count if device_count else None),
             "total_duration_s": int(_value(row, f"{key}_duration_s", 0) or 0),
+            "interval_text": BUCKET_INTERVAL_TEXT[key],
+            "count_text": str(count),
+            "share_text": _format_share(count / device_count if device_count else None),
+            "total_duration_text": _format_duration(_value(row, f"{key}_duration_s", 0) or 0),
+            "total_duration_exact_text": _format_exact_seconds(_value(row, f"{key}_duration_s", 0) or 0),
         }
         for key, _, _ in SUMMARY_BUCKETS
         for count in (int(_value(row, f"{key}_count", 0) or 0),)
@@ -189,18 +252,26 @@ async def get_usage_summary(
     items = []
     for row in rows:
         count = int(_value(row, "device_count", 0) or 0)
+        total_duration_s = _value(row, "total_duration_s", 0) or 0
+        average_duration_s = _value(row, "average_duration_s")
+        last_report_at = serialize_business_time(_value(row, "last_report_at"))
         items.append({
             "package_name": _value(row, "package_name"),
             # Kept as a nullable compatibility field; summaries no longer
             # split a package into separate model rows.
             "device_model": None,
             "device_count": count,
-            "total_duration_s": int(_value(row, "total_duration_s", 0) or 0),
-            "average_duration_s": int(_value(row, "average_duration_s")) if _value(row, "average_duration_s") is not None else None,
+            "total_duration_s": int(total_duration_s),
+            "average_duration_s": average_duration_s,
+            "total_duration_text": _format_duration(total_duration_s),
+            "total_duration_exact_text": _format_exact_seconds(total_duration_s),
+            "average_duration_text": _format_duration(average_duration_s),
+            "average_duration_exact_text": _format_exact_seconds(average_duration_s),
             "buckets": _bucket_items(row, count),
-            "last_report_at": serialize_business_time(_value(row, "last_report_at")),
+            "last_report_at": last_report_at,
+            "last_report_text": last_report_at or "-",
         })
-    return {"total": total, "page": page, "page_size": page_size, "items": items}
+    return {"total": total, "total_pages": _total_pages(total, page_size), "page": page, "page_size": page_size, "items": items}
 
 
 async def get_usage_devices(
@@ -236,24 +307,24 @@ async def get_usage_devices(
         .limit(page_size)
         .offset((page - 1) * page_size)
     )).mappings().all()
-    return {
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "items": [
-            {
-                "package_name": _value(row, "package_name"),
-                "device_id": _value(row, "device_id"),
-                "device_model": _value(row, "device_model"),
-                "os": _value(row, "os"),
-                "duration_s": _value(row, "duration_s"),
-                "sdk_version": _value(row, "sdk_version"),
-                "app_version": _value(row, "app_version"),
-                "last_report_at": serialize_business_time(_value(row, "server_ts")),
-            }
-            for row in rows
-        ],
-    }
+    items = []
+    for row in rows:
+        last_report_at = serialize_business_time(_value(row, "server_ts"))
+        duration_s = _value(row, "duration_s")
+        items.append({
+            "package_name": _value(row, "package_name"),
+            "device_id": _value(row, "device_id"),
+            "device_model": _value(row, "device_model"),
+            "os": _value(row, "os"),
+            "duration_s": duration_s,
+            "duration_text": _format_duration(duration_s),
+            "duration_exact_text": _format_exact_seconds(duration_s),
+            "sdk_version": _value(row, "sdk_version"),
+            "app_version": _value(row, "app_version"),
+            "last_report_at": last_report_at,
+            "last_report_text": last_report_at or "-",
+        })
+    return {"total": total, "total_pages": _total_pages(total, page_size), "page": page, "page_size": page_size, "items": items}
 
 
 async def get_usage_durations(

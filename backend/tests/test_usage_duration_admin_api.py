@@ -134,11 +134,11 @@ def test_usage_duration_summary_and_devices_routes_forward_scope(monkeypatch):
 
     async def fake_summary(_db, **kwargs):
         calls.append(("summary", kwargs))
-        return {"total": 0, "page": kwargs["page"], "page_size": kwargs["page_size"], "items": []}
+        return {"total": 0, "total_pages": 0, "page": kwargs["page"], "page_size": kwargs["page_size"], "items": []}
 
     async def fake_devices(_db, **kwargs):
         calls.append(("devices", kwargs))
-        return {"total": 0, "page": kwargs["page"], "page_size": kwargs["page_size"], "items": []}
+        return {"total": 0, "total_pages": 0, "page": kwargs["page"], "page_size": kwargs["page_size"], "items": []}
 
     monkeypatch.setattr(usage_duration.usage_duration_service, "get_usage_summary", fake_summary)
     monkeypatch.setattr(usage_duration.usage_duration_service, "get_usage_devices", fake_devices)
@@ -172,6 +172,25 @@ def test_usage_duration_summary_and_devices_routes_forward_scope(monkeypatch):
 
     assert summary.status_code == 200
     assert devices.status_code == 200
+    assert summary.json()["data"]["total_pages"] == 0
+    assert devices.json()["data"]["total_pages"] == 0
     assert calls[0][1]["package_name"] == "com.example.app"
     assert calls[0][1]["page"] == 2
     assert calls[1][1]["device_model"] is None
+
+
+def test_usage_duration_summary_and_devices_reject_non_positive_page_size():
+    from app.admin_main import app
+
+    with TestClient(app) as client:
+        summary = client.get(
+            "/api/admin/usage-durations/summary?page_size=0",
+            headers=headers(),
+        )
+        devices = client.get(
+            "/api/admin/usage-durations/devices?package_name=com.example.app&page_size=0",
+            headers=headers(),
+        )
+
+    assert summary.status_code == 422
+    assert devices.status_code == 422

@@ -30,7 +30,7 @@ def _database_url() -> str:
 async def test_usage_devices_pages_25_latest_rows_with_os_and_exact_total() -> None:
     database_url = _database_url()
     from app.models.usage_duration import SdkUsageDuration
-    from app.services.usage_duration_service import get_usage_devices
+    from app.services.usage_duration_service import get_usage_devices, get_usage_summary
 
     engine = create_async_engine(database_url)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
@@ -52,16 +52,40 @@ async def test_usage_devices_pages_25_latest_rows_with_os_and_exact_total() -> N
         async with sessions() as session:
             async with session.begin():
                 await session.execute(insert(SdkUsageDuration), rows)
+            summary = await get_usage_summary(
+                session,
+                package_name="com.integration.app",
+                range_start=start,
+                range_end=end,
+                page=1,
+                page_size=10,
+                sort_by="package_name",
+                sort_order="asc",
+            )
             pages = [
                 await get_usage_devices(session, package_name="com.integration.app", device_model=None, range_start=start, range_end=end, page=page, page_size=10)
                 for page in (1, 2, 3)
             ]
+        assert summary["total"] == 1
+        assert summary["total_pages"] == 1
+        summary_item = summary["items"][0]
+        assert summary_item["device_count"] == 25
+        assert summary_item["total_duration_s"] == sum(200 + index for index in range(25))
+        assert summary_item["average_duration_s"] == 212
+        assert summary_item["buckets"][1]["count"] == 25
+        assert summary_item["buckets"][1]["total_duration_s"] == 5300
+        assert summary_item["buckets"][1]["share"] == 1.0
+        assert summary_item["total_duration_text"] == "1 小时 28 分 20 秒"
+        assert summary_item["buckets"][1]["share_text"] == "100.0%"
         assert [page["total"] for page in pages] == [25, 25, 25]
+        assert [page["total_pages"] for page in pages] == [3, 3, 3]
         assert [len(page["items"]) for page in pages] == [10, 10, 5]
         items = [item for page in pages for item in page["items"]]
         assert [item["device_id"] for item in items] == [f"device-{index:02d}" for index in range(24, -1, -1)]
         assert {item["os"] for item in items} == {"14"}
         assert items[0]["duration_s"] == 224
+        assert items[0]["duration_text"] == "3 分 44 秒"
+        assert items[0]["last_report_text"] == "2026-09-29T08:24:00+08:00"
         assert items[-1]["duration_s"] == 200
     finally:
         await engine.dispose()

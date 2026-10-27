@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from decimal import Decimal
 from types import SimpleNamespace
 
 from sqlalchemy.dialects import postgresql
@@ -157,6 +158,115 @@ def test_usage_summary_uses_only_latest_device_and_computes_seven_buckets_with_t
     ]
 
 
+def test_usage_summary_adds_display_fields_and_total_pages_without_changing_numbers():
+    from app.services.usage_duration_service import get_usage_summary
+
+    row = {
+        "package_name": "com.example.app",
+        "device_model": None,
+        "device_count": 3,
+        "total_duration_s": 1500,
+        "average_duration_s": Decimal("1500.75"),
+        "le_120_count": 0,
+        "121_300_count": 0,
+        "301_600_count": 0,
+        "601_899_count": 0,
+        "900_1199_count": 0,
+        "1200_1499_count": 0,
+        "ge_1500_count": 3,
+        "le_120_duration_s": 0,
+        "121_300_duration_s": 0,
+        "301_600_duration_s": 0,
+        "601_899_duration_s": 0,
+        "900_1199_duration_s": 0,
+        "1200_1499_duration_s": 0,
+        "ge_1500_duration_s": 1500,
+        "last_report_at": None,
+        "_total": 3,
+    }
+    db = Db([Result(rows=[row])])
+
+    result = asyncio.run(get_usage_summary(
+        db,
+        package_name=None,
+        range_start=START,
+        range_end=END,
+        page=2,
+        page_size=2,
+        sort_by="package_name",
+        sort_order="asc",
+    ))
+
+    item = result["items"][0]
+    assert result["total"] == 3
+    assert result["total_pages"] == 2
+    assert item["total_duration_s"] == 1500
+    assert item["average_duration_s"] == Decimal("1500.75")
+    assert item["total_duration_text"] == "25 分"
+    assert item["average_duration_text"] == "25 分 1 秒"
+    assert item["last_report_text"] == "-"
+    assert item["buckets"][0]["count"] == 0
+    assert item["buckets"][0]["count_text"] == "0"
+    assert item["buckets"][0]["share_text"] == "0.0%"
+    assert item["buckets"][0]["interval_text"] == "≤120 秒"
+    assert item["buckets"][-1]["share_text"] == "100.0%"
+
+
+def test_usage_summary_empty_and_out_of_range_pages_have_distinct_metadata():
+    from app.services.usage_duration_service import get_usage_summary
+
+    empty_db = Db([Result(rows=[]), Result(scalar=0)])
+    empty = asyncio.run(get_usage_summary(
+        empty_db,
+        package_name=None,
+        range_start=START,
+        range_end=END,
+        page=1,
+        page_size=20,
+        sort_by="package_name",
+        sort_order="asc",
+    ))
+    assert empty["total"] == 0
+    assert empty["total_pages"] == 0
+    assert empty["items"] == []
+
+    out_of_range_db = Db([Result(rows=[]), Result(scalar=3)])
+    out_of_range = asyncio.run(get_usage_summary(
+        out_of_range_db,
+        package_name=None,
+        range_start=START,
+        range_end=END,
+        page=3,
+        page_size=2,
+        sort_by="package_name",
+        sort_order="asc",
+    ))
+    assert out_of_range["total"] == 3
+    assert out_of_range["total_pages"] == 2
+    assert out_of_range["items"] == []
+
+
+def test_usage_summary_rejects_non_positive_page_size():
+    from app.services.usage_duration_service import get_usage_summary
+
+    for page_size in (0, -1):
+        try:
+            asyncio.run(get_usage_summary(
+                Db([]),
+                package_name=None,
+                range_start=START,
+                range_end=END,
+                page=1,
+                page_size=page_size,
+                sort_by="package_name",
+                sort_order="asc",
+            ))
+        except ValueError as exc:
+            assert str(exc) == "分页参数无效"
+        else:
+            raise AssertionError("expected invalid page size to raise")
+
+
 def test_usage_summary_sql_has_mutually_exclusive_boundary_cases_and_duration_sums():
     from app.services.usage_duration_service import get_usage_summary
 
@@ -202,9 +312,57 @@ def test_usage_devices_returns_latest_rows_for_expanded_package_and_model():
         )
     )
     assert result["total"] == 1
+    assert result["total_pages"] == 1
     assert result["items"][0]["duration_s"] == 900
+    assert result["items"][0]["duration_text"] == "15 分"
+    assert result["items"][0]["duration_exact_text"] == "900 秒"
     assert result["items"][0]["app_version"] == "2.0"
     assert result["items"][0]["os"] == "14"
+    assert result["items"][0]["last_report_text"] == "2026-09-29T16:00:00+08:00"
+
+
+def test_usage_devices_preserves_null_display_values_and_rejects_non_positive_page_size():
+    from app.services.usage_duration_service import get_usage_devices
+
+    row = SimpleNamespace(
+        package_name="com.example.app",
+        device_id="device-1",
+        device_model=None,
+        os=None,
+        duration_s=None,
+        sdk_version=None,
+        app_version=None,
+        server_ts=None,
+    )
+    result = asyncio.run(get_usage_devices(
+        Db([Result(scalar=1), Result(rows=[row])]),
+        package_name="com.example.app",
+        device_model=None,
+        range_start=START,
+        range_end=END,
+        page=1,
+        page_size=20,
+    ))
+    assert result["items"][0]["duration_s"] is None
+    assert result["items"][0]["duration_text"] == "-"
+    assert result["items"][0]["last_report_text"] == "-"
+    assert result["items"][0]["os"] is None
+
+    for page_size in (0, -1):
+        try:
+            asyncio.run(get_usage_devices(
+                Db([]),
+                package_name="com.example.app",
+                device_model=None,
+                range_start=START,
+                range_end=END,
+                page=1,
+                page_size=page_size,
+            ))
+        except ValueError as exc:
+            assert str(exc) == "分页参数无效"
+        else:
+            raise AssertionError("expected invalid page size to raise")
 
 
 def test_usage_summary_and_devices_have_stable_tie_breakers():
