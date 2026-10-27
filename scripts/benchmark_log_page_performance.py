@@ -10,12 +10,18 @@ import argparse
 import asyncio
 import json
 import os
+from pathlib import Path
 import re
+import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.engine import make_url
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "backend"))
 
 
 def database_url() -> str:
@@ -40,12 +46,29 @@ async def main(iterations: int) -> None:
 
     engine = create_async_engine(database_url())
     sessions = async_sessionmaker(engine, expire_on_commit=False)
-    cases = {
-        "filter_options_all": lambda db: get_event_filter_options(db, package_name=None),
-        "events_all_first_page": lambda db: get_events(db, page=1, page_size=20, event_type=None, log_level=None, package_name=None, sdk_version=None, device_id=None, date_from=None, date_to=None),
-        "usage_summary_all": lambda db: get_usage_summary(db, package_name=None, range_start=datetime(2026, 9, 1, tzinfo=timezone.utc), range_end=datetime(2026, 10, 1, tzinfo=timezone.utc), page=1, page_size=20, sort_by="package_name", sort_order="asc"),
-    }
     try:
+        async with sessions() as session:
+            event_bounds = (await session.execute(text("SELECT min(server_ts)::date, max(server_ts)::date FROM sdk_events"))).one()
+            package = (await session.execute(text("SELECT package_name FROM sdk_events WHERE event_type='log' GROUP BY package_name ORDER BY count(*) DESC LIMIT 1"))).scalar_one()
+            sdk_version = (await session.execute(text("SELECT sdk_version FROM sdk_events WHERE event_type='log' AND package_name=:package AND sdk_version IS NOT NULL GROUP BY sdk_version ORDER BY count(*) DESC LIMIT 1"), {"package": package})).scalar_one()
+        date_from, date_to = event_bounds
+        short_start = datetime.combine(date_to, datetime.min.time(), tzinfo=timezone.utc)
+        short_end = short_start + timedelta(hours=2)
+        month_start = datetime.combine(max(date_from, date_to - timedelta(days=30)), datetime.min.time(), tzinfo=timezone.utc)
+        month_end = datetime.combine(date_to, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1)
+        cases = {
+            "filter_options_all": lambda db: get_event_filter_options(db, package_name=None),
+            "filter_options_package": lambda db: get_event_filter_options(db, package_name=package),
+            "events_all_first_page": lambda db: get_events(db, page=1, page_size=20, event_type=None, log_level=None, package_name=None, sdk_version=None, device_id=None, date_from=None, date_to=None),
+            "events_package_page_2": lambda db: get_events(db, page=2, page_size=20, event_type="log", log_level=None, package_name=package, sdk_version=sdk_version, device_id=None, date_from=date_from, date_to=date_to),
+            "events_not_found": lambda db: get_events(db, page=1, page_size=20, event_type=None, log_level=None, package_name="com.no.such.package", sdk_version=None, device_id=None, date_from=None, date_to=None),
+            "events_deep_page": lambda db: get_events(db, page=10000, page_size=20, event_type=None, log_level=None, package_name=package, sdk_version=None, device_id=None, date_from=None, date_to=None),
+            "usage_summary_all": lambda db: get_usage_summary(db, package_name=None, range_start=month_start, range_end=month_end, page=1, page_size=20, sort_by="package_name", sort_order="asc"),
+            "usage_summary_package": lambda db: get_usage_summary(db, package_name=package, range_start=month_start, range_end=month_end, page=1, page_size=20, sort_by="total_duration_s", sort_order="desc"),
+            "usage_summary_short": lambda db: get_usage_summary(db, package_name=None, range_start=short_start, range_end=short_end, page=1, page_size=20, sort_by="package_name", sort_order="asc"),
+            "usage_summary_empty": lambda db: get_usage_summary(db, package_name="com.no.such.package", range_start=month_start, range_end=month_end, page=1, page_size=20, sort_by="package_name", sort_order="asc"),
+            "usage_summary_deep_page": lambda db: get_usage_summary(db, package_name=None, range_start=month_start, range_end=month_end, page=100, page_size=20, sort_by="package_name", sort_order="asc"),
+        }
         report = {name: [] for name in cases}
         rows = {}
         for _ in range(iterations):

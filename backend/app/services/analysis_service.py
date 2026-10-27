@@ -57,7 +57,9 @@ async def _cached_sdk_versions(db: AsyncSession, package_name: str | None) -> li
             task = asyncio.create_task(_query_sdk_versions(db, package_name))
             _sdk_version_inflight[key] = task
     try:
-        values = await task
+        # A cancelled HTTP waiter must not cancel the shared query task and
+        # thereby fail the other waiter for the same cache key.
+        values = await asyncio.shield(task)
     finally:
         async with _sdk_version_cache_lock:
             if _sdk_version_inflight.get(key) is task:
@@ -216,19 +218,13 @@ async def get_events(
             _, end_time = business_day_utc_range(date_to)
             stmt = stmt.where(SdkEvent.server_ts < end_time)
 
-    # The window count shares the exact filtered relation with the page query.
-    # An empty/deep page has no row from which to read the count, so it falls
-    # back to the same exact filtered count query.
-    list_stmt = stmt.add_columns(func.count().over().label("_total")).order_by(SdkEvent.server_ts.desc()).limit(page_size).offset((page - 1) * page_size)
-    result = await db.execute(list_stmt)
-    result_rows = result.all()
-    if result_rows:
-        rows = [row[0] for row in result_rows]
-        total = int(result_rows[0][1] or 0)
-    else:
-        rows = []
-        count_stmt = select(func.count()).select_from(stmt.subquery())
-        total = int((await db.execute(count_stmt)).scalar_one() or 0)
+    # Keep the exact count + page shape: on the production snapshot the
+    # window-count candidate was slower for all raw-log cases, so it is not
+    # selected until an index/query-plan change makes it a win.
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    total = (await db.execute(count_stmt)).scalar_one()
+    list_stmt = stmt.order_by(SdkEvent.server_ts.desc()).limit(page_size).offset((page - 1) * page_size)
+    rows = (await db.execute(list_stmt)).scalars().all()
 
     items = [
         {

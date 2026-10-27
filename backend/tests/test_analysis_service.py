@@ -157,32 +157,9 @@ class _EventSession:
 
     async def execute(self, statement):
         self.statements.append(statement)
-        return _EventResults(rows=[(self.event, 1)])
-
-
-class _EmptyEventSession:
-    def __init__(self, total: int) -> None:
-        self.total = total
-        self.statements = []
-
-    async def execute(self, statement):
-        self.statements.append(statement)
         if len(self.statements) == 1:
-            return _EventResults(rows=[])
-        return _EventResults(total=self.total)
-
-
-@pytest.mark.asyncio
-async def test_events_empty_deep_page_keeps_exact_total() -> None:
-    db = _EmptyEventSession(37)
-    result = await get_events(
-        db, page=4, page_size=20, event_type=None, log_level=None,
-        package_name=None, sdk_version=None, device_id=None,
-        date_from=None, date_to=None,
-    )
-    assert result["total"] == 37
-    assert result["items"] == []
-    assert len(db.statements) == 2
+            return _EventResults(total=1)
+        return _EventResults(rows=[self.event])
 
 
 @pytest.mark.asyncio
@@ -243,7 +220,7 @@ async def test_events_filter_by_log_level_and_include_sdk_version() -> None:
         date_to=None,
     )
 
-    compiled = db.statements[0].compile(dialect=postgresql.dialect())
+    compiled = db.statements[1].compile(dialect=postgresql.dialect())
     assert "sdk_events.event_type" in str(compiled)
     assert "sdk_events.payload ->>" in str(compiled)
     assert {"log", "level", "error"} <= set(compiled.params.values())
@@ -277,7 +254,7 @@ async def test_events_filter_dates_use_utc_plus_8_day_boundaries() -> None:
         date_to=date(2026, 8, 17),
     )
 
-    compiled = db.statements[0].compile(dialect=postgresql.dialect())
+    compiled = db.statements[1].compile(dialect=postgresql.dialect())
     assert datetime(2026, 8, 16, 16, tzinfo=timezone.utc) in compiled.params.values()
     assert datetime(2026, 8, 17, 16, tzinfo=timezone.utc) in compiled.params.values()
 
@@ -351,7 +328,7 @@ async def test_events_combine_package_sdk_device_level_and_date_filters() -> Non
         date_to=date(2026, 8, 17),
     )
 
-    compiled = db.statements[0].compile(dialect=postgresql.dialect())
+    compiled = db.statements[1].compile(dialect=postgresql.dialect())
     sql = str(compiled)
     assert "sdk_events.package_name" in sql
     assert "sdk_events.sdk_version" in sql
@@ -392,7 +369,7 @@ async def test_events_filter_hours_use_one_continuous_utc_plus_8_range() -> None
         hour_to=17,
     )
 
-    compiled = db.statements[0].compile(dialect=postgresql.dialect())
+    compiled = db.statements[1].compile(dialect=postgresql.dialect())
     assert datetime(2026, 9, 20, tzinfo=timezone.utc) in compiled.params.values()
     assert datetime(2026, 9, 22, 10, tzinfo=timezone.utc) in compiled.params.values()
 
@@ -482,3 +459,29 @@ async def test_sdk_version_filter_cache_coalesces_same_scope_and_separates_packa
     assert calls.count("com.same") == 1
     assert calls.count("com.one") == 1
     assert calls.count("com.two") == 1
+
+
+@pytest.mark.asyncio
+async def test_cancelled_sdk_version_waiter_does_not_cancel_shared_query(monkeypatch: pytest.MonkeyPatch) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def fake_query(_db, _package_name):
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+        return ["1.0"]
+
+    monkeypatch.setattr(analysis_service, "_query_sdk_versions", fake_query)
+    await analysis_service.clear_filter_options_cache()
+    first = asyncio.create_task(analysis_service._cached_sdk_versions(object(), "com.cancel"))
+    await started.wait()
+    second = asyncio.create_task(analysis_service._cached_sdk_versions(object(), "com.cancel"))
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    release.set()
+    assert await second == ["1.0"]
+    assert calls == 1
