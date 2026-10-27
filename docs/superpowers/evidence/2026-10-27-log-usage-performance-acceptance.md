@@ -3,7 +3,8 @@
 ## Implementation
 
 - Worktree: `C:\Users\喻远飞\.codex\worktrees\ef23\SDK`
-- Feature HEAD: `1b3deb4de04a7d139ea138cae26c4ab7c9e43cce`
+- Implementation HEAD: `1b3deb4de04a7d139ea138cae26c4ab7c9e43cce`
+- Evidence-only follow-up HEAD: `5d3ca65bae22156d125f10156d6b4ad7c49fb38f`
 - Previously merged master: `0732f4cdd5955b023bc7844408ed6bb71a2d7eb9`
 - Production: unchanged; no deployment or further merge performed.
 - `PACKAGE_CATALOG_READS_ENABLED=false` keeps the legacy fact-table package
