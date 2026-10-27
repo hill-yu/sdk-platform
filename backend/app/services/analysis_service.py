@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import time
+from collections import OrderedDict
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -8,6 +11,63 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.timezone import business_day_utc_range, business_hour_utc_range, business_today, serialize_business_time
 from app.models.event import SdkEvent
+from app.services.package_catalog_service import search_packages as search_catalog_packages
+
+
+FILTER_OPTIONS_CACHE_TTL_SECONDS = 5.0
+FILTER_OPTIONS_CACHE_MAX_ENTRIES = 64
+_sdk_version_cache: OrderedDict[str, tuple[float, list[str]]] = OrderedDict()
+_sdk_version_inflight: dict[str, asyncio.Task[list[str]]] = {}
+_sdk_version_cache_lock = asyncio.Lock()
+
+
+async def clear_filter_options_cache() -> None:
+    async with _sdk_version_cache_lock:
+        _sdk_version_cache.clear()
+        _sdk_version_inflight.clear()
+
+
+async def _query_sdk_versions(db: AsyncSession, package_name: str | None) -> list[str]:
+    statement = (
+        select(SdkEvent.sdk_version)
+        .where(
+            SdkEvent.event_type == "log",
+            SdkEvent.sdk_version.is_not(None),
+            SdkEvent.sdk_version != "",
+        )
+        .distinct()
+        .order_by(SdkEvent.sdk_version)
+    )
+    if package_name:
+        statement = statement.where(SdkEvent.package_name == package_name)
+    rows = (await db.execute(statement)).all()
+    return sorted({row[0] for row in rows if row[0]})
+
+
+async def _cached_sdk_versions(db: AsyncSession, package_name: str | None) -> list[str]:
+    key = package_name or ""
+    now = time.monotonic()
+    async with _sdk_version_cache_lock:
+        cached = _sdk_version_cache.get(key)
+        if cached and now - cached[0] < FILTER_OPTIONS_CACHE_TTL_SECONDS:
+            _sdk_version_cache.move_to_end(key)
+            return list(cached[1])
+        task = _sdk_version_inflight.get(key)
+        if task is None:
+            task = asyncio.create_task(_query_sdk_versions(db, package_name))
+            _sdk_version_inflight[key] = task
+    try:
+        values = await task
+    finally:
+        async with _sdk_version_cache_lock:
+            if _sdk_version_inflight.get(key) is task:
+                _sdk_version_inflight.pop(key, None)
+    async with _sdk_version_cache_lock:
+        _sdk_version_cache[key] = (time.monotonic(), list(values))
+        _sdk_version_cache.move_to_end(key)
+        while len(_sdk_version_cache) > FILTER_OPTIONS_CACHE_MAX_ENTRIES:
+            _sdk_version_cache.popitem(last=False)
+    return list(values)
 
 
 async def get_summary(db: AsyncSession) -> dict[str, int]:
@@ -156,13 +216,19 @@ async def get_events(
             _, end_time = business_day_utc_range(date_to)
             stmt = stmt.where(SdkEvent.server_ts < end_time)
 
-    # Count total
-    count_stmt = select(func.count()).select_from(stmt.subquery())
-    total = (await db.execute(count_stmt)).scalar_one()
-
-    # Paginated list
-    list_stmt = stmt.order_by(SdkEvent.server_ts.desc()).limit(page_size).offset((page - 1) * page_size)
-    rows = (await db.execute(list_stmt)).scalars().all()
+    # The window count shares the exact filtered relation with the page query.
+    # An empty/deep page has no row from which to read the count, so it falls
+    # back to the same exact filtered count query.
+    list_stmt = stmt.add_columns(func.count().over().label("_total")).order_by(SdkEvent.server_ts.desc()).limit(page_size).offset((page - 1) * page_size)
+    result = await db.execute(list_stmt)
+    result_rows = result.all()
+    if result_rows:
+        rows = [row[0] for row in result_rows]
+        total = int(result_rows[0][1] or 0)
+    else:
+        rows = []
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = int((await db.execute(count_stmt)).scalar_one() or 0)
 
     items = [
         {
@@ -186,28 +252,9 @@ async def get_event_filter_options(
     package_name: str | None,
 ) -> dict[str, list[str]]:
     """返回原始日志视图使用的去重、升序筛选选项。"""
-    package_stmt = (
-        select(SdkEvent.package_name)
-        .where(SdkEvent.event_type == "log", SdkEvent.package_name != "")
-        .distinct()
-        .order_by(SdkEvent.package_name)
-    )
-    version_stmt = (
-        select(SdkEvent.sdk_version)
-        .where(
-            SdkEvent.event_type == "log",
-            SdkEvent.sdk_version.is_not(None),
-            SdkEvent.sdk_version != "",
-        )
-        .distinct()
-        .order_by(SdkEvent.sdk_version)
-    )
-    if package_name:
-        version_stmt = version_stmt.where(SdkEvent.package_name == package_name)
-
-    package_rows = (await db.execute(package_stmt)).all()
-    version_rows = (await db.execute(version_stmt)).all()
+    package_names = await search_catalog_packages(db, None, None, source="log")
+    package_key = package_name.strip() if package_name and package_name.strip() else None
     return {
-        "package_names": sorted({row[0] for row in package_rows if row[0]}),
-        "sdk_versions": sorted({row[0] for row in version_rows if row[0]}),
+        "package_names": package_names,
+        "sdk_versions": await _cached_sdk_versions(db, package_key),
     }

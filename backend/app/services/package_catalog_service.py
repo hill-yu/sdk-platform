@@ -69,7 +69,7 @@ async def ensure_package_sources(
 async def search_packages(
     db: AsyncSession,
     keyword: str | None,
-    limit: int,
+    limit: int | None,
     *,
     source: str,
 ) -> list[str]:
@@ -84,5 +84,8 @@ async def search_packages(
     normalized_keyword = keyword.strip() if keyword else ""
     if normalized_keyword:
         statement = statement.where(PackageCatalog.package_name.ilike(f"%{normalized_keyword}%"))
-    result = await db.execute(statement.order_by(PackageCatalog.package_name).limit(limit))
+    statement = statement.order_by(PackageCatalog.package_name)
+    if limit is not None:
+        statement = statement.limit(limit)
+    result = await db.execute(statement)
     return list(result.scalars().all())

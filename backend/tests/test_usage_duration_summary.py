@@ -103,7 +103,6 @@ def test_usage_summary_uses_only_latest_device_and_computes_seven_buckets_with_t
 
     db = Db(
         [
-            Result(scalar=1),
                 Result(rows=[{
                     "package_name": "com.example.app",
                     "device_model": None,
@@ -125,6 +124,7 @@ def test_usage_summary_uses_only_latest_device_and_computes_seven_buckets_with_t
                     "1200_1499_duration_s": 0,
                     "ge_1500_duration_s": 0,
                     "last_report_at": datetime(2026, 9, 29, 8, tzinfo=timezone.utc),
+                    "_total": 1,
                 }]),
         ]
     )
@@ -183,6 +183,7 @@ def test_usage_devices_returns_latest_rows_for_expanded_package_and_model():
         package_name="com.example.app",
         device_id="device-1",
         device_model="Pixel",
+        os="14",
         duration_s=900,
         sdk_version="1.0.3",
         app_version="2.0",
@@ -203,12 +204,13 @@ def test_usage_devices_returns_latest_rows_for_expanded_package_and_model():
     assert result["total"] == 1
     assert result["items"][0]["duration_s"] == 900
     assert result["items"][0]["app_version"] == "2.0"
+    assert result["items"][0]["os"] == "14"
 
 
 def test_usage_summary_and_devices_have_stable_tie_breakers():
     from app.services.usage_duration_service import get_usage_devices, get_usage_summary
 
-    summary_db = Db([Result(scalar=0), Result(rows=[])])
+    summary_db = Db([Result(rows=[]), Result(scalar=0)])
     asyncio.run(get_usage_summary(
         summary_db,
         package_name=None,
@@ -219,9 +221,9 @@ def test_usage_summary_and_devices_have_stable_tie_breakers():
         sort_by="device_count",
         sort_order="desc",
     ))
-    summary_sql = str(summary_db.statements[1].compile(dialect=postgresql.dialect()))
+    summary_sql = str(summary_db.statements[0].compile(dialect=postgresql.dialect()))
     assert "package_name" in summary_sql
-    assert "GROUP BY anon_1.package_name" in summary_sql
+    assert "GROUP BY anon_2.package_name" in summary_sql or "GROUP BY anon_1.package_name" in summary_sql
     assert "GROUP BY anon_1.package_name, anon_1.device_model" not in summary_sql
     assert "SELECT anon_1.package_name, anon_1.device_model" not in summary_sql
 

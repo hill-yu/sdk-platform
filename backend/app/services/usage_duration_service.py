@@ -173,7 +173,7 @@ async def get_usage_summary(
         *bucket_columns,
         func.max(latest_rows.c.server_ts).label("last_report_at"),
     ).group_by(latest_rows.c.package_name)
-    total = int((await db.execute(select(func.count()).select_from(grouped.subquery()))).scalar_one() or 0)
+    grouped = grouped.add_columns(func.count().over().label("_total"))
     # ``device_model`` remains an accepted compatibility sort key, but the
     # summary is intentionally one row per package now.
     sort_expression = grouped.selected_columns.package_name if sort_by == "device_model" else getattr(grouped.selected_columns, sort_by, grouped.selected_columns.package_name)
@@ -182,6 +182,10 @@ async def get_usage_summary(
         (grouped.selected_columns.package_name.desc() if sort_order == "desc" else grouped.selected_columns.package_name.asc()).nulls_last(),
     )
     rows = (await db.execute(ordered.limit(page_size).offset((page - 1) * page_size))).mappings().all()
+    if rows:
+        total = int(_value(rows[0], "_total", 0) or 0)
+    else:
+        total = int((await db.execute(select(func.count()).select_from(grouped.subquery()))).scalar_one() or 0)
     items = []
     for row in rows:
         count = int(_value(row, "device_count", 0) or 0)
@@ -241,6 +245,7 @@ async def get_usage_devices(
                 "package_name": _value(row, "package_name"),
                 "device_id": _value(row, "device_id"),
                 "device_model": _value(row, "device_model"),
+                "os": _value(row, "os"),
                 "duration_s": _value(row, "duration_s"),
                 "sdk_version": _value(row, "sdk_version"),
                 "app_version": _value(row, "app_version"),

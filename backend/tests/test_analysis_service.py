@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -156,9 +157,32 @@ class _EventSession:
 
     async def execute(self, statement):
         self.statements.append(statement)
+        return _EventResults(rows=[(self.event, 1)])
+
+
+class _EmptyEventSession:
+    def __init__(self, total: int) -> None:
+        self.total = total
+        self.statements = []
+
+    async def execute(self, statement):
+        self.statements.append(statement)
         if len(self.statements) == 1:
-            return _EventResults(total=1)
-        return _EventResults(rows=[self.event])
+            return _EventResults(rows=[])
+        return _EventResults(total=self.total)
+
+
+@pytest.mark.asyncio
+async def test_events_empty_deep_page_keeps_exact_total() -> None:
+    db = _EmptyEventSession(37)
+    result = await get_events(
+        db, page=4, page_size=20, event_type=None, log_level=None,
+        package_name=None, sdk_version=None, device_id=None,
+        date_from=None, date_to=None,
+    )
+    assert result["total"] == 37
+    assert result["items"] == []
+    assert len(db.statements) == 2
 
 
 @pytest.mark.asyncio
@@ -219,7 +243,7 @@ async def test_events_filter_by_log_level_and_include_sdk_version() -> None:
         date_to=None,
     )
 
-    compiled = db.statements[1].compile(dialect=postgresql.dialect())
+    compiled = db.statements[0].compile(dialect=postgresql.dialect())
     assert "sdk_events.event_type" in str(compiled)
     assert "sdk_events.payload ->>" in str(compiled)
     assert {"log", "level", "error"} <= set(compiled.params.values())
@@ -253,7 +277,7 @@ async def test_events_filter_dates_use_utc_plus_8_day_boundaries() -> None:
         date_to=date(2026, 8, 17),
     )
 
-    compiled = db.statements[1].compile(dialect=postgresql.dialect())
+    compiled = db.statements[0].compile(dialect=postgresql.dialect())
     assert datetime(2026, 8, 16, 16, tzinfo=timezone.utc) in compiled.params.values()
     assert datetime(2026, 8, 17, 16, tzinfo=timezone.utc) in compiled.params.values()
 
@@ -327,7 +351,7 @@ async def test_events_combine_package_sdk_device_level_and_date_filters() -> Non
         date_to=date(2026, 8, 17),
     )
 
-    compiled = db.statements[1].compile(dialect=postgresql.dialect())
+    compiled = db.statements[0].compile(dialect=postgresql.dialect())
     sql = str(compiled)
     assert "sdk_events.package_name" in sql
     assert "sdk_events.sdk_version" in sql
@@ -368,7 +392,7 @@ async def test_events_filter_hours_use_one_continuous_utc_plus_8_range() -> None
         hour_to=17,
     )
 
-    compiled = db.statements[1].compile(dialect=postgresql.dialect())
+    compiled = db.statements[0].compile(dialect=postgresql.dialect())
     assert datetime(2026, 9, 20, tzinfo=timezone.utc) in compiled.params.values()
     assert datetime(2026, 9, 22, 10, tzinfo=timezone.utc) in compiled.params.values()
 
@@ -387,13 +411,19 @@ class _OptionSession:
 
     async def execute(self, statement: Any) -> _OptionRows:
         self.statements.append(statement)
-        if len(self.statements) == 1:
-            return _OptionRows([("com.example.beta",), ("com.example.alpha",), ("com.example.alpha",)])
         return _OptionRows([("1.10.0",), ("1.2.0",), ("1.2.0",), (None,)])
 
 
 @pytest.mark.asyncio
-async def test_event_filter_options_are_distinct_sorted_and_package_scoped() -> None:
+async def test_event_filter_options_are_distinct_sorted_and_package_scoped(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_catalog(_db, keyword, limit, *, source):
+        assert keyword is None
+        assert limit is None
+        assert source == "log"
+        return ["com.example.alpha", "com.example.beta"]
+
+    monkeypatch.setattr(analysis_service, "search_catalog_packages", fake_catalog)
+    await analysis_service.clear_filter_options_cache()
     db = _OptionSession()
 
     result = await analysis_service.get_event_filter_options(db, package_name="com.example.alpha")  # type: ignore[arg-type]
@@ -402,9 +432,53 @@ async def test_event_filter_options_are_distinct_sorted_and_package_scoped() -> 
         "package_names": ["com.example.alpha", "com.example.beta"],
         "sdk_versions": ["1.10.0", "1.2.0"],
     }
-    package_sql = str(db.statements[0].compile(dialect=postgresql.dialect()))
-    version_sql = str(db.statements[1].compile(dialect=postgresql.dialect()))
-    assert "DISTINCT" in package_sql
-    assert "ORDER BY sdk_events.package_name" in package_sql
+    version_sql = str(db.statements[0].compile(dialect=postgresql.dialect()))
+    assert "DISTINCT" in version_sql
     assert "sdk_events.package_name" in version_sql
     assert "ORDER BY sdk_events.sdk_version" in version_sql
+
+
+@pytest.mark.asyncio
+async def test_event_filter_options_reads_package_names_from_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str | None, str]] = []
+
+    async def fake_catalog(_db, keyword, limit, *, source):
+        calls.append((keyword, source))
+        assert limit is None
+        return ["com.catalog.alpha", "com.catalog.beta"]
+
+    monkeypatch.setattr(analysis_service, "search_catalog_packages", fake_catalog, raising=False)
+    await analysis_service.clear_filter_options_cache()
+    db = _OptionSession()
+
+    result = await analysis_service.get_event_filter_options(db, package_name="com.catalog.alpha")  # type: ignore[arg-type]
+
+    assert result["package_names"] == ["com.catalog.alpha", "com.catalog.beta"]
+    assert calls == [(None, "log")]
+
+
+@pytest.mark.asyncio
+async def test_sdk_version_filter_cache_coalesces_same_scope_and_separates_packages(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str | None] = []
+
+    async def fake_query(_db, package_name):
+        calls.append(package_name)
+        await asyncio.sleep(0)
+        return [f"{package_name or 'all'}-1"]
+
+    monkeypatch.setattr(analysis_service, "_query_sdk_versions", fake_query)
+    await analysis_service.clear_filter_options_cache()
+    same = await asyncio.gather(
+        analysis_service._cached_sdk_versions(object(), "com.same"),
+        analysis_service._cached_sdk_versions(object(), "com.same"),
+    )
+    separate = await asyncio.gather(
+        analysis_service._cached_sdk_versions(object(), "com.one"),
+        analysis_service._cached_sdk_versions(object(), "com.two"),
+    )
+
+    assert same == [["com.same-1"], ["com.same-1"]]
+    assert separate == [["com.one-1"], ["com.two-1"]]
+    assert calls.count("com.same") == 1
+    assert calls.count("com.one") == 1
+    assert calls.count("com.two") == 1

@@ -33,13 +33,14 @@
               <td><button :data-testid="`usage-expand-${index}`" class="ghost" type="button" :aria-expanded="expandedKey === rowKey(item)" @click="toggleRow(item)">{{ expandedKey === rowKey(item) ? "收起" : "展开" }}</button></td>
             </tr>
             <tr v-if="expandedKey === rowKey(item)" data-testid="usage-detail-container"><td colspan="13">
-              <p v-if="detailCache[rowKey(item)]?.loading" class="muted">设备明细加载中…</p>
-              <p v-else-if="detailCache[rowKey(item)]?.error" class="error">{{ detailCache[rowKey(item)]?.error }}</p>
-              <p v-else-if="!detailCache[rowKey(item)]?.items.length" class="empty-state">暂无设备明细。</p>
+              <p v-if="currentDetail(item)?.loading" class="muted">设备明细加载中…</p>
+              <p v-else-if="currentDetail(item)?.error" class="error">{{ currentDetail(item)?.error }} <button type="button" class="ghost" data-testid="usage-device-retry" @click="retryDetails(item)">重试</button></p>
+              <p v-else-if="!currentDetail(item)?.items.length" class="empty-state">暂无设备明细。</p>
               <div v-else class="table-scroll usage-detail-scroll">
-                <table class="table"><caption class="sr-only">{{ item.package_name }} 设备明细</caption><thead><tr><th>设备 ID</th><th>机型</th><th>最新时长</th><th>SDK 版本</th><th>应用版本 ver</th><th>最后上报</th></tr></thead>
-                  <tbody><tr v-for="device in detailCache[rowKey(item)]?.items" :key="device.device_id" data-testid="usage-device-row"><td>{{ device.device_id }}</td><td>{{ device.device_model || "-" }}</td><td>{{ formatDuration(device.duration_s) }}</td><td>{{ device.sdk_version || "-" }}</td><td>{{ device.app_version || "-" }}</td><td>{{ device.last_report_at ?? "-" }}</td></tr></tbody>
+                <table class="table"><caption class="sr-only">{{ item.package_name }} 设备明细</caption><thead><tr><th>设备 ID</th><th>机型</th><th>OS</th><th>最新时长</th><th>SDK 版本</th><th>应用版本 ver</th><th>最后上报</th></tr></thead>
+                  <tbody><tr v-for="device in currentDetail(item)?.items" :key="device.device_id" data-testid="usage-device-row"><td>{{ device.device_id }}</td><td>{{ device.device_model || "-" }}</td><td>{{ device.os || "-" }}</td><td>{{ formatDuration(device.duration_s) }}</td><td>{{ device.sdk_version || "-" }}</td><td>{{ device.app_version || "-" }}</td><td>{{ device.last_report_at ?? "-" }}</td></tr></tbody>
                 </table>
+                <div class="detail-pagination"><label>每页<select data-testid="usage-device-page-size" :value="currentDetail(item)?.page_size || 10" @change="changeDevicePageSize(item, Number(($event.target as HTMLSelectElement).value))"><option v-for="size in devicePageSizes" :key="size" :value="size">{{ size }}</option></select></label><button data-testid="usage-device-prev" type="button" class="ghost" :disabled="(currentDetail(item)?.page ?? 1) <= 1" @click="changeDevicePage(item, (currentDetail(item)?.page ?? 1) - 1)">上一页</button><span>{{ currentDetail(item)?.page }} / {{ pageCount(currentDetail(item)) }}</span><button data-testid="usage-device-next" type="button" class="ghost" :disabled="(currentDetail(item)?.page ?? 1) >= pageCount(currentDetail(item))" @click="changeDevicePage(item, (currentDetail(item)?.page ?? 1) + 1)">下一页</button><span>共 {{ currentDetail(item)?.total ?? 0 }} 条</span></div>
               </div>
             </td></tr>
           </template>
@@ -63,7 +64,10 @@ const recent = defaultRecentThreeDays();
 const draft = reactive({ package_name: "", date_from: recent.date_from, hour_from: recent.hour_from, date_to: recent.date_to, hour_to: recent.hour_to });
 const appliedScope = ref<UsageScope>({ date_from: recent.date_from, hour_from: recent.hour_from, date_to: recent.date_to, hour_to: recent.hour_to });
 const summary = ref<{ total: number; page: number; page_size: number; items: UsageSummaryItem[] } | null>(null);
-const detailCache = ref<Record<string, { loading: boolean; error: string; items: UsageDevice[] }>>({});
+const devicePageSizes = [10, 20, 50];
+type DeviceDetailPage = { loading: boolean; error: string; total: number; page: number; page_size: number; items: UsageDevice[] };
+const detailCache = ref<Record<string, DeviceDetailPage>>({});
+const detailSelection = reactive<Record<string, { page: number; pageSize: number }>>({});
 const expandedKey = ref<string | null>(null);
 const loading = ref(false);
 const error = ref("");
@@ -80,6 +84,8 @@ function unwrap<T>(response: unknown): T {
 
 function scopeKey(scope: UsageScope) { return `${scope.package_name ?? ""}|${scope.date_from}|${scope.hour_from}|${scope.date_to}|${scope.hour_to}`; }
 function rowKey(item: UsageSummaryItem) { return `${scopeKey(appliedScope.value)}|${item.package_name}`; }
+function detailKey(item: UsageSummaryItem, page: number, pageSize: number) { return `${rowKey(item)}|${page}|${pageSize}`; }
+function pageCount(detail: DeviceDetailPage | undefined) { return Math.max(1, Math.ceil((detail?.total ?? 0) / (detail?.page_size || 10))); }
 function validate(scope: UsageScope) {
   if (scope.date_to < scope.date_from) return "结束日期不能早于开始日期。";
   if (scope.date_to === scope.date_from && scope.hour_to < scope.hour_from) return "结束小时不能早于开始小时。";
@@ -94,6 +100,7 @@ async function load(scope: UsageScope) {
   ++detailRequestId;
   expandedKey.value = null;
   detailCache.value = {};
+  Object.keys(detailSelection).forEach((key) => delete detailSelection[key]);
   loading.value = true; error.value = "";
   try {
     const response = await getUsageSummary(scope);
@@ -115,24 +122,34 @@ function applyScope(scope: UsageScope) {
 function applyDraft() { if (!props.disabled) applyScope(snapshotDraft()); }
 function refresh() { if (!props.disabled) void load({ ...appliedScope.value }); }
 
-async function loadDetails(item: UsageSummaryItem, key: string) {
+async function loadDetails(item: UsageSummaryItem, page = 1, pageSize = 10) {
   const requestId = ++detailRequestId;
-  const scope = { ...appliedScope.value, package_name: item.package_name, page: 1, page_size: 20 };
-  detailCache.value[key] = { loading: true, error: "", items: [] };
+  const key = detailKey(item, page, pageSize);
+  const row = rowKey(item);
+  detailSelection[row] = { page, pageSize };
+  const previous = detailCache.value[key];
+  const scope = { ...appliedScope.value, package_name: item.package_name, page, page_size: pageSize };
+  detailCache.value[key] = { loading: true, error: "", total: previous?.total ?? 0, page, page_size: pageSize, items: previous?.items ?? [] };
   try {
     const response = await getUsageDevices(scope);
-    if (disposed || requestId !== detailRequestId || key !== expandedKey.value) return;
-    detailCache.value[key] = { loading: false, error: "", items: unwrap<{ items: UsageDevice[] }>(response).items };
+    if (disposed || requestId !== detailRequestId || row !== expandedKey.value) return;
+    const data = unwrap<{ total: number; page: number; page_size: number; items: UsageDevice[] }>(response);
+    detailCache.value[key] = { loading: false, error: "", total: data.total, page: data.page, page_size: data.page_size, items: data.items };
   } catch (cause) {
-    if (!disposed && requestId === detailRequestId && key === expandedKey.value) detailCache.value[key] = { loading: false, error: cause instanceof Error ? cause.message : "设备明细读取失败", items: [] };
+    if (!disposed && requestId === detailRequestId && row === expandedKey.value) detailCache.value[key] = { ...detailCache.value[key], loading: false, error: cause instanceof Error ? cause.message : "设备明细读取失败" };
   }
 }
 function toggleRow(item: UsageSummaryItem) {
   const key = rowKey(item);
   if (expandedKey.value === key) { expandedKey.value = null; return; }
   expandedKey.value = key;
-  if (!detailCache.value[key]) void loadDetails(item, key);
+  detailSelection[key] ||= { page: 1, pageSize: 10 };
+  if (!detailCache.value[detailKey(item, 1, 10)]) void loadDetails(item);
 }
+function currentDetail(item: UsageSummaryItem) { const row = rowKey(item); const selection = detailSelection[row] || { page: 1, pageSize: 10 }; return detailCache.value[detailKey(item, selection.page, selection.pageSize)]; }
+function changeDevicePage(item: UsageSummaryItem, page: number) { const detail = currentDetail(item); if (page >= 1 && page <= pageCount(detail)) void loadDetails(item, page, detail?.page_size || 10); }
+function changeDevicePageSize(item: UsageSummaryItem, pageSize: number) { void loadDetails(item, 1, pageSize); }
+function retryDetails(item: UsageSummaryItem) { const detail = currentDetail(item); void loadDetails(item, detail?.page || 1, detail?.page_size || 10); }
 function formatDuration(seconds: number | null) {
   if (seconds == null) return "-";
   if (seconds < 60) return `${seconds} 秒`;
