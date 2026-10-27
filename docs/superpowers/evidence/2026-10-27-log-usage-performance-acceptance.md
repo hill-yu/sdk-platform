@@ -31,8 +31,9 @@ Results:
   second waiter, independent session ownership, and session close.
 - Frontend detail suite: `11 passed`, including “paginates more than ten device
   details and resets pagination with the applied scope”, “retries a failed
-  device page without losing the applied scope”, and stale/out-of-order scope
-  response isolation.
+  device page without losing the applied scope”, stale/out-of-order scope
+  response isolation, initial 25-device page 3 with 5 rows, and a 75-device
+  page-size-50 flow whose final page contains 25 rows.
 - Real PostgreSQL integration: `test_usage_duration_postgres_integration.py` passed 1, and `test_package_catalog_postgres_integration.py` passed 1, using isolated loopback databases cloned from the local snapshot. The default no-URL run remains 2 skipped.
 
 ## Performance decision
