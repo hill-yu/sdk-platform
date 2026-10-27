@@ -9,6 +9,8 @@ from typing import Any
 from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
+from app.core.database import async_session_factory
 from app.core.timezone import business_day_utc_range, business_hour_utc_range, business_today, serialize_business_time
 from app.models.event import SdkEvent
 from app.services.package_catalog_service import search_packages as search_catalog_packages
@@ -65,7 +67,13 @@ async def _cached_sdk_versions(db: AsyncSession, package_name: str | None) -> li
 
 async def _load_sdk_versions(db: AsyncSession, package_name: str | None, key: str) -> list[str]:
     try:
-        values = await _query_sdk_versions(db, package_name)
+        # The shared task owns its session. The request-scoped session may be
+        # closed when a cancelled waiter leaves the HTTP dependency.
+        if isinstance(db, AsyncSession):
+            async with async_session_factory() as owned_session:
+                values = await _query_sdk_versions(owned_session, package_name)
+        else:
+            values = await _query_sdk_versions(db, package_name)
         async with _sdk_version_cache_lock:
             _sdk_version_cache[key] = (time.monotonic(), list(values))
             _sdk_version_cache.move_to_end(key)
@@ -255,7 +263,17 @@ async def get_event_filter_options(
     package_name: str | None,
 ) -> dict[str, list[str]]:
     """返回原始日志视图使用的去重、升序筛选选项。"""
-    package_names = await search_catalog_packages(db, None, None, source="log")
+    if get_settings().PACKAGE_CATALOG_READS_ENABLED:
+        package_names = await search_catalog_packages(db, None, None, source="log")
+    else:
+        package_stmt = (
+            select(SdkEvent.package_name)
+            .where(SdkEvent.event_type == "log", SdkEvent.package_name != "")
+            .distinct()
+            .order_by(SdkEvent.package_name)
+        )
+        package_rows = (await db.execute(package_stmt)).all()
+        package_names = sorted({row[0] for row in package_rows if row[0]})
     package_key = package_name.strip() if package_name and package_name.strip() else None
     return {
         "package_names": package_names,

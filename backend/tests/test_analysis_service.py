@@ -388,6 +388,8 @@ class _OptionSession:
 
     async def execute(self, statement: Any) -> _OptionRows:
         self.statements.append(statement)
+        if len(self.statements) == 1:
+            return _OptionRows([("com.example.beta",), ("com.example.alpha",), ("com.example.alpha",)])
         return _OptionRows([("1.10.0",), ("1.2.0",), ("1.2.0",), (None,)])
 
 
@@ -409,7 +411,7 @@ async def test_event_filter_options_are_distinct_sorted_and_package_scoped(monke
         "package_names": ["com.example.alpha", "com.example.beta"],
         "sdk_versions": ["1.10.0", "1.2.0"],
     }
-    version_sql = str(db.statements[0].compile(dialect=postgresql.dialect()))
+    version_sql = str(db.statements[1].compile(dialect=postgresql.dialect()))
     assert "DISTINCT" in version_sql
     assert "sdk_events.package_name" in version_sql
     assert "ORDER BY sdk_events.sdk_version" in version_sql
@@ -425,6 +427,7 @@ async def test_event_filter_options_reads_package_names_from_catalog(monkeypatch
         return ["com.catalog.alpha", "com.catalog.beta"]
 
     monkeypatch.setattr(analysis_service, "search_catalog_packages", fake_catalog, raising=False)
+    monkeypatch.setattr(analysis_service, "get_settings", lambda: SimpleNamespace(PACKAGE_CATALOG_READS_ENABLED=True))
     await analysis_service.clear_filter_options_cache()
     db = _OptionSession()
 
@@ -432,6 +435,18 @@ async def test_event_filter_options_reads_package_names_from_catalog(monkeypatch
 
     assert result["package_names"] == ["com.catalog.alpha", "com.catalog.beta"]
     assert calls == [(None, "log")]
+
+
+@pytest.mark.asyncio
+async def test_event_filter_options_catalog_failure_is_not_silently_replaced(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def failing_catalog(*_args, **_kwargs):
+        raise RuntimeError("catalog unavailable")
+
+    monkeypatch.setattr(analysis_service, "search_catalog_packages", failing_catalog)
+    monkeypatch.setattr(analysis_service, "get_settings", lambda: SimpleNamespace(PACKAGE_CATALOG_READS_ENABLED=True))
+    await analysis_service.clear_filter_options_cache()
+    with pytest.raises(RuntimeError, match="catalog unavailable"):
+        await analysis_service.get_event_filter_options(_OptionSession(), package_name=None)  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
@@ -485,3 +500,42 @@ async def test_cancelled_sdk_version_waiter_does_not_cancel_shared_query(monkeyp
     release.set()
     assert await second == ["1.0"]
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_shared_filter_task_owns_and_closes_independent_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    class RequestSession:
+        pass
+
+    class OwnedSession:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            self.closed = True
+
+    owned = OwnedSession()
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_query(_db, _package_name):
+        started.set()
+        await release.wait()
+        return ["1.0"]
+
+    monkeypatch.setattr(analysis_service, "AsyncSession", RequestSession)
+    monkeypatch.setattr(analysis_service, "async_session_factory", lambda: owned)
+    monkeypatch.setattr(analysis_service, "_query_sdk_versions", fake_query)
+    await analysis_service.clear_filter_options_cache()
+    first = asyncio.create_task(analysis_service._cached_sdk_versions(RequestSession(), "com.owned"))
+    await started.wait()
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    second = asyncio.create_task(analysis_service._cached_sdk_versions(RequestSession(), "com.owned"))
+    release.set()
+    assert await second == ["1.0"]
+    assert owned.closed is True
