@@ -124,6 +124,10 @@ describe("UsageDurationPanel", () => {
     expect(wrapper.find("[data-testid='usage-summary-header-bucket']").exists()).toBe(false);
     expect(wrapper.get("[data-testid='usage-summary-row']").text()).toContain("15 分");
     expect(wrapper.get("[data-testid='usage-summary-row']").text()).toContain("2026-09-30 10:00");
+    const overviewScroll = wrapper.get("[data-testid='usage-overview-table-scroll']");
+    expect(overviewScroll.classes()).toContain("table-scroll");
+    expect(overviewScroll.classes()).toContain("overview-table-scroll");
+    expect(wrapper.get("[data-testid='usage-summary-pagination']").element.parentElement?.getAttribute("data-testid")).not.toBe("usage-overview-table-scroll");
   });
 
   it("auto-selects a single package and maps seven buckets without requesting devices", async () => {

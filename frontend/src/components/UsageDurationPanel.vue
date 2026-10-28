@@ -28,7 +28,7 @@
         <div><h4>包概览</h4><p class="muted">服务端分页结果，统计值保持后端口径。</p></div>
         <label>每页<select data-testid="usage-summary-page-size" :value="summary.page_size" @change="changeSummaryPageSize(Number(($event.target as HTMLSelectElement).value))"><option v-for="size in summaryPageSizes" :key="size" :value="size">{{ size }}</option></select></label>
       </div>
-      <div class="table-scroll overview-table-scroll">
+      <div class="table-scroll overview-table-scroll" data-testid="usage-overview-table-scroll">
         <table class="table usage-summary-table">
           <caption class="sr-only">使用时长包概览</caption>
           <thead><tr><th v-for="header in summaryHeaders" :key="header" data-testid="usage-summary-header">{{ header }}</th></tr></thead>
@@ -241,13 +241,13 @@ onBeforeUnmount(() => { disposed = true; ++summaryRequestId; ++deviceRequestId; 
 .overview-header { align-items: flex-start; }
 .overview-header label, .pagination label { display: inline-flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; }
 .table-scroll { min-width: 0; max-width: 100%; overflow-x: auto; }
-.overview-table-scroll { overflow-x: auto; }
+.overview-table-scroll { min-height: 96px; max-height: min(42vh, 360px); overflow: auto; }
 .table { width: 100%; border-collapse: collapse; }
 .usage-summary-table { min-width: 860px; }
 .distribution-table { min-width: 560px; }
 .detail-table { min-width: 900px; }
-.detail-table-scroll { max-height: min(55vh, 520px); overflow: auto; }
-.detail-table thead th { position: sticky; top: 0; z-index: 1; background: var(--panel-bg); }
+.detail-table-scroll { min-height: 180px; max-height: min(55vh, 520px); overflow: auto; }
+.overview-table thead th, .detail-table thead th { position: sticky; top: 0; z-index: 1; background: var(--panel-bg); }
 .table th, .table td { padding: 10px; border-bottom: 1px solid var(--border-soft); text-align: left; white-space: nowrap; }
 .ghost { border: 1px solid var(--border-soft); border-radius: 6px; color: var(--text-primary); background: transparent; padding: 6px 10px; cursor: pointer; }
 .ghost:hover, .detail-tabs button.active { border-color: var(--accent); color: var(--accent); background: var(--hover-bg); }
