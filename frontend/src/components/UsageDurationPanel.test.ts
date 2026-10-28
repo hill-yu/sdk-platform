@@ -96,6 +96,25 @@ describe("UsageDurationPanel", () => {
     expect(wrapper.find("[data-testid='usage-package-option']").exists()).toBe(true);
   });
 
+  it("clears the usage draft and reloads the initial candidates after selecting then emptying the input", async () => {
+    searchUsagePackages.mockImplementation(async (keyword: string) => ({ data: { items: keyword ? [`${keyword}.match`] : ["com.a"] } }));
+    const wrapper = mount(UsageDurationPanel);
+    const input = wrapper.get("[data-testid='usage-package-name']");
+    await input.trigger("focus");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    await wrapper.get("[data-package='com.a']").trigger("click");
+    await input.trigger("focus");
+    await input.trigger("keydown", { key: "a", ctrlKey: true });
+    await input.setValue("");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+
+    expect(searchUsagePackages).toHaveBeenLastCalledWith("");
+    expect(wrapper.find("[data-package='com.a']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='package-select-empty']").exists()).toBe(false);
+  });
+
   it("renders a six-column overview from backend display text without bucket columns", async () => {
     const wrapper = mount(UsageDurationPanel);
     await flushPromises();

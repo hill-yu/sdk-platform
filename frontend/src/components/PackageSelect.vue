@@ -175,7 +175,7 @@ function onDocumentClick(event: MouseEvent) {
 document.addEventListener("click", onDocumentClick);
 watch(keyword, () => {
   if (suppressKeywordSearch) { suppressKeywordSearch = false; return; }
-  if (props.allowFreeText && !props.multiple) emit("update:modelValue", keyword.value.trim());
+  if (!props.multiple && (props.allowFreeText || keyword.value.trim() === "")) emit("update:modelValue", keyword.value.trim());
   if (!props.disabled && open.value) {
     scheduleSearch();
   }

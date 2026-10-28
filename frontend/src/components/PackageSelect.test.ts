@@ -233,4 +233,52 @@ describe("PackageSelect", () => {
     await flushPromises();
     expect(searchLogPackages).toHaveBeenCalledWith("xom.example.a");
   });
+
+  it.each([
+    { label: "analysis/raw selection", allowFreeText: false },
+    { label: "usage free text", allowFreeText: true },
+  ])("restores initial candidates after clearing a selected package ($label)", async ({ allowFreeText }) => {
+    searchLogPackages.mockImplementation(async (keyword: string) => ({ data: { items: keyword ? [`${keyword}.match`] : ["com.initial"] } }));
+    const wrapper = mount(PackageSelect, { props: { modelValue: "", allowFreeText } });
+    const input = wrapper.get("[data-testid='package-select-input']");
+    await input.trigger("focus");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    await wrapper.get("[data-package='com.initial']").trigger("click");
+
+    await input.trigger("focus");
+    await input.trigger("keydown", { key: "a", ctrlKey: true });
+    await input.setValue("");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+
+    expect(searchLogPackages).toHaveBeenLastCalledWith("");
+    expect(wrapper.emitted("update:modelValue")?.at(-1)).toEqual([""]);
+    expect(wrapper.find("[data-package='com.initial']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='package-select-empty']").exists()).toBe(false);
+  });
+
+  it("keeps the empty search visible when a late selected-package response resolves", async () => {
+    let resolveSelected!: (value: unknown) => void;
+    searchLogPackages.mockReset()
+      .mockResolvedValueOnce({ data: { items: ["com.initial"] } })
+      .mockReturnValueOnce(new Promise((resolve) => { resolveSelected = resolve; }))
+      .mockResolvedValueOnce({ data: { items: ["com.initial"] } });
+    const wrapper = mount(PackageSelect, { props: { modelValue: "" } });
+    const input = wrapper.get("[data-testid='package-select-input']");
+    await input.trigger("focus");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    await wrapper.get("[data-package='com.initial']").trigger("click");
+    await input.trigger("focus");
+    await input.setValue("com.initial");
+    await vi.advanceTimersByTimeAsync(300);
+    await input.setValue("");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    resolveSelected({ data: { items: ["com.selected-only"] } });
+    await flushPromises();
+    expect(wrapper.find("[data-package='com.initial']").exists()).toBe(true);
+    expect(wrapper.find("[data-package='com.selected-only']").exists()).toBe(false);
+  });
 });

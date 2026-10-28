@@ -246,6 +246,8 @@ onBeforeUnmount(() => { disposed = true; ++summaryRequestId; ++deviceRequestId; 
 .usage-summary-table { min-width: 860px; }
 .distribution-table { min-width: 560px; }
 .detail-table { min-width: 900px; }
+.detail-table-scroll { max-height: min(55vh, 520px); overflow: auto; }
+.detail-table thead th { position: sticky; top: 0; z-index: 1; background: var(--panel-bg); }
 .table th, .table td { padding: 10px; border-bottom: 1px solid var(--border-soft); text-align: left; white-space: nowrap; }
 .ghost { border: 1px solid var(--border-soft); border-radius: 6px; color: var(--text-primary); background: transparent; padding: 6px 10px; cursor: pointer; }
 .ghost:hover, .detail-tabs button.active { border-color: var(--accent); color: var(--accent); background: var(--hover-bg); }
